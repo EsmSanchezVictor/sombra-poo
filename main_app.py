@@ -14,8 +14,10 @@ class MainApp:
         self.login_root = root  # Ventana de login (root)
         self.db_manager = db_manager
         self.root.title("Login")
+        self.root.configure(bg="#f3f4f6")
+        self.root.geometry("480x380")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.root.attributes('-fullscreen', True)
+        """ self.root.attributes('-fullscreen', True)
 
         tk.Label(root, text="Username:").grid(row=0, column=0, pady=5, padx=5)
         self.username_entry = tk.Entry(root)
@@ -26,7 +28,76 @@ class MainApp:
         self.password_entry.grid(row=1, column=1, pady=5, padx=5)
 
         tk.Button(root, text="Login", command=self.login).grid(row=2, column=0, columnspan=2, pady=10)
-        
+         """
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+
+        container = tk.Frame(root, bg="#f3f4f6", padx=20, pady=20)
+        container.grid(row=0, column=0, sticky="nsew")
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
+
+        card = tk.Frame(container, bg="white", bd=1, relief="solid", padx=24, pady=22)
+        card.grid(row=0, column=0)
+        card.grid_columnconfigure(0, weight=1)
+
+        header = tk.Label(
+            card,
+            text="Bienvenido",
+            font=("Helvetica", 16, "bold"),
+            bg="white",
+            fg="#1f2937",
+        )
+        header.grid(row=0, column=0, pady=(0, 12))
+
+        tk.Label(
+            card,
+            text="Usuario",
+            font=("Helvetica", 11),
+            bg="white",
+            fg="#4b5563",
+        ).grid(row=1, column=0, pady=(0, 5))
+        self.username_entry = tk.Entry(
+            card,
+            width=28,
+            relief="flat",
+            highlightbackground="#d1d5db",
+            highlightthickness=1,
+            bd=0,
+        )
+        self.username_entry.grid(row=2, column=0, pady=(0, 12), ipady=6, sticky="ew")
+
+        tk.Label(
+            card,
+            text="Contraseña",
+            font=("Helvetica", 11),
+            bg="white",
+            fg="#4b5563",
+        ).grid(row=3, column=0, pady=(0, 5))
+        self.password_entry = tk.Entry(
+            card,
+            show="*",
+            width=28,
+            relief="flat",
+            highlightbackground="#d1d5db",
+            highlightthickness=1,
+            bd=0,
+        )
+        self.password_entry.grid(row=4, column=0, pady=(0, 14), ipady=6, sticky="ew")
+
+        login_btn = tk.Button(
+            card,
+            text="Ingresar",
+            command=self.login,
+            bg="#2563eb",
+            fg="white",
+            activebackground="#1d4ed8",
+            relief="flat",
+            padx=14,
+            pady=8,
+            cursor="hand2",
+        )
+        login_btn.grid(row=5, column=0, sticky="ew", pady=(0, 8)) 
 
     def on_close(self):
         self.root.destroy()  # Cierra la ventana actual (root_2)
@@ -48,7 +119,7 @@ class MainApp:
     def admin_options(self):
         for widget in self.root.winfo_children():
             widget.destroy()
-
+ 
         tk.Button(self.root, text="Gestión de Usuarios", command=self.open_user_management).grid(row=0, column=0, pady=10, padx=10)
         tk.Button(self.root, text="Acceso al Software", command=self.open_main_app).grid(row=1, column=0, pady=10, padx=10)
 
