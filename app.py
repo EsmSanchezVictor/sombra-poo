@@ -1,0 +1,591 @@
+from datetime import datetime
+import tkinter as tk
+from tkinter import ttk
+import numpy as np
+from matplotlib import cm
+import math
+from tkinter import filedialog
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+from shape_selection import ShapeSelector
+from image_processor import ImageProcessor
+from save_pdf import PDFReportGenerator
+from shadow_temp import Temperatura
+from temp_graph import TemperatureGraph
+from mouse_pixel_value  import MouseHoverPixelValueWithTooltip
+from utils import export_to_excel
+import diseño as design
+import modelo_con_excel as modelo
+from DatasetSaver import DatasetSaver
+from tkinter import messagebox
+
+class App:
+    def __init__(self, root):
+
+        self.root = root
+        self.root.title("Distribución Grid")
+        self.modo = None  # 'arbol', 'estructura'
+        self.elemento_temporal = None
+
+        # Crear frames
+        self.frame0 = tk.Frame(root, bg="magenta", width=100, height=3)
+        self.frame1 = tk.Frame(self.root, bg="aqua", width=100, height=100)
+        self.frame2 = tk.Frame(root, bg="green", width=100, height=100)
+        self.frame3 = tk.Frame(root, bg="blue", width=100, height=100)
+        self.frame4 = tk.Frame(root, bg="yellow", width=100, height=100)
+        self.frame5 = tk.Frame(root, bg="purple", width=100, height=100)
+        self.frame6 = tk.Frame(root, bg="orange", width=100, height=1)
+
+        # Ubicar frames
+        self.frame0.grid(row=0, column=0, columnspan=3, sticky="nsew")
+        self.frame1.grid(row=1, column=0, rowspan=3, sticky="nsew")
+        self.frame2.grid(row=1, column=1, sticky="nsew")
+        self.frame3.grid(row=1, column=2, sticky="nsew")
+        self.frame4.grid(row=2, column=1, sticky="nsew")
+        self.frame5.grid(row=2, column=2, sticky="nsew")
+        self.frame6.grid(row=3, column=1, columnspan=2, sticky="nsew")
+
+        # Configurar pesos de las filas y columnas
+        root.grid_rowconfigure(0, weight=0)
+        root.grid_rowconfigure(1, weight=1)
+        root.grid_rowconfigure(3, weight=0)
+        root.grid_columnconfigure(0, weight=0)
+        root.grid_columnconfigure(1, weight=1)
+        root.grid_columnconfigure(2, weight=1)
+
+        
+        # Inicializamos el procesador de imágenes y el selector de forma
+        self.image_processor = ImageProcessor()
+        self.shape_selector = ShapeSelector(self) 
+        self.dataset_saver = DatasetSaver(self)
+
+        #self.frame1 = frame1
+        self.panel_width =  min(int(self.frame1.winfo_screenwidth() / 6), self.frame1.winfo_width())
+
+        # Crear un frame para los iconos (botones), inicialmente vertical a la izquierda
+        self.icon_frame = tk.Frame(self.frame1)
+        self.icon_frame.grid(row=0, column=0, sticky="ns")
+
+        # Cargar las imágenes para los botones (deben ser archivos PNG)
+        self.images = [
+            tk.PhotoImage(file="test/imagen/fiebre (3).png"),
+            tk.PhotoImage(file="test/imagen/sombra (3).png"),
+            tk.PhotoImage(file="test/imagen/config (3).png"),
+            tk.PhotoImage(file="test/imagen/vista-3d (3).png")
+        ]
+
+        # Lista de botones que representan los iconos
+        self.buttons = []
+        self.panel_frames = []
+
+        # Crear 4 botones que actuarán como iconos y 4 paneles
+        for i in range(4):
+            btn = tk.Button(self.icon_frame, image=self.images[i], command=lambda i=i: self.toggle_panel(i), relief=tk.FLAT,
+                            bg=self.frame1.cget('bg'))
+            btn.grid(row=i, column=0, pady=0, padx=0, sticky="ew")
+            self.buttons.append(btn)
+
+        # Crear los paneles desplegables (inicialmente ocultos)
+        for i in range(4):
+            panel = tk.Frame(self.frame1, bg="white", width=0, height=400)
+            panel.place(x=0, y=0, relheight=1)
+            panel.place_forget()
+            self.panel_frames.append(panel)
+
+        # Inicializar variable
+        self.setup_variables()
+    
+        # Otros atributos que tengas...
+        self.curvas_nivel_creadas = False  # Bandera para saber si las curvas de nivel han sido creadas
+        # Instanciar la clase Temperatura
+        self.temp_calculator = Temperatura()
+    
+        # Configurar los contenidos para cada panel
+        self.setup_panel_1()
+        self.setup_panel_2()
+        self.setup_panel_3()
+        self.setup_panel_4()
+
+        # Para recordar cuál panel está abierto
+        self.active_panel = None
+        self.is_animating = False
+
+        # Inicializar componentes
+        self.setup_menu()
+        self.setup_status_bar()
+        self.resultados(self.frame4)
+        self.temp_sombra(self.frame5)
+        self.imagen(self.frame2)
+        self.curva_de_nivel(self.frame3)
+        self.activar_mouse()
+        
+    def activar_mouse(self):
+        # Vincular eventos de mouse
+        self.canvas1.mpl_connect('button_press_event', self.shape_selector.on_mouse_press)
+        self.canvas1.mpl_connect('motion_notify_event', self.shape_selector.on_mouse_move)
+        self.canvas1.mpl_connect('button_release_event', self.shape_selector.on_mouse_release)
+    def setup_variables(self):
+        """Inicializa las variables de control para la aplicación"""
+        self.selection_type = tk.StringVar(value="Polígono")
+        self.matriz_size = tk.IntVar(value=1024)
+        self.drawing_mode = None
+        self.img = None
+        self.img_rgb = None
+        self.area_calculo_done = False
+        self.area_referencia_done = False
+        self.entries =[]
+        self.modo = None
+        self.vars = {
+            "T_amb_base": tk.DoubleVar(value=295),
+            "I_sol_base": tk.DoubleVar(value=1000),
+            "T_min": tk.DoubleVar(value=290),
+            "T_max": tk.DoubleVar(value=310),
+            "dia": tk.IntVar(value=180),
+            "lat": tk.DoubleVar(value=40),
+            "lon": tk.DoubleVar(value=-3),
+            "hora": tk.DoubleVar(value=12),
+            "humedad": tk.DoubleVar(value=0.5),
+            "viento": tk.StringVar(value="moderado"),
+            "arboles": [],
+            "estructuras": [],
+            "_update_required": True,
+            "_app_instance":self
+        }
+        # Controles de parámetros
+        self.controles = [
+            ("Fecha (AAAA-MM-DD)", self.vars["dia"], 1, None, True),  # es_fecha=True
+            ("Latitud (°)", self.vars["lat"], 2, [-90, 90], False),
+            ("Longitud (°)", self.vars["lon"], 3, [-180, 180], False),
+            ("Hora Local", self.vars["hora"], 4, [0, 24], False),
+            ("Humedad (%)", self.vars["humedad"], 5, [0, 100], False),
+            ("Temp. Base (K)", self.vars["T_amb_base"], 6, [250, 350], False),
+            ("Radiación (W/m²)", self.vars["I_sol_base"], 7, [0, 1500], False),
+            ("Temp. Mín (K)", self.vars["T_min"], 8, [250, 350], False),
+            ("Temp. Máx (K)", self.vars["T_max"], 9, [250, 350], False)
+        ]
+    def setup_panel_1(self):
+        """Configura el contenido del Panel 1"""
+        panel = self.panel_frames[0]
+        
+        labels = ["Temperatura ambiente (°C):", "Hora del día (0-23):", "Fecha (YYYY-MM-DD):", "Latitud:", "Longitud:"]
+        entries = []
+
+        for label_text in labels:
+            label = tk.Label(panel, text=label_text, bg=panel.cget("bg"), fg="black")
+            label.pack(anchor="w", padx=20, pady=5)
+            entry = tk.Entry(panel)
+            entry.pack(anchor="w", padx=20, pady=5)
+            self.entries.append(entry)
+
+        calculate_button = tk.Button(panel, text="Calcular temperatura en sombra", command=self.calculate_temperature_in_shade)
+        calculate_button.pack(padx=20, pady=20)
+    def setup_panel_2(self):
+        """Configura el contenido del Panel 2"""
+        panel = self.panel_frames[1]
+
+        # Botone para cargar la imagen a analizar 
+        cargar_imagen_button = tk.Button(panel, text="Cargar imagen",command=self.cargar_imagen, bg='#4CAF50', fg='white', font=("Arial", 10, "bold"))
+        cargar_imagen_button.pack(anchor="w",padx=20, pady=10)
+        
+        # Selección de tipo de área
+        area_label = tk.Label(panel, text="Seleccione el tipo de área:", bg=panel.cget("bg"), fg="black")
+        area_label.pack(anchor="w", padx=20, pady=10)
+
+        selection_type = tk.StringVar(value="Rectángulo")  # Variable para seleccionar entre rectángulo y círculo
+        self.rect_button = tk.Radiobutton(panel, text="Rectángulo", variable=selection_type, value="Rectángulo", bg=panel.cget("bg"), fg="black")
+        self.rect_button.pack(anchor="w", padx=20)
+
+        self.circ_button = tk.Radiobutton(panel, text="Círculo", variable=selection_type, value="Círculo", bg=panel.cget("bg"), fg="black")
+        self.circ_button.pack(anchor="w", padx=20)
+
+        self.circ_button = tk.Radiobutton(panel, text="Polígono", variable=selection_type, value="Polígono", bg=panel.cget("bg"), fg="black")
+        self.circ_button.pack(anchor="w", padx=20)
+        
+        # Selección del tamaño de la matriz
+        matrix_label = tk.Label(panel, text="Seleccione el tamaño de la matriz:", bg=panel.cget("bg"), fg="black")
+        matrix_label.pack(anchor="w", padx=20, pady=10)
+
+        matrix_size = ttk.Combobox(panel, values=[480, 640, 800, 1024])
+        matrix_size.pack(anchor="w", padx=20, pady=5)
+
+        # Botones de selección de área
+        self.area_calc_button = tk.Button(panel, text="Seleccione área de cálculo",bg='blue',fg='white', command=self.shape_selector.select_area_calculo, state=tk.DISABLED)
+        self.area_calc_button.pack(anchor="w",padx=20, pady=10)
+
+        self.area_ref_button = tk.Button(panel, text="Seleccione área de referencia",bg='red',fg='white', command=self.shape_selector.select_area_referencia, state=tk.DISABLED)
+        self.area_ref_button.pack(anchor="w",padx=20, pady=10)
+
+        # Botones de confirmación y cálculo
+        process_label = tk.Label(panel, text="Calcular y procesar:", bg=panel.cget("bg"), fg="black")
+        process_label.pack(anchor="w", padx=20, pady=10)
+
+        self.confirm_button = tk.Button(panel, text="Confirmar selección y calcular", command=self.confirmar_seleccion, state=tk.DISABLED)
+        self.confirm_button.pack(anchor="w",padx=20, pady=10)
+
+        self.curve_button = tk.Button(panel, text="Generar curva de nivel", command=self.mostrar_curvas_nivel, state=tk.DISABLED)
+        self.curve_button.pack(anchor="w",padx=20, pady=10)
+        
+        # Botones de confirmación y cálculo
+        process_label = tk.Label(panel, text="Exportar resultados:", bg=panel.cget("bg"), fg="black")
+        process_label.pack(anchor="w", padx=20, pady=10)
+
+        self.excel_button = tk.Button(panel, text="Exportar matriz a excel", command=self.exportar_a_excel, state=tk.DISABLED)
+        self.excel_button.pack(pady=10)
+
+        self.pdf_button = tk.Button(panel, text="Exportar a informe PDF", command=self.exportar_a_pdf, state=tk.DISABLED)
+        self.pdf_button.pack(pady=10)
+        
+        self.save_dataset_button = tk.Button(panel, text="Guardar Dataset", command=self.save_dataset, state=tk.DISABLED)
+        self.save_dataset_button.pack(pady=10)
+        
+        
+        
+    def setup_panel_3(self):
+        """Configura el contenido del Panel 3"""
+        panel = self.panel_frames[2]
+
+        for widget in panel.winfo_children():
+            widget.destroy()        
+        
+        diseno_label = tk.Label(panel, text="Modo de Edición:", bg=panel.cget("bg"), fg="black")
+        diseno_label.grid(row=0, column=0,sticky="w", padx=10, pady=10)
+        
+                
+        # Botone para añadir arbol 
+        add_arbol = tk.Button(panel, text="Añadir Árbol",command=lambda: design.establecer_modo('arbol',self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        add_arbol.grid(row=2, column=0,sticky="w",padx=10, pady=3)
+
+        # Botone para añadir arbol 
+        add_estructura = tk.Button(panel, text="Añadir Estructura",command=lambda: design.establecer_modo('estructura',self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        add_estructura.grid(row=2, column=0,sticky="w",padx=100, pady=3) 
+
+        # Botone para añadir arbol 
+        seleccionar = tk.Button(panel, text="Seleccionar",command=lambda: design.establecer_modo(None,self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        seleccionar.grid(row=3, column=0,sticky="w",padx=60, pady=3)        
+        
+        
+        # Botone guardar como
+        guardar = tk.Button(panel, text="Guardar como",command=lambda:design.guardar_como(self.vars,self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        guardar.grid(row=4, column=0,sticky="w",padx=10, pady=10)
+
+        # Botone abrir
+        abrir = tk.Button(panel, text="Abrir",command=lambda:design.abrir_archivo(self.vars,self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        abrir.grid(row=4, column=0,sticky="w",padx=120, pady=10)
+
+        # Botone para Generar Gráfico 
+        grafico = tk.Button(panel, text="Generar gráfico",command=lambda: self.actualizar_grafico_diseno(), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        grafico.grid(row=5, column=0,sticky="w",padx=10, pady=8)        
+        
+        # Botone para Vista 3D 
+        vista_3d = tk.Button(panel, text="Vista 3D", command=lambda:design.generar_3d(self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        vista_3d.grid(row=5, column=0,sticky="w",padx=120, pady=8)     
+        
+        # Selector de viento
+        Label_viento=tk.Label(panel, text="Viento")
+        Label_viento.grid(sticky="w",padx=10, pady=3) 
+        lista_viento=ttk.Combobox(panel, textvariable=self.vars["viento"],values=["nulo", "moderado", "fuerte"])
+        lista_viento.grid(sticky="w",padx=10, pady=3) 
+        
+        panelin = tk.Frame(self.panel_frames[2])
+        panelin.grid(row=1, column=0, sticky="nsew", padx=0, pady=2) 
+        for texto, var, fila, rango, es_fecha in self.controles:
+            self.crear_control(panelin, texto, var, fila, rango, es_fecha)
+    def setup_panel_4(self):
+        """Configura el contenido del Panel 4"""
+        panel = self.panel_frames[3]
+        
+        
+        for widget in panel.winfo_children():
+            widget.destroy()        
+        
+        diseno_label = tk.Label(panel, text="Modelo", bg=panel.cget("bg"), fg="black")
+        diseno_label.grid(row=0, column=0,sticky="w", padx=10, pady=1)
+        
+                
+        # Botone para cargar excel
+        add_arbol = tk.Button(panel, text="Cargar Excel",command=lambda:modelo.cargar_excel(self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        add_arbol.grid(row=1, column=0,sticky="w",padx=10, pady=5)
+
+        # Botone para generar grafico
+        add_estructura = tk.Button(panel, text="Generar Gráfico",command=lambda:modelo.generar_grafico(self.vars, self.frame2), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        add_estructura.grid(row=4, column=0,sticky="w",padx=20, pady=3)
+
+        # Botone para añadir arbol 
+        seleccionar = tk.Button(panel, text="Vista 3D",command=lambda:modelo.generar_3d(self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        seleccionar.grid(row=4, column=0,sticky="w",padx=130, pady=3)        
+        
+        Label_preconf=tk.Label(panel, text="Configuraciones rápidas")
+        Label_preconf.grid(row=5, column=0,sticky="w",padx=10, pady=6) 
+        # Botone guardar como
+        add_arbol = tk.Button(panel, text="Invierno", command=lambda: modelo.cargar_preset("invierno", self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        add_arbol.grid(row=6, column=0,sticky="w",padx=30, pady=3)
+
+        # Botone abrir
+        add_estructura = tk.Button(panel, text="Verano", command=lambda: modelo.cargar_preset("verano", self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        add_estructura.grid(row=6, column=0,sticky="w",padx=120, pady=3)
+
+        # Botone para Generar Gráfico 
+        seleccionar = tk.Button(panel, text="Soleado", command=lambda: modelo.cargar_preset("soleado", self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        seleccionar.grid(row=7, column=0,sticky="w",padx=30, pady=3)        
+        
+        # Botone para Vista 3D 
+        seleccionar = tk.Button(panel, text="Nublado", command=lambda: modelo.cargar_preset("nublado", self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        seleccionar.grid(row=7, column=0,sticky="w",padx=120, pady=3)     
+        
+        # Selector de viento
+        Label_viento=tk.Label(panel, text="Viento")
+        Label_viento.grid(row=3, column=0,sticky="w",padx=10, pady=3) 
+        lista_viento=ttk.Combobox(panel, textvariable=self.vars["viento"],values=["nulo", "moderado", "fuerte"])
+        lista_viento.grid(row=3, column=0,sticky="w",padx=60, pady=3) 
+        
+        panelin = tk.Frame(self.panel_frames[3])
+        panelin.grid(row=2, column=0, sticky="nsew", padx=0, pady=10) 
+        for texto, var, fila, rango, es_fecha in self.controles:
+            self.crear_control(panelin, texto, var, fila, rango, es_fecha)
+    
+    def crear_control(self, panel, texto, var, fila, rango=None, es_fecha=False):
+        tk.Label(panel, text=texto, anchor="w",font=("Arial", 8),width=20).grid(row=fila, column=0, sticky="ew", padx=0, pady=10)
+        if es_fecha:
+            entry = tk.Entry(panel,width=15)
+            entry.grid(row=fila, column=1, sticky="ew", padx=0)
+            entry.bind("<Return>", lambda e: actualizar_dia(entry.get(), var))
+        elif rango:
+            scale = tk.Scale(panel, from_=rango[0], to=rango[1], variable=var, 
+                            orient=tk.HORIZONTAL,length=1,width=5)
+            scale.grid(row=fila, column=1, sticky="ew", padx=0)
+    def toggle_panel(self, index):
+            if self.is_animating:
+                return
+
+            if self.active_panel is not None and self.active_panel != index:
+                self.close_panel(self.active_panel)
+                self.frame1.after(250, lambda: self.open_panel(index))  # Espera antes de abrir el nuevo panel
+            elif self.active_panel == index:
+                self.close_panel(self.active_panel)
+                self.active_panel = None
+            else:
+                self.open_panel(index)
+    def open_panel(self, index):
+        self.active_panel = index
+        self.is_animating = True
+        self.animate_panel_open(index, 0)
+        self.switch_buttons_to_horizontal()
+        self.highlight_button(index)
+    def animate_panel_open(self, index, current_width):
+        button_height = self.icon_frame.winfo_height()
+
+        if current_width <= self.panel_width:
+            self.panel_frames[index].config(width=current_width)
+            self.panel_frames[index].place(x=0, y=button_height-90, relheight=1)#, rely=0.1
+            self.frame1.after(10, self.animate_panel_open, index, current_width + 10)
+        else:
+            self.is_animating = False
+    def close_panel(self, index):
+        self.is_animating = True
+        self.animate_panel_close(index, self.panel_width)
+        self.reset_button(index)
+        self.switch_buttons_to_vertical()
+    def animate_panel_close(self, index, current_width):
+        button_height = self.icon_frame.winfo_height()
+        if current_width > 0:
+            self.panel_frames[index].config(width=current_width)
+            self.panel_frames[index].place(x=0, y=button_height, relheight=1, rely=0.1)
+            self.frame1.after(10, self.animate_panel_close, index, current_width - 10)
+        else:
+            self.panel_frames[index].place_forget()
+            self.is_animating = False
+    def highlight_button(self, index):
+        for i, button in enumerate(self.buttons):
+            button.config(bg="gray80" if i == index else self.frame1.cget("bg"))
+    def reset_button(self, index):
+        self.buttons[index].config(bg=self.frame1.cget("bg"))
+    def switch_buttons_to_horizontal(self):
+        for i, button in enumerate(self.buttons):
+            button.grid_forget()
+            button.grid(row=0, column=i,padx=12, sticky="ew")
+    def switch_buttons_to_vertical(self):
+        for i, button in enumerate(self.buttons):
+            button.grid_forget()
+            button.grid(row=i, column=0, sticky="ew")
+    # Configuración del menú en frame0
+    def setup_menu(self):
+        """Configura el menú principal."""
+        menu_bar = tk.Menu(self.root)
+        for i in range(1, 7):  # 6 elementos en el menú
+            submenu = tk.Menu(menu_bar, tearoff=0)
+            for j in range(1, 4):  # Cada uno con 3 opciones
+                submenu.add_command(label=f"Opción {i}.{j}")
+            menu_bar.add_cascade(label=f"Menú {i}", menu=submenu)
+        self.root.config(menu=menu_bar)  # Establece el menú en la ventana principal
+    def setup_status_bar(self):
+        """Configura la barra de estado."""
+        now = datetime.now()
+        date_time_label = tk.Label(self.frame6, text=f"Fecha y Hora: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        date_time_label.pack(side="right", padx=10)
+        for i in range(1, 4):
+            label = tk.Label(self.frame6, text=f"Etiqueta {i}")
+            label.pack(side="right", padx=10)
+    def resultados(self, frame):
+        """Configura el área de resultados."""
+        result_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        result_frame.pack(expand=True, fill='both', pady=5)
+
+        sombra_frame = tk.Frame(result_frame)
+        sombra_frame.pack(side=tk.LEFT, padx=50, pady=10)
+
+        self.lbl_dimensiones_calculo = tk.Label(
+            sombra_frame, text="Dimensiones del Área de Cálculo: N/A", font=("Arial", 12, "bold")
+        )
+        self.lbl_dimensiones_calculo.pack(pady=5)
+
+        self.lbl_dimensiones_referencia = tk.Label(
+            sombra_frame, text="Dimensiones del Área de Referencia: N/A", font=("Arial", 12, "bold")
+        )
+        self.lbl_dimensiones_referencia.pack(pady=5)
+
+        self.lbl_promedio_referencia = tk.Label(
+            sombra_frame, text="Promedio Gris Referencia: N/A", font=("Arial", 12, "bold")
+        )
+        self.lbl_promedio_referencia.pack(pady=5)
+
+        self.lbl_porcentaje_sombra = tk.Label(
+            sombra_frame, text="Porcentaje de sombra: N/A", font=("Arial", 12, "bold")
+        )
+        self.lbl_porcentaje_sombra.pack(pady=5)
+    def temp_sombra(self, frame):
+        """Configura el área de temperatura en sombra."""
+        temp_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        temp_frame.pack(expand=True, fill='both', pady=5)
+
+        self.lbl_temp_shade = tk.Label(temp_frame, text="Temperatura en Sombra: N/A", font=("Arial", 12, "bold"))
+        self.lbl_temp_shade.pack(pady=5)
+
+        self.graph_frame = tk.Frame(temp_frame)
+        self.graph_frame.pack(side=tk.RIGHT, padx=10)
+    def imagen(self, frame):
+        """Configura el área de visualización de imágenes."""
+        img_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        img_frame.pack(expand=True, fill='both', pady=5)
+        self.fig1, self.ax1 = plt.subplots() 
+        self.canvas1 = FigureCanvasTkAgg(self.fig1, master=img_frame)
+        self.canvas1.get_tk_widget().pack(side=tk.LEFT)
+    def curva_de_nivel(self, frame):
+        """Configura el área de curvas de nivel."""
+        nivel_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        nivel_frame.pack(expand=True, fill='both', pady=5)
+
+        self.fig2, self.ax2 = plt.subplots()
+        self.canvas2 = FigureCanvasTkAgg(self.fig2, master=nivel_frame)
+        self.canvas2.get_tk_widget().pack(side=tk.RIGHT)
+    def cargar_imagen(self):
+        file_path = filedialog.askopenfilename()
+        if file_path:
+            self.img, self.img_rgb = self.image_processor.load_image(file_path)
+            self.ax1.clear()
+            self.ax1.imshow(self.img_rgb)
+            self.canvas1.draw()
+            self.shape_selector.enable_calculo_button()
+    def calculate_temperature_in_shade(self):
+        try:
+            # Obtener valores ingresados por el usuario
+            temp_ambient = float(self.entries[0].get().replace('\ufeff', '').strip())
+            time_of_day = int(self.entries[1].get().replace('\ufeff', '').strip())
+            date = datetime.strptime(self.entries[2].get().replace('\ufeff', '').strip(), "%Y-%m-%d").date()
+            latitude = float(self.entries[3].get().replace('\ufeff', '').strip())
+            longitude = float(self.entries[4].get().replace('\ufeff', '').strip())
+
+            # Parámetros de opacidad y densidad
+            opacity = 0.8  # Puedes ajustarlo para que se base en los niveles de gris
+            shadow_density = 0.9  # Basado en la densidad de los puntos de sombra
+
+            # Usar la clase Temperatura para calcular la temperatura en sombra
+            temp_shade = self.temp_calculator.temperature_in_shade(
+                temp_ambient, latitude, longitude, date, time_of_day, opacity, shadow_density
+            )
+
+            # Mostrar el resultado de temperatura en sombra
+            self.lbl_temp_shade.config(text=f"Temperatura en Sombra: {temp_shade:.2f} °C")
+
+            # Limpiar el frame anterior si existe (evita sobreposición de gráficos)
+            for widget in self.graph_frame.winfo_children():
+                widget.destroy()
+
+            # Crear un objeto de la clase TemperatureGraph y mostrar la gráfica dentro del frame
+            graph = TemperatureGraph(temp_ambient, temp_shade, self.graph_frame)
+            graph.plot_temperature_scale()  # Dibujar la gráfica en el frame
+
+        except ValueError as e:
+            print(f"Error al ingresar los datos: {e}")
+    def confirmar_seleccion(self):
+        # Verificamos que ambas áreas hayan sido seleccionadas
+        if self.shape_selector.area_seleccionada is not None and self.shape_selector.area_referencia is not None:
+            # Cálculo del porcentaje de sombra
+            porcentaje_sombra = self.image_processor.calcular_porcentaje_sombra(
+                self.shape_selector.area_seleccionada,
+                self.shape_selector.area_referencia
+            )
+            self.lbl_porcentaje_sombra.config(text=f"Porcentaje de sombra: {porcentaje_sombra:.2f}%")
+
+            # Habilitar los botones para curvas de nivel y exportar
+            self.curve_button.config(state=tk.NORMAL)  # Habilitar el botón de curvas de nivel
+            self.excel_button.config(state=tk.NORMAL)  # Habilitar el botón para exportar a Excel
+            self.pdf_button.config(state=tk.NORMAL) # Habilita el botón para guardan el pdf
+            # Instanciar la clase para manejar el hover del mouse y mostrar el valor del píxel
+            self.mouse_hover_pixel_value = MouseHoverPixelValueWithTooltip(self, self.canvas1, self.canvas2, self.img_rgb, self.shape_selector.area_seleccionada)
+        else:
+            print("Error: No se ha seleccionado un área válida.")
+    def exportar_a_excel(self):
+        if self.shape_selector.area_seleccionada is not None:
+            export_to_excel(self.shape_selector.area_seleccionada)
+    def mostrar_curvas_nivel(self):
+        if self.shape_selector.area_seleccionada is not None:
+            
+            # Rotar la matriz 90 grados en sentido horario
+            area_volteada = np.flipud(self.shape_selector.area_seleccionada)
+            #area_rotada = np.rot90(self.shape_selector.area_seleccionada, k=0)  # k=-1 para rotar 90 grados a la derecha
+        
+            # Crear las curvas de nivel en el segundo área de dibujo
+            self.ax2.clear()
+            self.ax2.contour(area_volteada, levels=100, cmap='jet', linewidths=1.5, alpha=0.8)  # Usar mapa de colores 'jet'
+            self.canvas2.draw()
+            self.mouse_hover_pixel_value = MouseHoverPixelValueWithTooltip(self, self.canvas1, self.canvas2, self.img_rgb, self.shape_selector.area_seleccionada)
+            self.curvas_nivel_creadas = True
+            # Instanciar MouseHoverPixelValueWithTooltip después de generar las curvas de nivel
+        self.mouse_hover_pixel_value = MouseHoverPixelValueWithTooltip(self, self.canvas1, self.canvas2, self.img_rgb, self.shape_selector.area_seleccionada)
+    def exportar_a_pdf(self):
+        pdf_generator = PDFReportGenerator(self)
+        pdf_generator.generate_report()    
+    def actualizar_dia(fecha_str, dia_var):
+        # Función para actualizar día del año desde fecha
+        try:
+            fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
+            dia_del_año = fecha.timetuple().tm_yday
+            dia_var.set(dia_del_año)
+        except ValueError:
+            messagebox.showerror("Error", "Formato de fecha inválido. Use AAAA-MM-DD")
+    def actualizar_grafico_diseno(self):
+        # Limpiar frame2 antes de crear nuevo gráfico
+        for widget in self.frame2.winfo_children():
+            widget.destroy()
+        
+        
+        # Crear nuevo gráfico en frame2 y capturar el canvas
+        fig, ax, self.canvas_diseno = design.crear_area_grafico(self.vars, self.frame2,self)
+    
+        # Vincular eventos usando la instancia actual (self)
+        self.canvas_diseno.mpl_connect('button_press_event', lambda event: design.manejar_click(event, self))
+    def save_dataset(self):
+        """Método para manejar el guardado del dataset"""
+        if not hasattr(self, 'img_rgb') or self.img_rgb is None:
+            messagebox.showerror("Error", "No hay imagen cargada")
+            return
+            
+        if not hasattr(self.shape_selector, 'area_seleccionada') or self.shape_selector.area_seleccionada is None:
+            messagebox.showerror("Error", "No hay área de cálculo seleccionada")
+            return
+            
+        try:
+            self.dataset_saver.save_dataset()
+            messagebox.showinfo("Éxito", "Dataset guardado correctamente")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar el dataset: {str(e)}")
