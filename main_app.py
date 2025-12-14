@@ -28,7 +28,7 @@ class MainApp:
         self.password_entry.grid(row=1, column=1, pady=5, padx=5)
 
         tk.Button(root, text="Login", command=self.login).grid(row=2, column=0, columnspan=2, pady=10)
-         """
+        """
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
 
@@ -119,14 +119,51 @@ class MainApp:
     def admin_options(self):
         for widget in self.root.winfo_children():
             widget.destroy()
- 
-        tk.Button(self.root, text="Gestión de Usuarios", command=self.open_user_management).grid(row=0, column=0, pady=10, padx=10)
-        tk.Button(self.root, text="Acceso al Software", command=self.open_main_app).grid(row=1, column=0, pady=10, padx=10)
+            container = tk.Frame(self.root, bg="#f3f4f6", padx=20, pady=20)
+        container.grid(row=0, column=0, sticky="nsew")
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
+
+        card = tk.Frame(container, bg="white", bd=1, relief="solid", padx=24, pady=22)
+        card.grid(row=0, column=0)
+        card.grid_columnconfigure(0, weight=1)
+
+        tk.Label(
+            card,
+            text="Menú de administrador",
+            font=("Helvetica", 16, "bold"),
+            bg="white",
+            fg="#1f2937",
+        ).grid(row=0, column=0, pady=(0, 16), sticky="ew")
+
+        tk.Button(
+            card,
+            text="Gestión de Usuarios",
+            command=self.open_user_management,
+            bg="#2563eb",
+            fg="white",
+            activebackground="#1d4ed8",
+            relief="flat",
+            padx=14,
+            pady=10,
+            cursor="hand2",
+        ).grid(row=1, column=0, pady=(0, 10), sticky="ew")
+        tk.Button(
+            card,
+            text="Acceso al Software",
+            command=self.open_main_app,
+            bg="#f3f4f6",
+            fg="#111827",
+            activebackground="#e5e7eb",
+            relief="flat",
+            padx=14,
+            pady=10,
+            cursor="hand2",
+        ).grid(row=2, column=0, sticky="ew")
 
     def open_main_app(self):
-        #messagebox.showinfo("Acceso", "Bienvenido al software principal.")
+
         root_2 = tk.Toplevel()
-        #app = App(root_2)
         app = App(root_2)  # Pasar self.root como parámetro
         self.root.withdraw()  # Oculta la ventana de login
         
@@ -136,29 +173,121 @@ class MainApp:
 
         users = self.db_manager.fetch_all_users()
 
-        tk.Label(self.root, text="Gestión de Usuarios", font=("Arial", 16)).grid(row=0, column=0, columnspan=6, pady=10)
+        container = tk.Frame(self.root, bg="#f3f4f6", padx=18, pady=18)
+        container.grid(row=0, column=0, sticky="nsew")
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
 
-        headers = ["ID", "Username", "Nombre","Admin", "Nombre", "Apellido","DNI", "Email", "Teléfono", "Calle", "Número", "Ciudad"]
+        card = tk.Frame(container, bg="white", bd=1, relief="solid", padx=18, pady=18)
+        card.grid(row=0, column=0, sticky="nsew")
+        card.grid_columnconfigure(0, weight=1)
+
+        tk.Label(
+            card,
+            text="Gestión de Usuarios",
+            font=("Helvetica", 16, "bold"),
+            bg="white",
+            fg="#1f2937",
+        ).grid(row=0, column=0, columnspan=4, pady=(0, 12), sticky="w")
+
+        table = tk.Frame(card, bg="white")
+        table.grid(row=1, column=0, columnspan=4, sticky="nsew")
+        table.grid_columnconfigure(tuple(range(12)), weight=1)
+
+        headers = [
+            "ID",
+            "Username",
+            "Nombre",
+            "Admin",
+            "Nombre",
+            "Apellido",
+            "DNI",
+            "Email",
+            "Teléfono",
+            "Calle",
+            "Número",
+            "Ciudad",
+        ]
+        
+        
         for col, header in enumerate(headers):
-            tk.Label(self.root, text=header, font=("Arial", 10, "bold")).grid(row=1, column=col, padx=5, pady=5)
+            tk.Label(
+                table,
+                text=header,
+                font=("Helvetica", 10, "bold"),
+                bg="#f9fafb",
+                fg="#111827",
+                padx=6,
+                pady=6,
+                bd=1,
+                relief="solid",
+            ).grid(row=0, column=col, sticky="nsew")
 
-        for row, user in enumerate(users, start=2):
+        for row, user in enumerate(users, start=1):
             for col, data in enumerate(user):
-                tk.Label(self.root, text=data).grid(row=row, column=col, padx=5, pady=5)
+                tk.Label(
+                    table,
+                    text=data,
+                    font=("Helvetica", 10),
+                    bg="white",
+                    fg="#1f2937",
+                    padx=6,
+                    pady=5,
+                    bd=1,
+                    relief="solid",
+                ).grid(row=row, column=col, sticky="nsew")
 
-        tk.Button(self.root, text="Agregar Usuario", command=self.add_user).grid(row=len(users) + 2, column=0, pady=10)
-        tk.Button(self.root, text="Modificar Usuario", command=self.modify_user).grid(row=len(users) + 2, column=1, pady=10)
-        tk.Button(self.root, text="Eliminar Usuario", command=self.delete_user).grid(row=len(users) + 2, column=2, pady=10)
+        actions = tk.Frame(card, bg="white")
+        actions.grid(row=2, column=0, columnspan=4, pady=(14, 0), sticky="ew")
+        actions.grid_columnconfigure((0, 1, 2), weight=1, uniform="actions")
 
+        tk.Button(
+            actions,
+            text="Agregar Usuario",
+            command=self.add_user,
+            bg="#2563eb",
+            fg="white",
+            activebackground="#1d4ed8",
+            relief="flat",
+            padx=10,
+            pady=8,
+            cursor="hand2",
+        ).grid(row=0, column=0, padx=5, sticky="ew")
+        tk.Button(
+            actions,
+            text="Modificar Usuario",
+            command=self.modify_user,
+            bg="#f3f4f6",
+            fg="#111827",
+            activebackground="#e5e7eb",
+            relief="flat",
+            padx=10,
+            pady=8,
+            cursor="hand2",
+        ).grid(row=0, column=1, padx=5, sticky="ew")
+        tk.Button(
+            actions,
+            text="Eliminar Usuario",
+            command=self.delete_user,
+            bg="#ef4444",
+            fg="white",
+            activebackground="#dc2626",
+            relief="flat",
+            padx=10,
+            pady=8,
+            cursor="hand2",
+        ).grid(row=0, column=2, padx=5, sticky="ew")
+        
     def add_user(self):
         AddUserWindow(self.root, self.db_manager, self)
 
     def modify_user(self):
-        ModifyUserWindow(self.root, self.db_manager, self)
-    
+        ModifyUserWindow(self.root, self.db_manager, self)    
 
     def delete_user(self):
-        user_id = simpledialog.askinteger("Eliminar Usuario", "Ingrese el ID del usuario a eliminar:")
+        user_id = simpledialog.askinteger(
+            "Eliminar Usuario", "Ingrese el ID del usuario a eliminar:"
+        )
         if user_id:
             self.db_manager.delete_user(user_id)
             messagebox.showinfo("Éxito", "Usuario eliminado correctamente.")
