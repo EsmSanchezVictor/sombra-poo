@@ -8,7 +8,7 @@ class LoginWindow:
         self.db_manager = db_manager
         self.root.title("Login")
         self.root.configure(bg="#f3f4f6")
-        self.root.geometry("360x260")
+        self.center_window(360, 260)
 
         """ tk.Label(root, text="Username:").pack(pady=5)
         self.username_entry = tk.Entry(root)
@@ -21,7 +21,7 @@ class LoginWindow:
         """ tk.Label(root, text="Password:").pack(pady=5)
         self.password_entry = tk.Entry(root, show="*")
         self.password_entry.pack(pady=5)
-         """
+        """
         card = tk.Frame(container, bg="white", bd=1, relief="solid", padx=20, pady=20)
         card.pack(fill="both", expand=True)
 
@@ -47,6 +47,14 @@ class LoginWindow:
 
         recover_btn = tk.Button(card, text="Recuperar contraseña", command=self.recover_password, bg="#e5e7eb", fg="#1f2937", activebackground="#d1d5db", relief="flat", padx=14, pady=8, cursor="hand2")
         recover_btn.grid(row=6, column=0, sticky="ew")
+
+    def center_window(self, width, height):
+        self.root.update_idletasks()
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
 
     def login(self):
         username = self.username_entry.get()

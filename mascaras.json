@@ -91,6 +91,39 @@
         }
       ],
       "file_attributes": {}
+    },
+    "20251215_211422.jpg1036634": {
+      "filename": "20251215_211422.jpg",
+      "size": 1036634,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              299,
+              847,
+              1287,
+              1780,
+              1852,
+              1614,
+              501,
+              276
+            ],
+            "all_points_y": [
+              1196,
+              1025,
+              1066,
+              1147,
+              1209,
+              1245,
+              1241,
+              1227
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
     }
   },
   "_via_attributes": {
@@ -100,6 +133,7 @@
   "_via_data_format_version": "2.0.10",
   "_via_image_id_list": [
     "20250504_154700.jpg66018",
-    "20250504_160853.jpg6818"
+    "20250504_160853.jpg6818",
+    "20251215_211422.jpg1036634"
   ]
 }
