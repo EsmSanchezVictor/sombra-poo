@@ -216,6 +216,7 @@ def generar_grafico(vars, frame):
         
     contorno = ax.contourf(X, Y, T, niveles, cmap='viridis', alpha=0.8)
     ax.contour(X, Y, T, niveles, colors='k', linewidths=0.5)  # Añadir líneas de contorno
+    ax.set_title('Distribución de temperatura', fontsize=12, pad=10)
     fig.colorbar(contorno, ax=ax).set_label('Temperatura (K)', rotation=270, labelpad=20)
     ax.contour(X, Y, T, niveles, colors='black', linewidths=1.5)
     print(f"Min T: {np.nanmin(T)}, Max T: {np.nanmax(T)}")

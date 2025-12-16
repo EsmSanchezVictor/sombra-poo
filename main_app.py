@@ -15,20 +15,8 @@ class MainApp:
         self.db_manager = db_manager
         self.root.title("Login")
         self.root.configure(bg="#f3f4f6")
-        self.root.geometry("480x380")
+        self.center_window(480, 380)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-        """ self.root.attributes('-fullscreen', True)
-
-        tk.Label(root, text="Username:").grid(row=0, column=0, pady=5, padx=5)
-        self.username_entry = tk.Entry(root)
-        self.username_entry.grid(row=0, column=1, pady=5, padx=5)
-
-        tk.Label(root, text="Password:").grid(row=1, column=0, pady=5, padx=5)
-        self.password_entry = tk.Entry(root, show="*")
-        self.password_entry.grid(row=1, column=1, pady=5, padx=5)
-
-        tk.Button(root, text="Login", command=self.login).grid(row=2, column=0, columnspan=2, pady=10)
-        """
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
 
@@ -102,7 +90,24 @@ class MainApp:
     def on_close(self):
         self.root.destroy()  # Cierra la ventana actual (root_2)
         self.login_root.destroy()  # Cierra la ventana de login (root)
+        
+    def center_window(self, width, height):
+        self.root.update_idletasks()
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
 
+    def exit_fullscreen(self):
+        self.root.attributes("-fullscreen", False)
+
+    def back_to_admin(self):
+        self.exit_fullscreen()
+        self.admin_options()
+
+    def exit_program(self):
+        self.root.quit()
     def login(self):
         username = self.username_entry.get()
         password = self.password_entry.get()
@@ -117,13 +122,14 @@ class MainApp:
             messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
 
     def admin_options(self):
+        self.exit_fullscreen()
         for widget in self.root.winfo_children():
             widget.destroy()
-            container = tk.Frame(self.root, bg="#f3f4f6", padx=20, pady=20)
+        container = tk.Frame(self.root, bg="#f3f4f6", padx=20, pady=20)
         container.grid(row=0, column=0, sticky="nsew")
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
-
+        self.center_window(520, 420)
         card = tk.Frame(container, bg="white", bd=1, relief="solid", padx=24, pady=22)
         card.grid(row=0, column=0)
         card.grid_columnconfigure(0, weight=1)
@@ -152,9 +158,9 @@ class MainApp:
             card,
             text="Acceso al Software",
             command=self.open_main_app,
-            bg="#f3f4f6",
+            bg="#fef9c3",
             fg="#111827",
-            activebackground="#e5e7eb",
+            activebackground="#fef08a",
             relief="flat",
             padx=14,
             pady=10,
@@ -170,6 +176,7 @@ class MainApp:
     def open_user_management(self):
         for widget in self.root.winfo_children():
             widget.destroy()
+        self.root.attributes("-fullscreen", True)
 
         users = self.db_manager.fetch_all_users()
 
@@ -257,9 +264,9 @@ class MainApp:
             actions,
             text="Modificar Usuario",
             command=self.modify_user,
-            bg="#f3f4f6",
+            bg="#fef9c3",
             fg="#111827",
-            activebackground="#e5e7eb",
+            activebackground="#fef08a",
             relief="flat",
             padx=10,
             pady=8,
@@ -277,6 +284,36 @@ class MainApp:
             pady=8,
             cursor="hand2",
         ).grid(row=0, column=2, padx=5, sticky="ew")
+        
+        footer = tk.Frame(card, bg="white")
+        footer.grid(row=3, column=0, columnspan=4, pady=(16, 0), sticky="ew")
+        footer.grid_columnconfigure((0, 1), weight=1, uniform="footer")
+
+        tk.Button(
+            footer,
+            text="Volver",
+            command=self.back_to_admin,
+            bg="#fef9c3",
+            fg="#111827",
+            activebackground="#d1d5db",
+            relief="flat",
+            padx=12,
+            pady=10,
+            cursor="hand2",
+        ).grid(row=0, column=0, padx=6, sticky="ew")
+
+        tk.Button(
+            footer,
+            text="Salir",
+            command=self.exit_program,
+            bg="#ef4444",
+            fg="white",
+            activebackground="#dc2626",
+            relief="flat",
+            padx=12,
+            pady=10,
+            cursor="hand2",
+        ).grid(row=0, column=1, padx=6, sticky="ew")
         
     def add_user(self):
         AddUserWindow(self.root, self.db_manager, self)

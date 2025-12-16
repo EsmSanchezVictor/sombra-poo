@@ -27,14 +27,81 @@ class App:
         self.modo = None  # 'arbol', 'estructura'
         self.elemento_temporal = None
 
-        # Crear frames
+        """ # Crear frames
         self.frame0 = tk.Frame(root, bg="magenta", width=100, height=3)
         self.frame1 = tk.Frame(self.root, bg="aqua", width=100, height=100)
         self.frame2 = tk.Frame(root, bg="green", width=100, height=100)
         self.frame3 = tk.Frame(root, bg="blue", width=100, height=100)
         self.frame4 = tk.Frame(root, bg="yellow", width=100, height=100)
         self.frame5 = tk.Frame(root, bg="purple", width=100, height=100)
-        self.frame6 = tk.Frame(root, bg="orange", width=100, height=1)
+        self.frame6 = tk.Frame(root, bg="orange", width=100, height=1) """
+        # Paleta de colores suave para toda la interfaz
+        self.palette = {
+            "background": "#f5f7fb",
+            "panel": "#ffffff",
+            "accent": "#e6ebf5",
+            "border": "#d6dce8",
+        }
+
+        self.root.configure(bg=self.palette["background"])
+
+        # Crear frames principales con una estética consistente
+        self.frame0 = tk.Frame(
+            root,
+            bg=self.palette["accent"],
+            width=100,
+            height=3,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame1 = tk.Frame(
+            self.root,
+            bg=self.palette["background"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame2 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame3 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame4 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame5 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame6 = tk.Frame(
+            root,
+            bg=self.palette["accent"],
+            width=100,
+            height=1,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
 
         # Ubicar frames
         self.frame0.grid(row=0, column=0, columnspan=3, sticky="nsew")
@@ -63,7 +130,8 @@ class App:
         self.panel_width =  min(int(self.frame1.winfo_screenwidth() / 6), self.frame1.winfo_width())
 
         # Crear un frame para los iconos (botones), inicialmente vertical a la izquierda
-        self.icon_frame = tk.Frame(self.frame1)
+        """self.icon_frame = tk.Frame(self.frame1)"""
+        self.icon_frame = tk.Frame(self.frame1, bg=self.palette["background"])
         self.icon_frame.grid(row=0, column=0, sticky="ns")
 
         # Cargar las imágenes para los botones (deben ser archivos PNG)
@@ -87,7 +155,16 @@ class App:
 
         # Crear los paneles desplegables (inicialmente ocultos)
         for i in range(4):
-            panel = tk.Frame(self.frame1, bg="white", width=0, height=400)
+            """panel = tk.Frame(self.frame1, bg="white", width=0, height=400)"""
+            panel = tk.Frame(
+                self.frame1,
+                bg=self.palette["panel"],
+                width=0,
+                height=400,
+                highlightbackground=self.palette["border"],
+                highlightthickness=1,
+                bd=0,
+            )
             panel.place(x=0, y=0, relheight=1)
             panel.place_forget()
             self.panel_frames.append(panel)
@@ -420,58 +497,117 @@ class App:
     def setup_status_bar(self):
         """Configura la barra de estado."""
         now = datetime.now()
-        date_time_label = tk.Label(self.frame6, text=f"Fecha y Hora: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        # date_time_label = tk.Label(self.frame6, text=f"Fecha y Hora: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        self.frame6.configure(bg=self.palette["accent"])
+
+        date_time_label = tk.Label(
+            self.frame6,
+            text=f"Fecha y Hora: {now.strftime('%Y-%m-%d %H:%M:%S')}",
+            bg=self.palette["accent"],
+            fg="#2c3e50",
+            font=("Arial", 9, "bold"),
+        )
         date_time_label.pack(side="right", padx=10)
         for i in range(1, 4):
-            label = tk.Label(self.frame6, text=f"Etiqueta {i}")
+            #label = tk.Label(self.frame6, text=f"Etiqueta {i}")
+            label = tk.Label(
+                self.frame6,
+                text=f"Etiqueta {i}",
+                bg=self.palette["accent"],
+                fg="#4a4f63",
+                font=("Arial", 9),
+            )
             label.pack(side="right", padx=10)
+    def create_card(self, parent):
+        return tk.Frame(
+            parent,
+            bg=self.palette["panel"],
+            bd=0,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+            padx=12,
+            pady=12,
+        )
     def resultados(self, frame):
         """Configura el área de resultados."""
-        result_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        #result_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        result_frame = self.create_card(frame)
         result_frame.pack(expand=True, fill='both', pady=5)
 
-        sombra_frame = tk.Frame(result_frame)
+        #sombra_frame = tk.Frame(result_frame)
+        sombra_frame = tk.Frame(result_frame, bg=self.palette["panel"])
         sombra_frame.pack(side=tk.LEFT, padx=50, pady=10)
 
         self.lbl_dimensiones_calculo = tk.Label(
-            sombra_frame, text="Dimensiones del Área de Cálculo: N/A", font=("Arial", 12, "bold")
+            #sombra_frame, text="Dimensiones del Área de Cálculo: N/A", font=("Arial", 12, "bold")
+            sombra_frame,
+            text="Dimensiones del Área de Cálculo: N/A",
+            font=("Arial", 12, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
         )
         self.lbl_dimensiones_calculo.pack(pady=5)
 
         self.lbl_dimensiones_referencia = tk.Label(
-            sombra_frame, text="Dimensiones del Área de Referencia: N/A", font=("Arial", 12, "bold")
+            #sombra_frame, text="Dimensiones del Área de Referencia: N/A", font=("Arial", 12, "bold")
+            sombra_frame,
+            text="Dimensiones del Área de Referencia: N/A",
+            font=("Arial", 12, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",        
         )
         self.lbl_dimensiones_referencia.pack(pady=5)
 
         self.lbl_promedio_referencia = tk.Label(
-            sombra_frame, text="Promedio Gris Referencia: N/A", font=("Arial", 12, "bold")
+            #sombra_frame, text="Promedio Gris Referencia: N/A", font=("Arial", 12, "bold")
+            sombra_frame,
+            text="Promedio Gris Referencia: N/A",
+            font=("Arial", 12, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
         )
         self.lbl_promedio_referencia.pack(pady=5)
 
         self.lbl_porcentaje_sombra = tk.Label(
-            sombra_frame, text="Porcentaje de sombra: N/A", font=("Arial", 12, "bold")
+            #sombra_frame, text="Porcentaje de sombra: N/A", font=("Arial", 12, "bold")
+            sombra_frame,
+            text="Porcentaje de sombra: N/A",
+            font=("Arial", 12, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
         )
         self.lbl_porcentaje_sombra.pack(pady=5)
     def temp_sombra(self, frame):
         """Configura el área de temperatura en sombra."""
-        temp_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        #temp_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        temp_frame = self.create_card(frame)
         temp_frame.pack(expand=True, fill='both', pady=5)
 
-        self.lbl_temp_shade = tk.Label(temp_frame, text="Temperatura en Sombra: N/A", font=("Arial", 12, "bold"))
+        #self.lbl_temp_shade = tk.Label(temp_frame, text="Temperatura en Sombra: N/A", font=("Arial", 12, "bold"))
+        self.lbl_temp_shade = tk.Label(
+            temp_frame,
+            text="Temperatura en Sombra: N/A",
+            font=("Arial", 12, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
+        )
         self.lbl_temp_shade.pack(pady=5)
 
-        self.graph_frame = tk.Frame(temp_frame)
+        #self.graph_frame = tk.Frame(temp_frame)
+        self.graph_frame = tk.Frame(temp_frame, bg=self.palette["panel"])
         self.graph_frame.pack(side=tk.RIGHT, padx=10)
     def imagen(self, frame):
         """Configura el área de visualización de imágenes."""
-        img_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        #img_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        img_frame = self.create_card(frame)
         img_frame.pack(expand=True, fill='both', pady=5)
         self.fig1, self.ax1 = plt.subplots() 
         self.canvas1 = FigureCanvasTkAgg(self.fig1, master=img_frame)
         self.canvas1.get_tk_widget().pack(side=tk.LEFT)
     def curva_de_nivel(self, frame):
         """Configura el área de curvas de nivel."""
-        nivel_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        #nivel_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+        nivel_frame = self.create_card(frame)
         nivel_frame.pack(expand=True, fill='both', pady=5)
 
         self.fig2, self.ax2 = plt.subplots()
