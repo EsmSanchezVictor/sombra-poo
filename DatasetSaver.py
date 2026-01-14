@@ -90,30 +90,6 @@ class DatasetSaver:
         except Exception as e:
             print(f"Error al guardar dataset: {str(e)}")
 
-    """ def save_mask(self, img_filename, mask_filename):
-        Crea y guarda la máscara como imagen PNG esto es un comentario poner luego comilla
-        try:
-            # Crear máscara binaria basada en la selección actual
-            mask = np.zeros(self.app.img_rgb.shape[:2], dtype=np.uint8)
-            
-            if self.app.selection_type.get() == "Rectángulo":
-                x1, y1 = int(self.app.shape_selector.start_point[0]), int(self.app.shape_selector.start_point[1])
-                x2, y2 = int(self.app.shape_selector.end_point[0]), int(self.app.shape_selector.end_point[1])
-                cv2.rectangle(mask, (x1, y1), (x2, y2), 255, -1)
-            elif self.app.selection_type.get() == "Círculo":
-                center_x, center_y = int(self.app.shape_selector.start_point[0]), int(self.app.shape_selector.start_point[1])
-                radius = int(np.sqrt((self.app.shape_selector.end_point[0] - self.app.shape_selector.start_point[0])**2 + (self.app.shape_selector.end_point[1] - self.app.shape_selector.start_point[1])**2))
-                cv2.circle(mask, (center_x, center_y), radius, 255, -1)
-            elif self.app.selection_type.get() == "Polígono":
-                pts = np.array([(int(x), int(y)) for x, y in self.app.shape_selector.polygon_points], dtype=np.int32)
-                cv2.fillPoly(mask, [pts], 255)
-            
-            # Guardar máscara
-            mask_path = os.path.join('mascaras', mask_filename)
-            cv2.imwrite(mask_path, mask)
-        except Exception as e:
-            print(f"Error al guardar máscara: {str(e)}")
-            raise """
 
     def update_mask_json(self, img_filename, mask_filename):
         """Actualiza el archivo JSON con los nuevos datos de la máscara"""
