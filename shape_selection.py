@@ -106,7 +106,7 @@ class ShapeSelector:
                     # Calcular promedio
                     promedio_referencia = np.mean(self.area_referencia)
                     self.app.lbl_promedio_referencia.config(text=f"Promedio Gris Referencia: {promedio_referencia:.2f}")
-
+                    self.app.ref_gray_mean = promedio_referencia
                 self.redraw_selection()
                 
                 if self.app.area_calculo_done and self.app.area_referencia_done:
@@ -189,7 +189,8 @@ class ShapeSelector:
             # Calcular promedio
             promedio_referencia = np.mean(self.area_referencia)
             self.app.lbl_promedio_referencia.config(text=f"Promedio Gris Referencia: {promedio_referencia:.2f}")
-
+            self.app.ref_gray_mean = promedio_referencia
+            
         self.app.ax1.add_patch(polygon_patch)
         self.app.canvas1.draw()
         
@@ -246,8 +247,7 @@ class ShapeSelector:
         """Selecciona y devuelve un área circular."""
         try:
             center_x, center_y = int(self.start_point[0]), int(self.start_point[1])
-            radius = int(np.sqrt((self.end_point[0] - self.start_point[0])**2 + 
-                               (self.end_point[1] - self.start_point[1])**2))
+            radius = int(np.sqrt((self.end_point[0] - self.start_point[0])**2 + (self.end_point[1] - self.start_point[1])**2))
 
             mask = np.zeros(self.app.img_rgb.shape[:2], dtype=np.uint8)
             cv2.circle(mask, (center_x, center_y), radius, 1, thickness=-1)
@@ -338,6 +338,7 @@ class ShapeSelector:
         """Redibuja la imagen con las áreas seleccionadas."""
         self.app.ax1.clear()
         self.app.ax1.imshow(self.app.img_rgb)
+        self.app._setup_hover_shadow_percent_photo(self.app.ax1, self.app.canvas1, self.app.img_rgb)
 
         if self.shape_patch_calculo:
             self.app.ax1.add_patch(self.shape_patch_calculo)

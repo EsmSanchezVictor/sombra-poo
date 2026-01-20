@@ -12,7 +12,7 @@ from image_processor import ImageProcessor
 from save_pdf import PDFReportGenerator
 from shadow_temp import Temperatura
 from temp_graph import TemperatureGraph
-from mouse_pixel_value  import MouseHoverPixelValueWithTooltip
+#from mouse_pixel_value  import MouseHoverPixelValueWithTooltip
 from utils import export_to_excel
 import diseño as design
 import modelo_con_excel as modelo
@@ -125,7 +125,17 @@ class App:
         self.image_processor = ImageProcessor()
         self.shape_selector = ShapeSelector(self) 
         self.dataset_saver = DatasetSaver(self)
-
+        self.porcentaje_sombra = None
+        self.tmrt_result = None
+        self.ref_gray_mean = None
+        self.tmrt_map = None
+        self.original_rgb = None
+        self._tmrt_hover_cid = None
+        self._tmrt_hover_canvas = None
+        self._tmrt_hover_annotation = None
+        self._shadow_hover_cid = None
+        self._shadow_hover_canvas = None
+        self._shadow_hover_annotation = None
         #self.frame1 = frame1
         self.panel_width =  min(int(self.frame1.winfo_screenwidth() / 6), self.frame1.winfo_width())
 
@@ -174,8 +184,8 @@ class App:
     
         # Otros atributos que tengas...
         self.curvas_nivel_creadas = False  # Bandera para saber si las curvas de nivel han sido creadas
-        # Instanciar la clase Temperatura
-        self.temp_calculator = Temperatura()
+        # Calculadora Tmrt (se instancia cuando se calcula)
+        self.temp_calculator = None
     
         # Configurar los contenidos para cada panel
         self.setup_panel_1()
@@ -245,7 +255,12 @@ class App:
         panel = self.panel_frames[0]
         
         labels = ["Temperatura ambiente (°C):", "Hora del día (0-23):", "Fecha (YYYY-MM-DD):", "Latitud:", "Longitud:"]
-        entries = []
+        self.entries = []
+        self.entry_temp = None
+        self.entry_time = None
+        self.entry_date = None
+        self.entry_lat = None
+        self.entry_lon = None
 
         for label_text in labels:
             label = tk.Label(panel, text=label_text, bg=panel.cget("bg"), fg="black")
@@ -253,7 +268,13 @@ class App:
             entry = tk.Entry(panel)
             entry.pack(anchor="w", padx=20, pady=5)
             self.entries.append(entry)
-
+        
+        self.entry_temp = self.entries[0]
+        self.entry_time = self.entries[1]
+        self.entry_date = self.entries[2]
+        self.entry_lat = self.entries[3]
+        self.entry_lon = self.entries[4]
+        
         calculate_button = tk.Button(panel, text="Calcular temperatura en sombra", command=self.calculate_temperature_in_shade)
         calculate_button.pack(padx=20, pady=20)
     def setup_panel_2(self):
@@ -584,14 +605,32 @@ class App:
         temp_frame.pack(expand=True, fill='both', pady=5)
 
         #self.lbl_temp_shade = tk.Label(temp_frame, text="Temperatura en Sombra: N/A", font=("Arial", 12, "bold"))
-        self.lbl_temp_shade = tk.Label(
+        self.lbl_tmrt_sol = tk.Label(
             temp_frame,
-            text="Temperatura en Sombra: N/A",
+            text="Tmrt al sol: N/A",
             font=("Arial", 12, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_temp_shade.pack(pady=5)
+        self.lbl_tmrt_sol.pack(pady=5)
+
+        self.lbl_tmrt_sombra = tk.Label(
+            temp_frame,
+            text="Tmrt en sombra: N/A",
+            font=("Arial", 12, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
+        )
+        self.lbl_tmrt_sombra.pack(pady=5)
+
+        self.lbl_delta_tmrt = tk.Label(
+            temp_frame,
+            text="ΔTmrt (impacto sombra): N/A",
+            font=("Arial", 12, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
+        )
+        self.lbl_delta_tmrt.pack(pady=5)    
 
         #self.graph_frame = tk.Frame(temp_frame)
         self.graph_frame = tk.Frame(temp_frame, bg=self.palette["panel"])
@@ -617,41 +656,41 @@ class App:
         file_path = filedialog.askopenfilename()
         if file_path:
             self.img, self.img_rgb = self.image_processor.load_image(file_path)
+            self.original_rgb = self.img_rgb
             self.ax1.clear()
             self.ax1.imshow(self.img_rgb)
+            self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
             self.canvas1.draw()
             self.shape_selector.enable_calculo_button()
+            
     def calculate_temperature_in_shade(self):
         try:
+            if self.porcentaje_sombra is None:
+                messagebox.showerror("Error", "Primero debe seleccionar el área para calcular el porcentaje de sombra.")
+                return
             # Obtener valores ingresados por el usuario
-            temp_ambient = float(self.entries[0].get().replace('\ufeff', '').strip())
-            time_of_day = int(self.entries[1].get().replace('\ufeff', '').strip())
-            date = datetime.strptime(self.entries[2].get().replace('\ufeff', '').strip(), "%Y-%m-%d").date()
-            latitude = float(self.entries[3].get().replace('\ufeff', '').strip())
-            longitude = float(self.entries[4].get().replace('\ufeff', '').strip())
+            temp_ambient = float(self.entry_temp.get().replace('\ufeff', '').strip())
+            latitude = float(self.entry_lat.get().replace('\ufeff', '').strip())
+            longitude = float(self.entry_lon.get().replace('\ufeff', '').strip())
 
-            # Parámetros de opacidad y densidad
-            opacity = 0.8  # Puedes ajustarlo para que se base en los niveles de gris
-            shadow_density = 0.9  # Basado en la densidad de los puntos de sombra
-
-            # Usar la clase Temperatura para calcular la temperatura en sombra
-            temp_shade = self.temp_calculator.temperature_in_shade(
-                temp_ambient, latitude, longitude, date, time_of_day, opacity, shadow_density
-            )
-
-            # Mostrar el resultado de temperatura en sombra
-            self.lbl_temp_shade.config(text=f"Temperatura en Sombra: {temp_shade:.2f} °C")
-
+            self.temp_calculator = Temperatura(latitude, longitude)
+            result = self.temp_calculator.calculate_tmrt(temp_ambient, self.porcentaje_sombra, shadow_type="tree")
+            self.tmrt_result = result
+            
+            
+            self.lbl_tmrt_sol.config(text=f"Tmrt al sol: {result['Tmrt_sol']:.2f} °C")
+            self.lbl_tmrt_sombra.config(text=f"Tmrt en sombra: {result['Tmrt_sombra']:.2f} °C")
+            self.lbl_delta_tmrt.config(text=f"ΔTmrt (impacto sombra): {result['Delta_Tmrt']:.2f} °C")
             # Limpiar el frame anterior si existe (evita sobreposición de gráficos)
             for widget in self.graph_frame.winfo_children():
                 widget.destroy()
 
             # Crear un objeto de la clase TemperatureGraph y mostrar la gráfica dentro del frame
-            graph = TemperatureGraph(temp_ambient, temp_shade, self.graph_frame)
+            graph = TemperatureGraph(temp_ambient, result["Tmrt_sombra"], self.graph_frame)
             graph.plot_temperature_scale()  # Dibujar la gráfica en el frame
 
         except ValueError as e:
-            print(f"Error al ingresar los datos: {e}")
+            messagebox.showerror("Error", f"Error al ingresar los datos: {e}")
     def confirmar_seleccion(self):
         # Verificamos que ambas áreas hayan sido seleccionadas
         if self.shape_selector.area_seleccionada is not None and self.shape_selector.area_referencia is not None:
@@ -660,14 +699,13 @@ class App:
                 self.shape_selector.area_seleccionada,
                 self.shape_selector.area_referencia
             )
+            self.porcentaje_sombra = porcentaje_sombra
             self.lbl_porcentaje_sombra.config(text=f"Porcentaje de sombra: {porcentaje_sombra:.2f}%")
 
             # Habilitar los botones para curvas de nivel y exportar
             self.curve_button.config(state=tk.NORMAL)  # Habilitar el botón de curvas de nivel
             self.excel_button.config(state=tk.NORMAL)  # Habilitar el botón para exportar a Excel
             self.pdf_button.config(state=tk.NORMAL) # Habilita el botón para guardan el pdf
-            # Instanciar la clase para manejar el hover del mouse y mostrar el valor del píxel
-            self.mouse_hover_pixel_value = MouseHoverPixelValueWithTooltip(self, self.canvas1, self.canvas2, self.img_rgb, self.shape_selector.area_seleccionada)
         else:
             print("Error: No se ha seleccionado un área válida.")
     def exportar_a_excel(self):
@@ -683,11 +721,13 @@ class App:
             # Crear las curvas de nivel en el segundo área de dibujo
             self.ax2.clear()
             self.ax2.contour(area_volteada, levels=100, cmap='jet', linewidths=1.5, alpha=0.8)  # Usar mapa de colores 'jet'
+            self.tmrt_map = area_volteada
+            self._setup_hover_tmrt_map(self.ax2, self.canvas2, area_volteada)
             self.canvas2.draw()
-            self.mouse_hover_pixel_value = MouseHoverPixelValueWithTooltip(self, self.canvas1, self.canvas2, self.img_rgb, self.shape_selector.area_seleccionada)
             self.curvas_nivel_creadas = True
-            # Instanciar MouseHoverPixelValueWithTooltip después de generar las curvas de nivel
-        self.mouse_hover_pixel_value = MouseHoverPixelValueWithTooltip(self, self.canvas1, self.canvas2, self.img_rgb, self.shape_selector.area_seleccionada)
+        if self.shape_selector.area_seleccionada is not None:
+            self.tmrt_map = np.flipud(self.shape_selector.area_seleccionada)
+            self._setup_hover_tmrt_map(self.ax2, self.canvas2, self.tmrt_map)
     def exportar_a_pdf(self):
         pdf_generator = PDFReportGenerator(self)
         pdf_generator.generate_report()    
@@ -724,4 +764,96 @@ class App:
             self.dataset_saver.save_dataset()
             messagebox.showinfo("Éxito", "Dataset guardado correctamente")
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo guardar el dataset: {str(e)}")
+                        messagebox.showerror("Error", f"No se pudo guardar el dataset: {str(e)}")
+
+    def _setup_hover_tmrt_map(self, ax, canvas, data_2d):
+        if self._tmrt_hover_canvas is not None and self._tmrt_hover_cid is not None:
+            self._tmrt_hover_canvas.mpl_disconnect(self._tmrt_hover_cid)
+        self._tmrt_hover_canvas = canvas
+        if self._tmrt_hover_annotation is None or self._tmrt_hover_annotation.axes != ax:
+            self._tmrt_hover_annotation = ax.annotate(
+                "",
+                xy=(0, 0),
+                xytext=(10, 10),
+                textcoords="offset points",
+                fontsize=8,
+                bbox=dict(boxstyle="round", fc="white", alpha=0.7),
+            )
+            self._tmrt_hover_annotation.set_visible(False)
+
+        def on_move(event):
+            if event.inaxes != ax or event.xdata is None or event.ydata is None:
+                if self._tmrt_hover_annotation.get_visible():
+                    self._tmrt_hover_annotation.set_visible(False)
+                    canvas.draw_idle()
+                return
+
+            x, y = int(event.xdata), int(event.ydata)
+            if y < 0 or x < 0 or y >= data_2d.shape[0] or x >= data_2d.shape[1]:
+                if self._tmrt_hover_annotation.get_visible():
+                    self._tmrt_hover_annotation.set_visible(False)
+                    canvas.draw_idle()
+                return
+
+            tmrt_value = float(data_2d[y, x])
+            try:
+                temp_air = float(self.entry_temp.get().replace('\ufeff', '').strip())
+                temp_air_text = f"{temp_air:.2f} °C"
+            except (ValueError, AttributeError):
+                temp_air_text = "N/A"
+
+            self._tmrt_hover_annotation.xy = (event.xdata, event.ydata)
+            self._tmrt_hover_annotation.set_text(
+                f"Tmrt: {tmrt_value:.2f} °C\nTemp aire: {temp_air_text}"
+            )
+            self._tmrt_hover_annotation.set_visible(True)
+            canvas.draw_idle()
+
+        self._tmrt_hover_cid = canvas.mpl_connect("motion_notify_event", on_move)
+
+    def _setup_hover_shadow_percent_photo(self, ax, canvas, rgb_img):
+        if self._shadow_hover_canvas is not None and self._shadow_hover_cid is not None:
+            self._shadow_hover_canvas.mpl_disconnect(self._shadow_hover_cid)
+        self._shadow_hover_canvas = canvas
+        if self._shadow_hover_annotation is None or self._shadow_hover_annotation.axes != ax:
+            self._shadow_hover_annotation = ax.annotate(
+                "",
+                xy=(0, 0),
+                xytext=(10, 10),
+                textcoords="offset points",
+                fontsize=8,
+                bbox=dict(boxstyle="round", fc="white", alpha=0.7),
+            )
+            self._shadow_hover_annotation.set_visible(False)
+
+        def on_move(event):
+            if event.inaxes != ax or event.xdata is None or event.ydata is None:
+                if self._shadow_hover_annotation.get_visible():
+                    self._shadow_hover_annotation.set_visible(False)
+                    canvas.draw_idle()
+                return
+
+            x, y = int(event.xdata), int(event.ydata)
+            if y < 0 or x < 0 or y >= rgb_img.shape[0] or x >= rgb_img.shape[1]:
+                if self._shadow_hover_annotation.get_visible():
+                    self._shadow_hover_annotation.set_visible(False)
+                    canvas.draw_idle()
+                return
+
+            pixel = rgb_img[y, x]
+            r, g, b = float(pixel[0]), float(pixel[1]), float(pixel[2])
+            gray = 0.299 * r + 0.587 * g + 0.114 * b
+            ref_gray = self.ref_gray_mean
+            if ref_gray is None or ref_gray <= 0:
+                text = "Ref no definida"
+            else:
+                sombra = (ref_gray - gray) / ref_gray
+                sombra = max(0, min(sombra, 1)) * 100
+                text = f"% Sombra: {sombra:.2f}%"
+
+            self._shadow_hover_annotation.xy = (event.xdata, event.ydata)
+            self._shadow_hover_annotation.set_text(text)
+            self._shadow_hover_annotation.set_visible(True)
+            canvas.draw_idle()
+
+        self._shadow_hover_cid = canvas.mpl_connect("motion_notify_event", on_move)
