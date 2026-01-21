@@ -64,3 +64,4 @@ class MouseHoverPixelValueWithTooltip:
                     self.tooltip.place_forget()  # Ocultar si está fuera de los límites
             else:
                 self.tooltip.place_forget()  # Ocultar si el mouse está fuera de los ejes
+ 
