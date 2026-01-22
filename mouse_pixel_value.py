@@ -17,7 +17,9 @@ class MouseHoverPixelValueWithTooltip:
         self.canvas_contour = canvas_contour
         self.img_rgb = img_rgb
         self.area_seleccionada = area_seleccionada
-     
+
+        self.last_image_pixel = None
+        self.last_contour_pixel = None
 
         # Conectar eventos de movimiento del mouse
         self.canvas_image.mpl_connect('motion_notify_event', self.on_mouse_move_image)
@@ -28,40 +30,63 @@ class MouseHoverPixelValueWithTooltip:
         self.tooltip.place_forget()  # Ocultarla inicialmente
 
     def on_mouse_move_image(self, event):
-        """Mostrar el valor del píxel sobre la imagen cargada y mover el tooltip cerca del mouse."""
-        if event.inaxes:  # Solo si el mouse está dentro de los ejes de la imagen
-            x, y = int(event.xdata), int(event.ydata)  # Obtener las coordenadas del gráfico
-            x2, y2 = int(event.xdata), int(event.ydata)  # Obtener las coordenadas del gráfico
-            if 0 <= x < self.img_rgb.shape[1] and 0 <= y < self.img_rgb.shape[0]:
-                pixel_value = self.img_rgb[y, x]
-                # Actualizar el texto del tooltip con el valor del píxel
-                self.tooltip.config(text=f"(R,G,B): {x,y}")#text=f"(R,G,B): {pixel_value}")
-                # Mover el tooltip cerca del puntero del mouse
-          
-          
-          
-                self.tooltip.place(x=100+event.x,y=100+event.y/3)
+        """Mostrar % sombra sobre la imagen RGB sin redibujar la figura."""
+        if not event.inaxes or event.xdata is None or event.ydata is None:
+            self.tooltip.place_forget()
+            self.last_image_pixel = None
+            return
+
+        x, y = int(event.xdata), int(event.ydata)
+        if 0 <= x < self.img_rgb.shape[1] and 0 <= y < self.img_rgb.shape[0]:
+            if self.last_image_pixel == (x, y):
+                return
+            self.last_image_pixel = (x, y)
+
+            pixel = self.img_rgb[y, x]
+            r, g, b = float(pixel[0]), float(pixel[1]), float(pixel[2])
+            gray = 0.299 * r + 0.587 * g + 0.114 * b
+            ref_gray = self.app.ref_gray_mean
+            if ref_gray is None or ref_gray <= 0:
+                text = "Ref no definida"
             else:
-                self.tooltip.place_forget()  # Ocultar si está fuera de los límites
+                sombra = (ref_gray - gray) / ref_gray
+                sombra = max(0, min(sombra, 1)) * 100
+                text = f"% Sombra: {sombra:.2f}%"
+
+            self.tooltip.config(text=text)
+            self.tooltip.place(x=100 + event.x, y=100 + event.y / 3)
         else:
-            self.tooltip.place_forget()  # Ocultar si el mouse está fuera de los ejes
+            self.tooltip.place_forget()
+            self.last_image_pixel = None
 
     def on_mouse_move_contour(self, event):
-        """Mostrar el valor del píxel sobre las curvas de nivel y mover el tooltip cerca del mouse."""
-        if self.app.curvas_nivel_creadas:  # Solo ejecutar si las curvas de nivel han sido creadas
-            if event.inaxes:  # Solo si el mouse está dentro de los ejes
-                x, y = int(event.xdata), int(event.ydata)  # Obtener las coordenadas del gráfico
-                x2, y2 = int(event.xdata), int(event.ydata)  # Obtener las coordenadas del gráfico
-                if 0 <= x < self.area_seleccionada.shape[1] and 0 <= y < self.area_seleccionada.shape[0]:
-                    pixel_value = self.area_seleccionada[y, x]
-                    # Actualizar el texto del tooltip con el valor del píxel
-                    self.tooltip.config(text=f"Valor:{x,y}")# {pixel_value:.2f}
-                    # Mover el tooltip cerca del puntero del mouse
-                    
-                    
-                    self.tooltip.place(x=750+event.x, y=100+event.y/3)
-                else:
-                    self.tooltip.place_forget()  # Ocultar si está fuera de los límites
-            else:
-                self.tooltip.place_forget()  # Ocultar si el mouse está fuera de los ejes
- 
+        """Mostrar Tmrt y temperatura de aire sobre el mapa sin redibujar."""
+        if not self.app.curvas_nivel_creadas:
+            return
+        if not event.inaxes or event.xdata is None or event.ydata is None:
+            self.tooltip.place_forget()
+            self.last_contour_pixel = None
+            return
+
+        data = self.app.tmrt_map if self.app.tmrt_map is not None else self.area_seleccionada
+        if data is None:
+            return
+
+        x, y = int(event.xdata), int(event.ydata)
+        if 0 <= x < data.shape[1] and 0 <= y < data.shape[0]:
+            if self.last_contour_pixel == (x, y):
+                return
+            self.last_contour_pixel = (x, y)
+
+            tmrt_value = float(data[y, x])
+            try:
+                temp_air = float(self.app.entry_temp.get().replace('\ufeff', '').strip())
+                temp_air_text = f"{temp_air:.2f} °C"
+            except (ValueError, AttributeError):
+                temp_air_text = "N/A"
+
+            self.tooltip.config(text=f"Tmrt: {tmrt_value:.2f} °C\nTemp aire: {temp_air_text}")
+            self.tooltip.place(x=750 + event.x, y=100 + event.y / 3)
+        else:
+            self.tooltip.place_forget()
+            self.last_contour_pixel = None

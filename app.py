@@ -1,4 +1,5 @@
 from datetime import datetime
+from io import BytesIO
 import tkinter as tk
 from tkinter import ttk
 import numpy as np
@@ -18,6 +19,7 @@ import diseño as design
 import modelo_con_excel as modelo
 from DatasetSaver import DatasetSaver
 from tkinter import messagebox
+from PIL import Image, ImageTk
 
 class App:
     def __init__(self, root):
@@ -136,6 +138,15 @@ class App:
         self._shadow_hover_cid = None
         self._shadow_hover_canvas = None
         self._shadow_hover_annotation = None
+        self.porcentaje_sombra = None
+        self.tmrt_result = None
+        self.ref_gray_mean = None
+        self.tmrt_map = None
+        self.original_rgb = None
+        self.mouse_hover_pixel_value = None
+        self.curva_frame = None
+        self.curva_label = None
+        self.curva_photo = None
         #self.frame1 = frame1
         self.panel_width =  min(int(self.frame1.winfo_screenwidth() / 6), self.frame1.winfo_width())
 
@@ -181,11 +192,12 @@ class App:
 
         # Inicializar variable
         self.setup_variables()
-    
+        # Calculadora Tmrt (se instancia cuando se calcula)
+        self.temp_calculator = None
         # Otros atributos que tengas...
         self.curvas_nivel_creadas = False  # Bandera para saber si las curvas de nivel han sido creadas
         # Calculadora Tmrt (se instancia cuando se calcula)
-        self.temp_calculator = None
+
     
         # Configurar los contenidos para cada panel
         self.setup_panel_1()
@@ -563,7 +575,7 @@ class App:
             #sombra_frame, text="Dimensiones del Área de Cálculo: N/A", font=("Arial", 12, "bold")
             sombra_frame,
             text="Dimensiones del Área de Cálculo: N/A",
-            font=("Arial", 12, "bold"),
+            font=("Arial", 9, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
@@ -573,7 +585,7 @@ class App:
             #sombra_frame, text="Dimensiones del Área de Referencia: N/A", font=("Arial", 12, "bold")
             sombra_frame,
             text="Dimensiones del Área de Referencia: N/A",
-            font=("Arial", 12, "bold"),
+            font=("Arial", 9, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",        
         )
@@ -583,7 +595,7 @@ class App:
             #sombra_frame, text="Promedio Gris Referencia: N/A", font=("Arial", 12, "bold")
             sombra_frame,
             text="Promedio Gris Referencia: N/A",
-            font=("Arial", 12, "bold"),
+            font=("Arial", 9, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
@@ -593,7 +605,7 @@ class App:
             #sombra_frame, text="Porcentaje de sombra: N/A", font=("Arial", 12, "bold")
             sombra_frame,
             text="Porcentaje de sombra: N/A",
-            font=("Arial", 12, "bold"),
+            font=("Arial", 9, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
@@ -608,7 +620,7 @@ class App:
         self.lbl_tmrt_sol = tk.Label(
             temp_frame,
             text="Tmrt al sol: N/A",
-            font=("Arial", 12, "bold"),
+            font=("Arial", 9, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
@@ -617,7 +629,7 @@ class App:
         self.lbl_tmrt_sombra = tk.Label(
             temp_frame,
             text="Tmrt en sombra: N/A",
-            font=("Arial", 12, "bold"),
+            font=("Arial", 9, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
@@ -626,7 +638,7 @@ class App:
         self.lbl_delta_tmrt = tk.Label(
             temp_frame,
             text="ΔTmrt (impacto sombra): N/A",
-            font=("Arial", 12, "bold"),
+            font=("Arial", 9, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
@@ -648,6 +660,7 @@ class App:
         #nivel_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
         nivel_frame = self.create_card(frame)
         nivel_frame.pack(expand=True, fill='both', pady=5)
+        self.curva_frame = nivel_frame
 
         self.fig2, self.ax2 = plt.subplots()
         self.canvas2 = FigureCanvasTkAgg(self.fig2, master=nivel_frame)
@@ -662,7 +675,16 @@ class App:
             self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
             self.canvas1.draw()
             self.shape_selector.enable_calculo_button()
-            
+            if self.mouse_hover_pixel_value is None:
+                self.mouse_hover_pixel_value = MouseHoverPixelValueWithTooltip(
+                    self,
+                    self.canvas1,
+                    self.canvas2,
+                    self.img_rgb,
+                    self.shape_selector.area_seleccionada,
+                )
+            else:
+                self.mouse_hover_pixel_value.img_rgb = self.img_rgb
     def calculate_temperature_in_shade(self):
         try:
             if self.porcentaje_sombra is None:
@@ -718,16 +740,38 @@ class App:
             area_volteada = np.flipud(self.shape_selector.area_seleccionada)
             #area_rotada = np.rot90(self.shape_selector.area_seleccionada, k=0)  # k=-1 para rotar 90 grados a la derecha
         
-            # Crear las curvas de nivel en el segundo área de dibujo
-            self.ax2.clear()
-            self.ax2.contour(area_volteada, levels=100, cmap='jet', linewidths=1.5, alpha=0.8)  # Usar mapa de colores 'jet'
+
+            # Crear las curvas de nivel en una figura local
+            fig, ax = plt.subplots()
+            ax.contour(area_volteada, levels=100, cmap='jet', linewidths=1.5, alpha=0.8)
+            fig.tight_layout(pad=0)
+
+            buf = BytesIO()
+            fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", pad_inches=0)
+            buf.seek(0)
+            plt.close(fig)
+
+            img = Image.open(buf)
+            if self.curva_frame is not None:
+                self.curva_frame.update_idletasks()
+                frame_width = self.curva_frame.winfo_width() or 600 
+                frame_height = self.curva_frame.winfo_height() or 400
+                img.thumbnail((frame_width, frame_height), Image.LANCZOS)
+
+            photo = ImageTk.PhotoImage(img)
+            if self.curva_label is None:
+                self.curva_label = tk.Label(self.curva_frame, image=photo, bg=self.curva_frame.cget("bg"))
+                self.curva_label.pack(expand=True, fill='both')
+            else:
+                self.curva_label.configure(image=photo)
+            self.curva_photo = photo
+
+            if self.canvas2 is not None:
+                self.canvas2.get_tk_widget().pack_forget()
+
             self.tmrt_map = area_volteada
-            self._setup_hover_tmrt_map(self.ax2, self.canvas2, area_volteada)
-            self.canvas2.draw()
             self.curvas_nivel_creadas = True
-        if self.shape_selector.area_seleccionada is not None:
-            self.tmrt_map = np.flipud(self.shape_selector.area_seleccionada)
-            self._setup_hover_tmrt_map(self.ax2, self.canvas2, self.tmrt_map)
+
     def exportar_a_pdf(self):
         pdf_generator = PDFReportGenerator(self)
         pdf_generator.generate_report()    
