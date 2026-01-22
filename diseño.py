@@ -108,11 +108,11 @@ def crear_area_grafico(vars,frame,app):
 def establecer_modo(modos, app):
     app.modo = modos
     elemento_temporal = None
-def actualizar_fecha(var, fecha_str):
+def actualizar_fecha(var,frame, fecha_str): #ojo con el frame
     try:
         fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
         var.set(fecha.timetuple().tm_yday)
-        actualizar_grafico(vars,frame)
+        actualizar_grafico(vars, frame)
     except ValueError:
         messagebox.showerror("Error", "Formato de fecha inválido. Use AAAA-MM-DD")
 def manejar_click(event, app):
@@ -303,12 +303,13 @@ def actualizar_grafico(vars, frame):
     X, Y = np.meshgrid(x, y)
     
     # Cálculos principales
-    theta_sol =  angulo_solar(vars)
-    I_sol =  vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
+    theta_sol = angulo_solar(vars)
+    azimut_sol = azimut_solar(vars, theta_sol)
+    I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
     
     # Cálculo de sombras
-    sombra_arboles =  calcular_sombra_arboles(vars,X, Y, theta_sol)
-    sombra_estruct =  calcular_sombra_estructuras(vars,X, Y, theta_sol)
+    sombra_arboles = calcular_sombra_arboles(vars, X, Y, theta_sol, azimut_sol)
+    sombra_estruct = calcular_sombra_estructuras(vars, X, Y, theta_sol, azimut_sol)
     sombra_total = np.clip(sombra_arboles * (1 - sombra_estruct), 0, 1)
     
     # Configuración de materiales
@@ -324,14 +325,13 @@ def actualizar_grafico(vars, frame):
             epsilon[mask] = mat.epsilon
     
     # Balance energético
-    T_amb =  temperatura_ambiente(vars)
+    T_amb = temperatura_ambiente(vars)
     q_solar = alpha * I_sol * sombra_total
-    q_emitido = epsilon * sigma * (T_amb**4 -  vars["T_amb_base"].get()**4)
-    h_c =  coeficiente_conveccion(vars)
-    q_conveccion = h_c * (T_amb -  vars["T_amb_base"].get())
+    h_c = coeficiente_conveccion(vars)
+    h_r = 4 * epsilon * sigma * (T_amb**3)
     
-    # Cálculo final de temperatura
-    T =  vars["T_amb_base"].get() + (q_solar - q_emitido - q_conveccion) / (h_c + epsilon * sigma)
+    # Cálculo final de temperatura (balance estacionario linealizado)
+    T = T_amb + q_solar / (h_c + h_r)
     
     # Configuración de niveles para el contorno
     nivel_min = np.nanmin(T)
@@ -417,31 +417,53 @@ def actualizar_grafico(vars, frame):
     vars["Y"] = Y
     vars["T"] = T
 def angulo_solar(vars):
-    delta = np.radians(23.45 * np.sin(np.radians((360/365)*( vars["dia"].get()-81))))
-    phi = np.radians( vars["lat"].get())
-    h = np.radians(15*( vars["hora"].get()-12) + ( vars["lon"].get()/15))
+    delta = np.radians(23.45 * np.sin(np.radians((360/365)*(vars["dia"].get()-81))))
+    phi = np.radians(vars["lat"].get())
+    h = np.radians(15*(vars["hora"].get()-12) + (vars["lon"].get()/15))
     return np.arcsin(np.sin(phi)*np.sin(delta) + np.cos(phi)*np.cos(delta)*np.cos(h))
+def azimut_solar(vars, theta_sol):
+    delta = np.radians(23.45 * np.sin(np.radians((360/365)*(vars["dia"].get()-81))))
+    phi = np.radians(vars["lat"].get())
+    h = np.radians(15*(vars["hora"].get()-12) + (vars["lon"].get()/15))
+    cos_theta = np.cos(theta_sol)
+    if cos_theta == 0:
+        return 0.0
+    sin_az = -np.sin(h) * np.cos(delta) / cos_theta
+    cos_az = (np.sin(delta) - np.sin(theta_sol) * np.sin(phi)) / (cos_theta * np.cos(phi))
+    return np.arctan2(sin_az, cos_az)
 def temperatura_ambiente(vars):
     return  vars["T_min"].get() + ( vars["T_max"].get() -  vars["T_min"].get()) * np.sin(np.pi* vars["hora"].get()/24)
 def coeficiente_conveccion(vars):
     return {"nulo":5, "moderado":15, "fuerte":25}.get( vars["viento"].get(), 10)
-def calcular_sombra_arboles(  vars,X, Y, theta_sol):
+def calcular_sombra_arboles(vars, X, Y, theta_sol, azimut_sol):
     sombra = np.ones_like(X)
-    for arbol in  vars['arboles']:
-        if theta_sol <= 0:
-            continue
-        radio_sombra = arbol.radio_copa / np.tan(theta_sol)
-        distancia = np.sqrt((X - arbol.x)**2 + (Y - arbol.y)**2)
-        sombra[distancia < radio_sombra] *= (1 - arbol.rho_copa)
+    if theta_sol <= 0:
+        return sombra
+    tan_theta = np.tan(max(theta_sol, np.radians(2)))
+    for arbol in vars['arboles']:
+        longitud_sombra = arbol.h / tan_theta
+        dx = -longitud_sombra * np.sin(azimut_sol)
+        dy = -longitud_sombra * np.cos(azimut_sol)
+        cx = arbol.x + dx
+        cy = arbol.y + dy
+        distancia = np.sqrt((X - cx)**2 + (Y - cy)**2)
+        sombra[distancia < arbol.radio_copa] *= (1 - arbol.rho_copa)
     return sombra
-def calcular_sombra_estructuras(vars,X, Y, theta_sol):
+def calcular_sombra_estructuras(vars, X, Y, theta_sol, azimut_sol):
     sombra_total = np.zeros_like(X)
+    if theta_sol <= 0:
+        return sombra_total
+    tan_theta = np.tan(max(theta_sol, np.radians(2)))
     for estructura in  vars['estructuras']:
         if estructura.tipo == 'Pared' and theta_sol > 0:
-            longitud_sombra = estructura.altura / np.tan(theta_sol)
-            x_sombra = estructura.x1 - longitud_sombra if np.cos(theta_sol) > 0 else estructura.x1 + longitud_sombra
-            y_sombra = estructura.y1 - longitud_sombra if np.sin(theta_sol) > 0 else estructura.y1 + longitud_sombra
-            mask = (X >= min(estructura.x1, x_sombra)) & (X <= max(estructura.x1, x_sombra)) & (Y >= min(estructura.y1, y_sombra)) & (Y <= max(estructura.y1, y_sombra))
+            longitud_sombra = estructura.altura / tan_theta
+            dx = -longitud_sombra * np.sin(azimut_sol)
+            dy = -longitud_sombra * np.cos(azimut_sol)
+            x_min = min(estructura.x1, estructura.x2, estructura.x1 + dx, estructura.x2 + dx)
+            x_max = max(estructura.x1, estructura.x2, estructura.x1 + dx, estructura.x2 + dx)
+            y_min = min(estructura.y1, estructura.y2, estructura.y1 + dy, estructura.y2 + dy)
+            y_max = max(estructura.y1, estructura.y2, estructura.y1 + dy, estructura.y2 + dy)
+            mask = (X >= x_min) & (X <= x_max) & (Y >= y_min) & (Y <= y_max)
             sombra_total[mask] += float(estructura.opacidad)
         elif estructura.tipo == 'Galeria':
             mask = (X >= estructura.x1) & (X <= estructura.x2) & (Y >= estructura.y1) & (Y <= estructura.y2)

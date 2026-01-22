@@ -104,6 +104,70 @@ class App:
             highlightbackground=self.palette["border"],
             highlightthickness=1,
         )
+        self.frame7 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame8 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame9 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame10 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame11 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame12 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame13 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
+        self.frame14 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=100,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
 
         # Ubicar frames
         self.frame0.grid(row=0, column=0, columnspan=3, sticky="nsew")
@@ -113,7 +177,23 @@ class App:
         self.frame4.grid(row=2, column=1, sticky="nsew")
         self.frame5.grid(row=2, column=2, sticky="nsew")
         self.frame6.grid(row=3, column=1, columnspan=2, sticky="nsew")
-
+        self.frame7.grid(row=1, column=1, sticky="nsew")
+        self.frame8.grid(row=1, column=2, sticky="nsew")
+        self.frame9.grid(row=2, column=1, sticky="nsew")
+        self.frame10.grid(row=2, column=2, sticky="nsew")
+        self.frame11.grid(row=1, column=1, sticky="nsew")
+        self.frame12.grid(row=1, column=2, sticky="nsew")
+        self.frame13.grid(row=2, column=1, sticky="nsew")
+        self.frame14.grid(row=2, column=2, sticky="nsew")
+        self.frame7.grid_remove()
+        self.frame8.grid_remove()
+        self.frame9.grid_remove()
+        self.frame10.grid_remove()
+        self.frame11.grid_remove()
+        self.frame12.grid_remove()
+        self.frame13.grid_remove()
+        self.frame14.grid_remove()
+        
         # Configurar pesos de las filas y columnas
         root.grid_rowconfigure(0, weight=0)
         root.grid_rowconfigure(1, weight=1)
@@ -147,6 +227,7 @@ class App:
         self.curva_frame = None
         self.curva_label = None
         self.curva_photo = None
+        self.curva_img_pil_original = None
         #self.frame1 = frame1
         self.panel_width =  min(int(self.frame1.winfo_screenwidth() / 6), self.frame1.winfo_width())
 
@@ -383,9 +464,8 @@ class App:
         abrir.grid(row=4, column=0,sticky="w",padx=120, pady=10)
 
         # Botone para Generar Gráfico 
-        grafico = tk.Button(panel, text="Generar gráfico",command=lambda: self.actualizar_grafico_diseno(), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        grafico.grid(row=5, column=0,sticky="w",padx=10, pady=8)        
-        
+        grafico = tk.Button(panel, text="Generar gráfico",command=lambda: self.actualizar_grafico_diseno(self.frame7), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))        
+        grafico.grid(row=5, column=0,sticky="w",padx=10, pady=8)   
         # Botone para Vista 3D 
         vista_3d = tk.Button(panel, text="Vista 3D", command=lambda:design.generar_3d(self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
         vista_3d.grid(row=5, column=0,sticky="w",padx=120, pady=8)     
@@ -417,7 +497,7 @@ class App:
         add_arbol.grid(row=1, column=0,sticky="w",padx=10, pady=5)
 
         # Botone para generar grafico
-        add_estructura = tk.Button(panel, text="Generar Gráfico",command=lambda:modelo.generar_grafico(self.vars, self.frame2), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        add_estructura = tk.Button(panel, text="Generar Gráfico",command=lambda:modelo.generar_grafico(self.vars, self.frame11), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
         add_estructura.grid(row=4, column=0,sticky="w",padx=20, pady=3)
 
         # Botone para añadir arbol 
@@ -479,6 +559,12 @@ class App:
         self.active_panel = index
         self.is_animating = True
         self.animate_panel_open(index, 0)
+        if index == 1:
+            self.show_panel2_frames()
+        elif index == 2:
+            self.show_diseno_frames()
+        elif index == 3:
+            self.show_modelo_frames()
         self.switch_buttons_to_horizontal()
         self.highlight_button(index)
     def animate_panel_open(self, index, current_width):
@@ -504,6 +590,26 @@ class App:
         else:
             self.panel_frames[index].place_forget()
             self.is_animating = False
+    def _toggle_frames(self, frames_to_show, frames_to_hide):
+        for frame in frames_to_hide:
+            frame.grid_remove()
+        for frame in frames_to_show:
+            frame.grid()
+    def show_panel2_frames(self):
+        self._toggle_frames(
+            [self.frame2, self.frame3, self.frame4, self.frame5],
+            [self.frame7, self.frame8, self.frame9, self.frame10, self.frame11, self.frame12, self.frame13, self.frame14],
+        )
+    def show_diseno_frames(self):
+        self._toggle_frames(
+            [self.frame7, self.frame8, self.frame9, self.frame10],
+            [self.frame2, self.frame3, self.frame4, self.frame5, self.frame11, self.frame12, self.frame13, self.frame14],
+        )
+    def show_modelo_frames(self):
+        self._toggle_frames(
+            [self.frame11, self.frame12, self.frame13, self.frame14],
+            [self.frame2, self.frame3, self.frame4, self.frame5, self.frame7, self.frame8, self.frame9, self.frame10],
+        )
     def highlight_button(self, index):
         for i, button in enumerate(self.buttons):
             button.config(bg="gray80" if i == index else self.frame1.cget("bg"))
@@ -804,14 +910,23 @@ class App:
             dia_var.set(dia_del_año)
         except ValueError:
             messagebox.showerror("Error", "Formato de fecha inválido. Use AAAA-MM-DD")
-    def actualizar_grafico_diseno(self):
-        # Limpiar frame2 antes de crear nuevo gráfico
-        for widget in self.frame2.winfo_children():
+    def render_grafico_en_frame(self, target_frame, grafico_fn, *args):
+        for widget in target_frame.winfo_children():
             widget.destroy()
         
         
         # Crear nuevo gráfico en frame2 y capturar el canvas
-        fig, ax, self.canvas_diseno = design.crear_area_grafico(self.vars, self.frame2,self)
+        return grafico_fn(*args, target_frame)
+    def actualizar_grafico_diseno(self, target_frame=None):
+        if target_frame is None:
+            target_frame = self.frame2
+
+        # Crear nuevo gráfico en el frame destino y capturar el canvas
+        fig, ax, self.canvas_diseno = self.render_grafico_en_frame(
+            target_frame,
+            lambda vars, frame: design.crear_area_grafico(vars, frame, self),
+            self.vars,
+        )
     
         # Vincular eventos usando la instancia actual (self)
         self.canvas_diseno.mpl_connect('button_press_event', lambda event: design.manejar_click(event, self))

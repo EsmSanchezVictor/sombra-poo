@@ -86,28 +86,48 @@ def angulo_solar(latitud, longitud, dia_del_año, hora_local):
     h = np.radians(15 * (hora_local - 12) + (longitud / 15))
     sin_theta = np.sin(phi) * np.sin(delta) + np.cos(phi) * np.cos(delta) * np.cos(h)
     return np.arcsin(sin_theta)
+def azimut_solar(latitud, longitud, dia_del_año, hora_local, theta_sol):
+    delta = np.radians(declinacion_solar(dia_del_año))
+    phi = np.radians(latitud)
+    h = np.radians(15 * (hora_local - 12) + (longitud / 15))
+    cos_theta = np.cos(theta_sol)
+    if cos_theta == 0:
+        return 0.0
+    sin_az = -np.sin(h) * np.cos(delta) / cos_theta
+    cos_az = (np.sin(delta) - np.sin(theta_sol) * np.sin(phi)) / (cos_theta * np.cos(phi))
+    return np.arctan2(sin_az, cos_az)
 def temperatura_ambiente(hora_local, T_min, T_max):
     return T_min + (T_max - T_min) * np.sin(np.pi * hora_local / 24)
-def calcular_sombra_arboles(X, Y, arboles, theta_sol):
+def calcular_sombra_arboles(X, Y, arboles, theta_sol, azimut_sol):
     sombra = np.ones_like(X)
+    if theta_sol <= 0:
+        return sombra
+    tan_theta = np.tan(max(theta_sol, np.radians(2)))
     for arbol in arboles:
-        if theta_sol <= 0:
-            continue
-        radio_sombra = arbol.radio_copa / np.tan(theta_sol)
-        distancia = np.sqrt((X - arbol.x)**2 + (Y - arbol.y)**2)
-        sombra[distancia < radio_sombra] *= (1 - arbol.rho_copa)
+        longitud_sombra = arbol.h / tan_theta
+        dx = -longitud_sombra * np.sin(azimut_sol)
+        dy = -longitud_sombra * np.cos(azimut_sol)
+        cx = arbol.x + dx
+        cy = arbol.y + dy
+        distancia = np.sqrt((X - cx)**2 + (Y - cy)**2)
+        sombra[distancia < arbol.radio_copa] *= (1 - arbol.rho_copa)
     return sombra
-def sombra_estructuras(X, Y, estructuras, theta_sol):
+def sombra_estructuras(X, Y, estructuras, theta_sol, azimut_sol):
     
     sombra_total = np.zeros_like(X)
+    if theta_sol <= 0:
+        return sombra_total
+    tan_theta = np.tan(max(theta_sol, np.radians(2)))
     for estructura in estructuras:
         if estructura.tipo == 'Pared' and theta_sol > 0:
-            longitud_sombra = estructura.altura / np.tan(theta_sol)
-            x_sombra = estructura.x1 - longitud_sombra if np.cos(theta_sol) > 0 else estructura.x1 + longitud_sombra
-            y_sombra = estructura.y1 - longitud_sombra if np.sin(theta_sol) > 0 else estructura.y1 + longitud_sombra
-            mask = (X >= min(estructura.x1, x_sombra)) & (X <= max(estructura.x1, x_sombra)) & \
-                   (Y >= min(estructura.y1, y_sombra)) & (Y <= max(estructura.y1, y_sombra))
-
+            longitud_sombra = estructura.altura / tan_theta
+            dx = -longitud_sombra * np.sin(azimut_sol)
+            dy = -longitud_sombra * np.cos(azimut_sol)
+            x_min = min(estructura.x1, estructura.x2, estructura.x1 + dx, estructura.x2 + dx)
+            x_max = max(estructura.x1, estructura.x2, estructura.x1 + dx, estructura.x2 + dx)
+            y_min = min(estructura.y1, estructura.y2, estructura.y1 + dy, estructura.y2 + dy)
+            y_max = max(estructura.y1, estructura.y2, estructura.y1 + dy, estructura.y2 + dy)
+            mask = (X >= x_min) & (X <= x_max) & (Y >= y_min) & (Y <= y_max)
             sombra_total[mask] += float(estructura.opacidad)
         elif estructura.tipo == 'Galeria':
             mask = (X >= estructura.x1) & (X <= estructura.x2) & \
@@ -177,11 +197,12 @@ def generar_grafico(vars, frame):
     
     # Cálculos principales
     theta_sol = angulo_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get())
+    azimut_sol = azimut_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), theta_sol)
     I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
     
     # Cálculo de sombras
-    sombra_arboles = calcular_sombra_arboles(X, Y, vars.get('arboles', []), theta_sol)
-    sombra_estruct = sombra_estructuras(X, Y, vars.get('estructuras', []), theta_sol)
+    sombra_arboles = calcular_sombra_arboles(X, Y, vars.get('arboles', []), theta_sol, azimut_sol)
+    sombra_estruct = sombra_estructuras(X, Y, vars.get('estructuras', []), theta_sol, azimut_sol)
     sombra_total = np.clip(sombra_arboles * (1 - sombra_estruct), 0, 1)
     print("Sombra estructuras min/max:", np.min(sombra_estruct), np.max(sombra_estruct))
     # Configuración de materiales
@@ -199,12 +220,11 @@ def generar_grafico(vars, frame):
     # Balance energético
     T_amb = temperatura_ambiente(vars["hora"].get(), vars["T_min"].get(), vars["T_max"].get())
     q_solar = alpha * I_sol * sombra_total
-    q_emitido = epsilon * sigma * (T_amb**4 - vars["T_amb_base"].get()**4)
     h_c = calcular_coeficiente_conveccion(vars["viento"].get())
-    q_conveccion = h_c * (T_amb - vars["T_amb_base"].get())
+    h_r = 4 * epsilon * sigma * (T_amb**3)
     
-    # Cálculo final de temperatura
-    T = vars["T_amb_base"].get() + (q_solar - q_emitido - q_conveccion) / (h_c + epsilon * sigma)
+    # Cálculo final de temperatura (balance estacionario linealizado)
+    T = T_amb + q_solar / (h_c + h_r)
     
     # Guardar datos para 3D
     vars["X"] = X
@@ -268,8 +288,8 @@ def generar_grafico(vars, frame):
     info_text = (
         f"Aportes energéticos:\n"
         f"Radiación solar: {q_solar.mean():.1f} W/m²\n"
-        f"Convección: {q_conveccion:.1f} W/m²\n"
-        f"Emisión térmica: {q_emitido.mean():.1f} W/m²"
+        f"Coef. convección: {h_c:.1f} W/m²K\n"
+        f"Coef. radiativo: {h_r.mean():.1f} W/m²K"
     )
     ax.text(0.05, 0.95, info_text, transform=ax.transAxes, 
             bbox=dict(facecolor='white', alpha=0.8), verticalalignment='top')   
@@ -375,4 +395,3 @@ def cargar_preset(config, vars):
     }
     for k, v in presets[config].items():
         vars[k].set(v)
-
