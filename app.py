@@ -661,6 +661,7 @@ class App:
         nivel_frame = self.create_card(frame)
         nivel_frame.pack(expand=True, fill='both', pady=5)
         self.curva_frame = nivel_frame
+        self.curva_frame.bind("<Configure>", self._on_curva_frame_resize)
 
         self.fig2, self.ax2 = plt.subplots()
         self.canvas2 = FigureCanvasTkAgg(self.fig2, master=nivel_frame)
@@ -751,14 +752,11 @@ class App:
             buf.seek(0)
             plt.close(fig)
 
-            img = Image.open(buf)
-            if self.curva_frame is not None:
-                self.curva_frame.update_idletasks()
-                frame_width = self.curva_frame.winfo_width() or 600 
-                frame_height = self.curva_frame.winfo_height() or 400
-                img.thumbnail((frame_width, frame_height), Image.LANCZOS)
-
-            photo = ImageTk.PhotoImage(img)
+            img = Image.open(buf).copy()
+            buf.close()
+            self.curva_img_pil_original = img
+            resized_img = self._fit_image_to_frame(self.curva_img_pil_original, self.curva_frame)
+            photo = ImageTk.PhotoImage(resized_img)
             if self.curva_label is None:
                 self.curva_label = tk.Label(self.curva_frame, image=photo, bg=self.curva_frame.cget("bg"))
                 self.curva_label.pack(expand=True, fill='both')
@@ -771,6 +769,29 @@ class App:
 
             self.tmrt_map = area_volteada
             self.curvas_nivel_creadas = True
+    def _fit_image_to_frame(self, pil_img, frame, padding=8):
+        if frame is None:
+            return pil_img
+        frame.update_idletasks()
+        frame_width = frame.winfo_width()-15        
+        frame_height = frame.winfo_height()-15
+        if frame_width <= 1 or frame_height <= 1:
+            frame_width, frame_height = 600, 350
+        frame_width = max(1, frame_width - padding * 2)
+        frame_height = max(1, frame_height - padding * 2)
+        img_width, img_height = pil_img.size
+        scale = min(frame_width / img_width, frame_height / img_height)
+        new_width = max(1, int(img_width * scale))
+        new_height = max(1, int(img_height * scale))
+        return pil_img.resize((new_width, new_height), Image.LANCZOS)
+
+    def _on_curva_frame_resize(self, event):
+        if self.curva_img_pil_original is None or self.curva_label is None:
+            return
+        resized_img = self._fit_image_to_frame(self.curva_img_pil_original, event.widget)
+        self.curva_photo = ImageTk.PhotoImage(resized_img)
+        self.curva_label.config(image=self.curva_photo)
+
 
     def exportar_a_pdf(self):
         pdf_generator = PDFReportGenerator(self)
