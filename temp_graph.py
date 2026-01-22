@@ -18,7 +18,7 @@ class TemperatureGraph:
         fig = plt.figure(figsize=(6, 1))  # Ajustar tamaño de la figura
         
         ax_colorbar = fig.add_axes([0.2, 0.5, 0.6, 0.15])  # Añadir un área para la barra de color
-        fig.suptitle("Escala de temperatura", fontsize=12, y=1.08)
+        fig.suptitle("Escala de temperatura", fontsize=9, y=1.08)
         # Crear una barra de color usando 'jet' con un mapa de colores adecuado
         norm = plt.Normalize(self.temp_shade, self.temp_ambient)
         color_bar = cm.ScalarMappable(cmap="jet", norm=norm)
