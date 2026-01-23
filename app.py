@@ -1,5 +1,7 @@
 from datetime import datetime
 from io import BytesIO
+import csv
+import os
 import tkinter as tk
 from tkinter import ttk
 import numpy as np
@@ -273,6 +275,7 @@ class App:
 
         # Inicializar variable
         self.setup_variables()
+        self.locations_data = self._load_locations_csv()
         # Calculadora Tmrt (se instancia cuando se calcula)
         self.temp_calculator = None
         # Otros atributos que tengas...
@@ -315,7 +318,19 @@ class App:
         self.area_referencia_done = False
         self.entries =[]
         self.modo = None
-        self.vars = {
+        self.vars = self._build_vars()
+        self.vars_modelo = self._build_vars()
+        # Controles de parámetros
+        self.controles = self._build_controles(self.vars)
+        self.controles_modelo = self._build_controles(self.vars_modelo)
+        self.simple_mode_var = tk.BooleanVar(value=True)
+        self.simple_country_var = tk.StringVar()
+        self.simple_city_var = tk.StringVar()
+        self.simple_cloudiness_var = tk.StringVar(value="Despejado")
+        self.simple_temp_c_var = tk.StringVar(value="25")
+        
+    def _build_vars(self):
+        return {
             "T_amb_base": tk.DoubleVar(value=295),
             "I_sol_base": tk.DoubleVar(value=1000),
             "T_min": tk.DoubleVar(value=290),
@@ -329,20 +344,54 @@ class App:
             "arboles": [],
             "estructuras": [],
             "_update_required": True,
-            "_app_instance":self
+            "_app_instance":self,
         }
         # Controles de parámetros
-        self.controles = [
-            ("Fecha (AAAA-MM-DD)", self.vars["dia"], 1, None, True),  # es_fecha=True
-            ("Latitud (°)", self.vars["lat"], 2, [-90, 90], False),
-            ("Longitud (°)", self.vars["lon"], 3, [-180, 180], False),
-            ("Hora Local", self.vars["hora"], 4, [0, 24], False),
-            ("Humedad (%)", self.vars["humedad"], 5, [0, 100], False),
-            ("Temp. Base (K)", self.vars["T_amb_base"], 6, [250, 350], False),
-            ("Radiación (W/m²)", self.vars["I_sol_base"], 7, [0, 1500], False),
-            ("Temp. Mín (K)", self.vars["T_min"], 8, [250, 350], False),
-            ("Temp. Máx (K)", self.vars["T_max"], 9, [250, 350], False)
+        
+    def _build_controles(self, vars_dict):
+        return [
+            ("Fecha (AAAA-MM-DD)", vars_dict["dia"], 1, None, True),  # es_fecha=True
+            ("Latitud (°)", vars_dict["lat"], 2, [-90, 90], False),
+            ("Longitud (°)", vars_dict["lon"], 3, [-180, 180], False),
+            ("Hora Local", vars_dict["hora"], 4, [0, 24], False),
+            ("Humedad (%)", vars_dict["humedad"], 5, [0, 100], False),
+            ("Temp. Base (K)", vars_dict["T_amb_base"], 6, [250, 350], False),
+            ("Radiación (W/m²)", vars_dict["I_sol_base"], 7, [0, 1500], False),
+            ("Temp. Mín (K)", vars_dict["T_min"], 8, [250, 350], False),
+            ("Temp. Máx (K)", vars_dict["T_max"], 9, [250, 350], False),
         ]
+    def _load_locations_csv(self):
+        data_path = os.path.join("data", "locations_ar.csv")
+        if not os.path.exists(data_path):
+            return {"error": "No se encontró data/locations_ar.csv"}
+        countries = []
+        cities_by_country = {}
+        city_lookup = {}
+        with open(data_path, newline="", encoding="utf-8") as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                country = row.get("country", "").strip()
+                city = row.get("city", "").strip()
+                if not country or not city:
+                    continue
+                countries.append(country)
+                cities_by_country.setdefault(country, []).append(city)
+                key = (country, city)
+                city_lookup[key] = {
+                    "lat": float(row.get("lat", 0)),
+                    "lon": float(row.get("lon", 0)),
+                    "tz": row.get("tz", "").strip(),
+                    "province": row.get("province", "").strip(),
+                    "kind": row.get("kind", "").strip(),
+                }
+        unique_countries = sorted(set(countries))
+        for country in unique_countries:
+            cities_by_country[country] = sorted(set(cities_by_country.get(country, [])))
+        return {
+            "countries": unique_countries,
+            "cities_by_country": cities_by_country,
+            "city_lookup": city_lookup,
+        }
     def setup_panel_1(self):
         """Configura el contenido del Panel 1"""
         panel = self.panel_frames[0]
@@ -493,21 +542,21 @@ class App:
         
                 
         # Botone para cargar excel
-        add_arbol = tk.Button(panel, text="Cargar Excel",command=lambda:modelo.cargar_excel(self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        add_arbol = tk.Button(panel, text="Cargar Excel",command=lambda:modelo.cargar_excel(self.vars_modelo), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
         add_arbol.grid(row=1, column=0,sticky="w",padx=10, pady=5)
 
         # Botone para generar grafico
-        add_estructura = tk.Button(panel, text="Generar Gráfico",command=lambda:modelo.generar_grafico(self.vars, self.frame11), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        add_estructura = tk.Button(panel, text="Generar Gráfico",command=lambda:modelo.generar_grafico(self.vars_modelo, self.frame11), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
         add_estructura.grid(row=4, column=0,sticky="w",padx=20, pady=3)
 
         # Botone para añadir arbol 
-        seleccionar = tk.Button(panel, text="Vista 3D",command=lambda:modelo.generar_3d(self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        seleccionar = tk.Button(panel, text="Vista 3D",command=lambda:modelo.generar_3d(self.vars_modelo), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
         seleccionar.grid(row=4, column=0,sticky="w",padx=130, pady=3)        
         
         Label_preconf=tk.Label(panel, text="Configuraciones rápidas")
         Label_preconf.grid(row=5, column=0,sticky="w",padx=10, pady=6) 
         # Botone guardar como
-        add_arbol = tk.Button(panel, text="Invierno", command=lambda: modelo.cargar_preset("invierno", self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
+        seleccionar = tk.Button(panel, text="Soleado", command=lambda: modelo.cargar_preset("soleado", self.vars_modelo), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
         add_arbol.grid(row=6, column=0,sticky="w",padx=30, pady=3)
 
         # Botone abrir
@@ -525,14 +574,14 @@ class App:
         # Selector de viento
         Label_viento=tk.Label(panel, text="Viento")
         Label_viento.grid(row=3, column=0,sticky="w",padx=10, pady=3) 
-        lista_viento=ttk.Combobox(panel, textvariable=self.vars["viento"],values=["nulo", "moderado", "fuerte"])
+        lista_viento=ttk.Combobox(panel, textvariable=self.vars_modelo["viento"],values=["nulo", "moderado", "fuerte"])
         lista_viento.grid(row=3, column=0,sticky="w",padx=60, pady=3) 
         
         panelin = tk.Frame(self.panel_frames[3])
         panelin.grid(row=2, column=0, sticky="nsew", padx=0, pady=10) 
-        for texto, var, fila, rango, es_fecha in self.controles:
+        for texto, var, fila, rango, es_fecha in self.controles_modelo:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
-    
+        self.vars_modelo["graph_frame"] = self.frame11
     def crear_control(self, panel, texto, var, fila, rango=None, es_fecha=False):
         tk.Label(panel, text=texto, anchor="w",font=("Arial", 8),width=20).grid(row=fila, column=0, sticky="ew", padx=0, pady=10)
         if es_fecha:
@@ -869,7 +918,7 @@ class App:
             else:
                 self.curva_label.configure(image=photo)
             self.curva_photo = photo
-
+            self.curva_label.image = photo
             if self.canvas2 is not None:
                 self.canvas2.get_tk_widget().pack_forget()
 
@@ -897,7 +946,7 @@ class App:
         resized_img = self._fit_image_to_frame(self.curva_img_pil_original, event.widget)
         self.curva_photo = ImageTk.PhotoImage(resized_img)
         self.curva_label.config(image=self.curva_photo)
-
+        self.curva_label.image = self.curva_photo
 
     def exportar_a_pdf(self):
         pdf_generator = PDFReportGenerator(self)

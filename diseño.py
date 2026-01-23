@@ -161,7 +161,9 @@ def mostrar_dialogo_arbol(x, y,app):
                 radio_copa=float(entries['Radio Copa (m):'].get())
             )
             app.vars['arboles'].append(nuevo_arbol)
-            actualizar_grafico(app.vars, app.frame2)
+            #actualizar_grafico(app.vars, app.frame2)
+            target_frame = getattr(app, "frame7", app.frame2)
+            actualizar_grafico(app.vars, target_frame)
             dialogo.destroy()
         except ValueError:
             messagebox.showerror("Error", "Valores inválidos")
@@ -203,7 +205,9 @@ def mostrar_dialogo_estructura(x1, y1, x2, y2,app):
                 material=entries['Material:'].get()
             )
             app.vars['estructuras'].append(nueva_estructura)
-            actualizar_grafico(app.vars,app.frame2)
+            #actualizar_grafico(app.vars,app.frame2)
+            target_frame = getattr(app, "frame7", app.frame2)
+            actualizar_grafico(app.vars, target_frame)
             dialogo.destroy()
         except ValueError:
             messagebox.showerror("Error", "Valores inválidos")
@@ -274,7 +278,9 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
                 estructura.opacidad = float(entries['Opacidad:'].get())
                 estructura.material = entries['Material:'].get()
             
-            actualizar_grafico(vars, app.frame2)
+            #actualizar_grafico(vars, app.frame2)
+            target_frame = getattr(app, "frame7", app.frame2)
+            actualizar_grafico(vars, target_frame)
             dialogo.destroy()
         except ValueError:
             messagebox.showerror("Error", "Valores inválidos")
@@ -285,7 +291,9 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
                 vars['arboles'].remove(obj)
             else:
                 vars['estructuras'].remove(obj)
-            actualizar_grafico(vars, app.frame2)
+            #actualizar_grafico(vars, app.frame2)
+            target_frame = getattr(app, "frame7", app.frame2)
+            actualizar_grafico(vars, target_frame)
             dialogo.destroy()
     
     ttk.Button(dialogo, text="Guardar", command=guardar).grid(row=len(campos)+1, column=0)
@@ -568,7 +576,9 @@ def abrir_archivo(vars, app):
                 vars['estructuras'].append(estructura)
             
             archivo_actual = filepath
-            actualizar_grafico(vars,app.frame2)
+            #actualizar_grafico(vars,app.frame2)
+            target_frame = getattr(app, "frame7", app.frame2)
+            actualizar_grafico(vars, target_frame)
             messagebox.showinfo("Éxito", "Archivo cargado correctamente")
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar archivo:\n{str(e)}")
