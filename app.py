@@ -275,7 +275,6 @@ class App:
 
         # Inicializar variable
         self.setup_variables()
-        self.locations_data = self._load_locations_csv()
         # Calculadora Tmrt (se instancia cuando se calcula)
         self.temp_calculator = None
         # Otros atributos que tengas...
@@ -323,12 +322,7 @@ class App:
         # Controles de parámetros
         self.controles = self._build_controles(self.vars)
         self.controles_modelo = self._build_controles(self.vars_modelo)
-        self.simple_mode_var = tk.BooleanVar(value=True)
-        self.simple_country_var = tk.StringVar()
-        self.simple_city_var = tk.StringVar()
-        self.simple_cloudiness_var = tk.StringVar(value="Despejado")
-        self.simple_temp_c_var = tk.StringVar(value="25")
-        
+
     def _build_vars(self):
         return {
             "T_amb_base": tk.DoubleVar(value=295),
@@ -360,38 +354,6 @@ class App:
             ("Temp. Mín (K)", vars_dict["T_min"], 8, [250, 350], False),
             ("Temp. Máx (K)", vars_dict["T_max"], 9, [250, 350], False),
         ]
-    def _load_locations_csv(self):
-        data_path = os.path.join("data", "locations_ar.csv")
-        if not os.path.exists(data_path):
-            return {"error": "No se encontró data/locations_ar.csv"}
-        countries = []
-        cities_by_country = {}
-        city_lookup = {}
-        with open(data_path, newline="", encoding="utf-8") as csvfile:
-            reader = csv.DictReader(csvfile)
-            for row in reader:
-                country = row.get("country", "").strip()
-                city = row.get("city", "").strip()
-                if not country or not city:
-                    continue
-                countries.append(country)
-                cities_by_country.setdefault(country, []).append(city)
-                key = (country, city)
-                city_lookup[key] = {
-                    "lat": float(row.get("lat", 0)),
-                    "lon": float(row.get("lon", 0)),
-                    "tz": row.get("tz", "").strip(),
-                    "province": row.get("province", "").strip(),
-                    "kind": row.get("kind", "").strip(),
-                }
-        unique_countries = sorted(set(countries))
-        for country in unique_countries:
-            cities_by_country[country] = sorted(set(cities_by_country.get(country, [])))
-        return {
-            "countries": unique_countries,
-            "cities_by_country": cities_by_country,
-            "city_lookup": city_lookup,
-        }
     def setup_panel_1(self):
         """Configura el contenido del Panel 1"""
         panel = self.panel_frames[0]
