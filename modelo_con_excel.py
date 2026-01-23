@@ -204,7 +204,10 @@ def generar_grafico(vars, frame):
     sombra_arboles = calcular_sombra_arboles(X, Y, vars.get('arboles', []), theta_sol, azimut_sol)
     sombra_estruct = sombra_estructuras(X, Y, vars.get('estructuras', []), theta_sol, azimut_sol)
     sombra_total = np.clip(sombra_arboles * (1 - sombra_estruct), 0, 1)
-    print("Sombra estructuras min/max:", np.min(sombra_estruct), np.max(sombra_estruct))
+    debug_flag = vars.get("debug", False)
+    debug = bool(debug_flag.get()) if hasattr(debug_flag, "get") else bool(debug_flag)
+    if debug:
+        print("Sombra estructuras min/max:", np.min(sombra_estruct), np.max(sombra_estruct))
     # Configuración de materiales
     alpha = np.full_like(X, materiales["suelo"].alpha)
     epsilon = np.full_like(X, materiales["suelo"].epsilon)
@@ -225,21 +228,38 @@ def generar_grafico(vars, frame):
     
     # Cálculo final de temperatura (balance estacionario linealizado)
     T = T_amb + q_solar / (h_c + h_r)
-    
+    finite_mask = np.isfinite(T)
+    if not np.all(finite_mask):
+        T = np.where(finite_mask, T, T_amb)
     # Guardar datos para 3D
     vars["X"] = X
     vars["Y"] = Y
     vars["T"] = T
     
     # Configuración del gráfico
-    niveles = np.linspace(np.nanmin(T), np.nanmax(T), 20)  # Ajustar rango de niveles
+    tmin = float(np.nanmin(T))
+    tmax = float(np.nanmax(T))
+    if debug:
+        print("T min/max:", tmin, tmax)
+        print("Sombra total min/max:", np.min(sombra_total), np.max(sombra_total))
+        print("Radiación efectiva min/max:", np.min(q_solar), np.max(q_solar))
+    if np.isclose(tmin, tmax):
+        delta = max(0.5, 0.01 * abs(tmin))
+        niveles = np.linspace(tmin - delta, tmax + delta, 10)
+    else:
+        niveles = np.linspace(tmin, tmax, 20)
+    niveles = np.unique(np.sort(niveles))
+    if niveles.size < 2:
+        delta = max(0.5, 0.01 * abs(tmin))
+        niveles = np.array([tmin - delta, tmax + delta])
         
     contorno = ax.contourf(X, Y, T, niveles, cmap='viridis', alpha=0.8)
     ax.contour(X, Y, T, niveles, colors='k', linewidths=0.5)  # Añadir líneas de contorno
     ax.set_title('Distribución de temperatura', fontsize=12, pad=10)
     fig.colorbar(contorno, ax=ax).set_label('Temperatura (K)', rotation=270, labelpad=20)
     ax.contour(X, Y, T, niveles, colors='black', linewidths=1.5)
-    print(f"Min T: {np.nanmin(T)}, Max T: {np.nanmax(T)}")
+    if debug:
+        print(f"Min T: {np.nanmin(T)}, Max T: {np.nanmax(T)}")
 
     # Dibujar elementos
     if 'arboles' in vars:
