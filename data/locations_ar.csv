@@ -1,0 +1,30 @@
+country,province,city,lat,lon,tz,kind
+Argentina,CABA,Buenos Aires,-34.6037,-58.3816,America/Argentina/Buenos_Aires,capital
+Argentina,Buenos Aires,La Plata,-34.9214,-57.9544,America/Argentina/Buenos_Aires,capital
+Argentina,Santa Fe,Santa Fe,-31.6333,-60.7,America/Argentina/Cordoba,capital
+Argentina,Entre Ríos,Paraná,-31.732,-60.5238,America/Argentina/Cordoba,capital
+Argentina,Córdoba,Córdoba,-31.4201,-64.1888,America/Argentina/Cordoba,capital
+Argentina,Mendoza,Mendoza,-32.8895,-68.8458,America/Argentina/Mendoza,capital
+Argentina,San Juan,San Juan,-31.5375,-68.5364,America/Argentina/San_Juan,capital
+Argentina,San Luis,San Luis,-33.295,-66.3356,America/Argentina/San_Luis,capital
+Argentina,La Rioja,La Rioja,-29.4131,-66.856,America/Argentina/La_Rioja,capital
+Argentina,Catamarca,San Fernando del Valle de Catamarca,-28.4696,-65.7852,America/Argentina/Catamarca,capital
+Argentina,Tucumán,San Miguel de Tucumán,-26.8083,-65.2176,America/Argentina/Tucuman,capital
+Argentina,Salta,Salta,-24.7821,-65.4232,America/Argentina/Salta,capital
+Argentina,Jujuy,San Salvador de Jujuy,-24.1858,-65.2995,America/Argentina/Jujuy,capital
+Argentina,Santiago del Estero,Santiago del Estero,-27.7844,-64.2673,America/Argentina/Santiago_del_Estero,capital
+Argentina,Chaco,Resistencia,-27.4514,-58.9867,America/Argentina/Cordoba,capital
+Argentina,Corrientes,Corrientes,-27.4692,-58.8306,America/Argentina/Cordoba,capital
+Argentina,Misiones,Posadas,-27.3621,-55.9009,America/Argentina/Cordoba,capital
+Argentina,Formosa,Formosa,-26.1775,-58.1781,America/Argentina/Cordoba,capital
+Argentina,Neuquén,Neuquén,-38.9516,-68.0591,America/Argentina/Neuquen,capital
+Argentina,Río Negro,Viedma,-40.8135,-62.9967,America/Argentina/Salta,capital
+Argentina,Chubut,Rawson,-43.2991,-65.1023,America/Argentina/Catamarca,capital
+Argentina,Santa Cruz,Río Gallegos,-51.623,-69.2168,America/Argentina/Rio_Gallegos,capital
+Argentina,Tierra del Fuego,Ushuaia,-54.8019,-68.303,America/Argentina/Ushuaia,capital
+Argentina,La Pampa,Santa Rosa,-36.62,-64.29,America/Argentina/Salta,capital
+Argentina,Santa Fe,Rosario,-32.9442,-60.6505,America/Argentina/Cordoba,major_city
+Argentina,Buenos Aires,Mar del Plata,-38.0055,-57.5426,America/Argentina/Buenos_Aires,major_city
+Argentina,Buenos Aires,Bahía Blanca,-38.7196,-62.2724,America/Argentina/Buenos_Aires,major_city
+Argentina,Chubut,Comodoro Rivadavia,-45.8641,-67.4966,America/Argentina/Catamarca,major_city
+Argentina,Río Negro,San Carlos de Bariloche,-41.1335,-71.3103,America/Argentina/Salta,major_city
