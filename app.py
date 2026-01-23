@@ -300,7 +300,40 @@ class App:
         self.imagen(self.frame2)
         self.curva_de_nivel(self.frame3)
         self.activar_mouse()
-        
+    
+    def load_locations_csv(self, path):
+        if not os.path.exists(path):
+            return None, f"No se encontró el archivo de ubicaciones: {path}"
+        try:
+            countries = set()
+            cities_by_country = {}
+            lookup = {}
+            with open(path, newline="", encoding="utf-8") as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    country = row.get("country", "").strip()
+                    city = row.get("city", "").strip()
+                    province = row.get("province", "").strip()
+                    if not country or not city:
+                        continue
+                    label = f"{city} ({province})" if province else city
+                    countries.add(country)
+                    cities_by_country.setdefault(country, []).append(label)
+                    lookup[label] = {
+                        "country": country,
+                        "city": city,
+                        "province": province,
+                        "lat": float(row.get("lat", 0) or 0),
+                        "lon": float(row.get("lon", 0) or 0),
+                        "tz": row.get("tz", "").strip(),
+                        "kind": row.get("kind", "").strip(),
+                    }
+            countries_list = sorted(countries)
+            for country in cities_by_country:
+                cities_by_country[country] = sorted(cities_by_country[country])
+            return {"countries": countries_list, "cities": cities_by_country, "lookup": lookup}, None
+        except Exception as exc:
+            return None, f"No se pudo leer el archivo de ubicaciones: {exc}"    
     def activar_mouse(self):
         # Vincular eventos de mouse
         self.canvas1.mpl_connect('button_press_event', self.shape_selector.on_mouse_press)
@@ -319,6 +352,15 @@ class App:
         self.modo = None
         self.vars = self._build_vars()
         self.vars_modelo = self._build_vars()
+        self.modo_modelo = tk.StringVar(value="simple")
+        self.simple_country = tk.StringVar()
+        self.simple_city = tk.StringVar()
+        self.simple_cloudiness = tk.StringVar(value="Despejado")
+        self.simple_temp_air_c = tk.DoubleVar(value=25.0)
+        self.locations_path = os.path.join(os.path.dirname(__file__), "data", "locations_ar.csv")
+        self.locations_data, self.locations_error = self.load_locations_csv(self.locations_path)
+        if self.locations_data and self.locations_data["countries"]:
+            self.simple_country.set(self.locations_data["countries"][0])
         # Controles de parámetros
         self.controles = self._build_controles(self.vars)
         self.controles_modelo = self._build_controles(self.vars_modelo)
@@ -500,50 +542,180 @@ class App:
             widget.destroy()        
         
         diseno_label = tk.Label(panel, text="Modelo", bg=panel.cget("bg"), fg="black")
-        diseno_label.grid(row=0, column=0,sticky="w", padx=10, pady=1)
-        
-                
-        # Botone para cargar excel
-        add_arbol = tk.Button(panel, text="Cargar Excel",command=lambda:modelo.cargar_excel(self.vars_modelo), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        add_arbol.grid(row=1, column=0,sticky="w",padx=10, pady=5)
+        diseno_label.grid(row=0, column=0, sticky="w", padx=10, pady=1)
 
-        # Botone para generar grafico
-        add_estructura = tk.Button(panel, text="Generar Gráfico",command=lambda:modelo.generar_grafico(self.vars_modelo, self.frame11), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        add_estructura.grid(row=4, column=0,sticky="w",padx=20, pady=3)
+        modo_frame = tk.Frame(panel, bg=panel.cget("bg"))
+        modo_frame.grid(row=1, column=0, sticky="w", padx=10, pady=4)
+        self.simple_mode_radio = tk.Radiobutton(
+            modo_frame,
+            text="Modo Simple",
+            variable=self.modo_modelo,
+            value="simple",
+            bg=panel.cget("bg"),
+            command=self._toggle_modelo_mode,
+        )
+        self.simple_mode_radio.grid(row=0, column=0, sticky="w")
+        self.advanced_mode_radio = tk.Radiobutton(
+            modo_frame,
+            text="Modo Avanzado",
+            variable=self.modo_modelo,
+            value="advanced",
+            bg=panel.cget("bg"),
+            command=self._toggle_modelo_mode,
+        )
+        self.advanced_mode_radio.grid(row=0, column=1, sticky="w", padx=10)
 
-        # Botone para añadir arbol 
-        seleccionar = tk.Button(panel, text="Vista 3D",command=lambda:modelo.generar_3d(self.vars_modelo), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        seleccionar.grid(row=4, column=0,sticky="w",padx=130, pady=3)        
-        
-        Label_preconf=tk.Label(panel, text="Configuraciones rápidas")
-        Label_preconf.grid(row=5, column=0,sticky="w",padx=10, pady=6) 
-        # Botone guardar como
-        seleccionar = tk.Button(panel, text="Soleado", command=lambda: modelo.cargar_preset("soleado", self.vars_modelo), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        add_arbol.grid(row=6, column=0,sticky="w",padx=30, pady=3)
+        acciones_frame = tk.Frame(panel, bg=panel.cget("bg"))
+        acciones_frame.grid(row=4, column=0, sticky="w", padx=10, pady=4)
+        tk.Button(
+            acciones_frame,
+            text="Cargar Excel",
+            command=lambda: modelo.cargar_excel(self.vars_modelo),
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+        ).grid(row=0, column=0, sticky="w", padx=0, pady=3)
+        tk.Button(
+            acciones_frame,
+            text="Generar Gráfico",
+            command=self.generar_grafico_modelo,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+        ).grid(row=0, column=1, sticky="w", padx=10, pady=3)
+        tk.Button(
+            acciones_frame,
+            text="Vista 3D",
+            command=lambda: modelo.generar_3d(self.vars_modelo),
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+        ).grid(row=0, column=2, sticky="w", padx=10, pady=3)
 
-        # Botone abrir
-        add_estructura = tk.Button(panel, text="Verano", command=lambda: modelo.cargar_preset("verano", self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        add_estructura.grid(row=6, column=0,sticky="w",padx=120, pady=3)
+        self.simple_frame = tk.Frame(panel, bg=panel.cget("bg"))
+        self.simple_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=6)
 
-        # Botone para Generar Gráfico 
-        seleccionar = tk.Button(panel, text="Soleado", command=lambda: modelo.cargar_preset("soleado", self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        seleccionar.grid(row=7, column=0,sticky="w",padx=30, pady=3)        
-        
-        # Botone para Vista 3D 
-        seleccionar = tk.Button(panel, text="Nublado", command=lambda: modelo.cargar_preset("nublado", self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        seleccionar.grid(row=7, column=0,sticky="w",padx=120, pady=3)     
-        
-        # Selector de viento
-        Label_viento=tk.Label(panel, text="Viento")
-        Label_viento.grid(row=3, column=0,sticky="w",padx=10, pady=3) 
-        lista_viento=ttk.Combobox(panel, textvariable=self.vars_modelo["viento"],values=["nulo", "moderado", "fuerte"])
-        lista_viento.grid(row=3, column=0,sticky="w",padx=60, pady=3) 
-        
-        panelin = tk.Frame(self.panel_frames[3])
-        panelin.grid(row=2, column=0, sticky="nsew", padx=0, pady=10) 
+        if self.locations_error:
+            tk.Label(
+                self.simple_frame,
+                text=self.locations_error,
+                fg="red",
+                bg=panel.cget("bg"),
+                wraplength=260,
+                justify="left",
+            ).grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
+
+        tk.Label(self.simple_frame, text="País", bg=panel.cget("bg")).grid(row=1, column=0, sticky="w", pady=2)
+        self.country_combo = ttk.Combobox(
+            self.simple_frame,
+            textvariable=self.simple_country,
+            values=self.locations_data["countries"] if self.locations_data else [],
+            state="readonly" if self.locations_data else "disabled",
+            width=22,
+        )
+        self.country_combo.grid(row=1, column=1, sticky="w", pady=2)
+        self.country_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_city_options())
+
+        tk.Label(self.simple_frame, text="Ciudad", bg=panel.cget("bg")).grid(row=2, column=0, sticky="w", pady=2)
+        self.city_combo = ttk.Combobox(
+            self.simple_frame,
+            textvariable=self.simple_city,
+            values=[],
+            width=22,
+            state="normal" if self.locations_data else "disabled",
+        )
+        self.city_combo.grid(row=2, column=1, sticky="w", pady=2)
+        self.city_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_location(False))
+        self.city_combo.bind("<KeyRelease>", self._filter_city_options)
+
+        tk.Button(
+            self.simple_frame,
+            text="Aplicar ubicación",
+            command=lambda: self._apply_location(True),
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+            state="normal" if self.locations_data else "disabled",
+        ).grid(row=3, column=1, sticky="w", pady=4)
+
+        tk.Label(self.simple_frame, text="Nubosidad", bg=panel.cget("bg")).grid(row=4, column=0, sticky="w", pady=2)
+        ttk.Combobox(
+            self.simple_frame,
+            textvariable=self.simple_cloudiness,
+            values=["Despejado", "Parcial", "Nublado"],
+            state="readonly",
+            width=22,
+        ).grid(row=4, column=1, sticky="w", pady=2)
+
+        tk.Label(self.simple_frame, text="Temperatura aire (°C)", bg=panel.cget("bg")).grid(row=5, column=0, sticky="w", pady=2)
+        tk.Entry(self.simple_frame, textvariable=self.simple_temp_air_c, width=10).grid(
+            row=5, column=1, sticky="w", pady=2
+        )
+        tk.Label(self.simple_frame, text="Viento", bg=panel.cget("bg")).grid(row=6, column=0, sticky="w", pady=2)
+        ttk.Combobox(
+            self.simple_frame,
+            textvariable=self.vars_modelo["viento"],
+            values=["nulo", "moderado", "fuerte"],
+            width=22,
+        ).grid(row=6, column=1, sticky="w", pady=2)
+
+        self.advanced_frame = tk.Frame(panel, bg=panel.cget("bg"))
+        self.advanced_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=6)
+
+        tk.Label(self.advanced_frame, text="Viento", bg=panel.cget("bg")).grid(row=0, column=0, sticky="w", pady=2)
+        ttk.Combobox(
+            self.advanced_frame,
+            textvariable=self.vars_modelo["viento"],
+            values=["nulo", "moderado", "fuerte"],
+            width=22,
+        ).grid(row=0, column=1, sticky="w", pady=2)
+
+        tk.Label(self.advanced_frame, text="Configuraciones rápidas", bg=panel.cget("bg")).grid(
+            row=1, column=0, sticky="w", pady=6
+        )
+        tk.Button(
+            self.advanced_frame,
+            text="Soleado",
+            command=lambda: modelo.cargar_preset("soleado", self.vars_modelo),
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+        ).grid(row=2, column=0, sticky="w", padx=0, pady=3)
+        tk.Button(
+            self.advanced_frame,
+            text="Verano",
+            command=lambda: modelo.cargar_preset("verano", self.vars),
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+        ).grid(row=2, column=1, sticky="w", padx=10, pady=3)
+        tk.Button(
+            self.advanced_frame,
+            text="Soleado",
+            command=lambda: modelo.cargar_preset("soleado", self.vars),
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+        ).grid(row=3, column=0, sticky="w", padx=0, pady=3)
+        tk.Button(
+            self.advanced_frame,
+            text="Nublado",
+            command=lambda: modelo.cargar_preset("nublado", self.vars),
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+        ).grid(row=3, column=1, sticky="w", padx=10, pady=3)
+
+        panelin = tk.Frame(self.advanced_frame, bg=panel.cget("bg"))
+        panelin.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=0, pady=10) 
         for texto, var, fila, rango, es_fecha in self.controles_modelo:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
         self.vars_modelo["graph_frame"] = self.frame11
+        self._update_city_options()
+        if self.locations_error:
+            self.modo_modelo.set("advanced")
+            self.simple_mode_radio.config(state="disabled")
+        self._toggle_modelo_mode()  
     def crear_control(self, panel, texto, var, fila, rango=None, es_fecha=False):
         tk.Label(panel, text=texto, anchor="w",font=("Arial", 8),width=20).grid(row=fila, column=0, sticky="ew", padx=0, pady=10)
         if es_fecha:
@@ -554,6 +726,84 @@ class App:
             scale = tk.Scale(panel, from_=rango[0], to=rango[1], variable=var, 
                             orient=tk.HORIZONTAL,length=1,width=5)
             scale.grid(row=fila, column=1, sticky="ew", padx=0)
+    def _toggle_modelo_mode(self):
+        if self.modo_modelo.get() == "simple" and not self.locations_error:
+            self.advanced_frame.grid_remove()
+            self.simple_frame.grid()
+        else:
+            self.simple_frame.grid_remove()
+            self.advanced_frame.grid()
+
+    def _update_city_options(self):
+        if not self.locations_data:
+            return
+        country = self.simple_country.get()
+        cities = self.locations_data["cities"].get(country, [])
+        self.city_combo["values"] = cities
+        if cities and self.simple_city.get() not in cities:
+            self.simple_city.set(cities[0])
+
+    def _filter_city_options(self, event):
+        if not self.locations_data:
+            return
+        country = self.simple_country.get()
+        query = self.simple_city.get().lower().strip()
+        cities = self.locations_data["cities"].get(country, [])
+        if query:
+            filtered = [city for city in cities if query in city.lower()]
+        else:
+            filtered = cities
+        self.city_combo["values"] = filtered
+
+    def _apply_location(self, show_message):
+        if not self.locations_data:
+            return
+        city_label = self.simple_city.get().strip()
+        location = self.locations_data["lookup"].get(city_label)
+        if not location:
+            if show_message:
+                messagebox.showwarning("Ubicación", "Seleccione una ciudad válida.")
+            return
+        self.vars_modelo["lat"].set(location["lat"])
+        self.vars_modelo["lon"].set(location["lon"])
+        self.vars_modelo["_update_required"] = True
+        if show_message:
+            messagebox.showinfo("Ubicación aplicada", f"Lat/Lon: {location['lat']}, {location['lon']}")
+
+    def _validate_kelvin_input(self):
+        temp_k = self.vars_modelo["T_amb_base"].get()
+        if temp_k < 260 or temp_k > 330:
+            temp_c = temp_k - 273.15
+            return messagebox.askyesno(
+                "Temperatura en Kelvin",
+                f"Temp Base está en Kelvin. Equivale a {temp_c:.1f} °C. ¿Es correcto?",
+            )
+        return True
+
+    def generar_grafico_modelo(self):
+        if self.modo_modelo.get() == "simple":
+            if self.locations_data:
+                city_label = self.simple_city.get().strip()
+                if city_label not in self.locations_data["lookup"]:
+                    messagebox.showwarning("Ubicación", "Seleccione una ciudad válida antes de generar el gráfico.")
+                    return
+            self._apply_location(False)
+            try:
+                temp_air_c = float(self.simple_temp_air_c.get())
+            except (TypeError, ValueError):
+                messagebox.showerror("Temperatura inválida", "Ingrese la temperatura del aire en °C.")
+                return
+            temp_air_k = temp_air_c + 273.15
+            cloudiness = self.simple_cloudiness.get()
+            rad_map = {"Despejado": 950, "Parcial": 650, "Nublado": 250}
+            i_max = rad_map.get(cloudiness, 650)
+            self.vars_modelo["T_amb_base"].set(temp_air_k)
+            self.vars_modelo["I_sol_base"].set(i_max)
+            self.vars_modelo["nubosidad"] = cloudiness
+        else:
+            if not self._validate_kelvin_input():
+                return
+        modelo.generar_grafico(self.vars_modelo, self.frame11)
     def toggle_panel(self, index):
             if self.is_animating:
                 return

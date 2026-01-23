@@ -239,19 +239,25 @@ def generar_grafico(vars, frame):
     # Configuración del gráfico
     tmin = float(np.nanmin(T))
     tmax = float(np.nanmax(T))
+    margin = 1.0  
     if debug:
         print("T min/max:", tmin, tmax)
         print("Sombra total min/max:", np.min(sombra_total), np.max(sombra_total))
         print("Radiación efectiva min/max:", np.min(q_solar), np.max(q_solar))
     if np.isclose(tmin, tmax):
-        delta = max(0.5, 0.01 * abs(tmin))
-        niveles = np.linspace(tmin - delta, tmax + delta, 10)
+        delta = max(margin, 0.01 * abs(tmin), 0.5)
+        tmin_auto = tmin - delta
+        tmax_auto = tmax + delta
     else:
-        niveles = np.linspace(tmin, tmax, 20)
+        tmin_auto = tmin - margin
+        tmax_auto = tmax + margin
+    if tmin_auto >= tmax_auto:
+        tmax_auto = tmin_auto + max(margin, 0.5)
+    niveles = np.linspace(tmin_auto, tmax_auto, 20)
     niveles = np.unique(np.sort(niveles))
     if niveles.size < 2:
-        delta = max(0.5, 0.01 * abs(tmin))
-        niveles = np.array([tmin - delta, tmax + delta])
+        delta = max(margin, 0.01 * abs(tmin))
+        niveles = np.array([tmin_auto - delta, tmax_auto + delta])
         
     contorno = ax.contourf(X, Y, T, niveles, cmap='viridis', alpha=0.8)
     ax.contour(X, Y, T, niveles, colors='k', linewidths=0.5)  # Añadir líneas de contorno
