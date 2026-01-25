@@ -325,6 +325,17 @@ def generar_grafico(vars, frame):
         widget.destroy()
     FigureCanvasTkAgg(fig, master=frame).get_tk_widget().pack(fill=tk.BOTH, expand=True)
     vars['_update_required'] = True
+    return {
+        "T": T,
+        "shadow": sombra_total,
+        "meta": {
+            "hora": vars["hora"].get() if hasattr(vars.get("hora"), "get") else vars.get("hora"),
+            "dia": vars["dia"].get() if hasattr(vars.get("dia"), "get") else vars.get("dia"),
+            "lat": vars["lat"].get() if hasattr(vars.get("lat"), "get") else vars.get("lat"),
+            "lon": vars["lon"].get() if hasattr(vars.get("lon"), "get") else vars.get("lon"),
+            "I_sol": float(I_sol),
+        },
+    }    
 def editar_elemento(vars, arbol=None, estructura=None):
     dialog = tk.Toplevel()
     dialog.title("Editar Elemento")

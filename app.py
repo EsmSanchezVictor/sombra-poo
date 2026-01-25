@@ -2,6 +2,7 @@ from datetime import datetime
 from io import BytesIO
 import csv
 import os
+import json
 import tkinter as tk
 from tkinter import ttk
 import numpy as np
@@ -48,6 +49,13 @@ class App:
         }
 
         self.root.configure(bg=self.palette["background"])
+        self.settings_path = os.path.join(os.path.dirname(__file__), "data", "settings.json")
+        self.settings = self.load_settings()
+        self.current_project_path = self.settings.get("last_project_path")
+        self.is_dirty = False
+        self.last_T = None
+        self.last_shadow = None
+        self.last_meta = None
 
         # Crear frames principales con una estética consistente
         self.frame0 = tk.Frame(
@@ -287,7 +295,8 @@ class App:
         self.setup_panel_2()
         self.setup_panel_3()
         self.setup_panel_4()
-
+        self.apply_settings(self.settings)
+        
         # Para recordar cuál panel está abierto
         self.active_panel = None
         self.is_animating = False
@@ -364,6 +373,56 @@ class App:
         # Controles de parámetros
         self.controles = self._build_controles(self.vars)
         self.controles_modelo = self._build_controles(self.vars_modelo)
+
+    def load_settings(self):
+        defaults = self._default_settings()
+        os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
+        if not os.path.exists(self.settings_path):
+            self._write_settings(defaults)
+            return defaults
+        try:
+            with open(self.settings_path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if data.get("version") != defaults["version"]:
+                return defaults
+            return {**defaults, **data}
+        except (OSError, json.JSONDecodeError):
+            return defaults
+
+    def _write_settings(self, data):
+        with open(self.settings_path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2, ensure_ascii=False)
+
+    def _default_settings(self):
+        return {
+            "version": 1,
+            "ui_mode": "simple",
+            "units": "C",
+            "default_country": "Argentina",
+            "default_city": "Paraná",
+            "default_cloudiness": "Despejado",
+            "default_wind": "moderado",
+            "last_project_path": None,
+        }
+
+    def apply_settings(self, settings):
+        if not settings:
+            return
+        self.modo_modelo.set(settings.get("ui_mode", "simple"))
+        self.simple_cloudiness.set(settings.get("default_cloudiness", "Despejado"))
+        self.simple_country.set(settings.get("default_country", self.simple_country.get()))
+        self.simple_city.set(settings.get("default_city", self.simple_city.get()))
+        default_wind = settings.get("default_wind", "moderado")
+        if "viento" in self.vars:
+            self.vars["viento"].set(default_wind)
+        if "viento" in self.vars_modelo:
+            self.vars_modelo["viento"].set(default_wind)
+        if hasattr(self, "city_combo") and self.locations_data:
+            self._update_city_options()
+        self._toggle_modelo_mode()
+
+    def mark_dirty(self):
+        self.is_dirty = True
 
     def _build_vars(self):
         return {
@@ -803,7 +862,11 @@ class App:
         else:
             if not self._validate_kelvin_input():
                 return
-        modelo.generar_grafico(self.vars_modelo, self.frame11)
+        result = modelo.generar_grafico(self.vars_modelo, self.frame11)
+        if result:
+            self.last_T = result.get("T")
+            self.last_shadow = result.get("shadow")
+            self.last_meta = result.get("meta")
     def toggle_panel(self, index):
             if self.is_animating:
                 return
@@ -888,36 +951,536 @@ class App:
     def setup_menu(self):
         """Configura el menú principal."""
         menu_bar = tk.Menu(self.root)
-        for i in range(1, 7):  # 6 elementos en el menú
-            submenu = tk.Menu(menu_bar, tearoff=0)
-            for j in range(1, 4):  # Cada uno con 3 opciones
-                submenu.add_command(label=f"Opción {i}.{j}")
-            menu_bar.add_cascade(label=f"Menú {i}", menu=submenu)
-        self.root.config(menu=menu_bar)  # Establece el menú en la ventana principal
-    def setup_status_bar(self):
-        """Configura la barra de estado."""
-        now = datetime.now()
-        # date_time_label = tk.Label(self.frame6, text=f"Fecha y Hora: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-        self.frame6.configure(bg=self.palette["accent"])
+        
+        archivo_menu = tk.Menu(menu_bar, tearoff=0)
+        archivo_menu.add_command(label="Nuevo proyecto", accelerator="Ctrl+N", command=self.new_project)
+        archivo_menu.add_command(label="Abrir proyecto…", accelerator="Ctrl+O", command=self.open_project)
+        archivo_menu.add_command(label="Guardar proyecto", accelerator="Ctrl+S", command=self.save_project)
+        archivo_menu.add_command(label="Guardar como…", command=self.save_project_as)
+        archivo_menu.add_separator()
+        importar_menu = tk.Menu(archivo_menu, tearoff=0)
+        importar_menu.add_command(label="Importar imagen base…", command=self.cargar_imagen)
+        archivo_menu.add_cascade(label="Importar…", menu=importar_menu)
+        exportar_menu = tk.Menu(archivo_menu, tearoff=0)
+        exportar_menu.add_command(label="Exportar a Excel…", accelerator="Ctrl+E", command=self.exportar_a_excel)
+        exportar_menu.add_command(label="Exportar a PDF…", accelerator="Ctrl+P", command=self.exportar_a_pdf)
+        exportar_menu.add_command(label="Exportar dataset…", command=self.save_dataset)
+        archivo_menu.add_cascade(label="Exportar…", menu=exportar_menu)
+        archivo_menu.add_separator()
+        archivo_menu.add_command(label="Salir", accelerator="Ctrl+Q", command=self.exit_app)
+        menu_bar.add_cascade(label="Archivo", menu=archivo_menu)
 
+        edicion_menu = tk.Menu(menu_bar, tearoff=0)
+        edicion_menu.add_command(label="Deshacer", accelerator="Ctrl+Z", command=self.undo)
+        edicion_menu.add_command(label="Rehacer", accelerator="Ctrl+Y", command=self.redo)
+        edicion_menu.add_separator()
+        edicion_menu.add_command(label="Preferencias…", command=self.open_preferences)
+        menu_bar.add_cascade(label="Edición", menu=edicion_menu)
+
+        escena_menu = tk.Menu(menu_bar, tearoff=0)
+        paneles_menu = tk.Menu(escena_menu, tearoff=0)
+        paneles_menu.add_command(label="Abrir Panel 1", command=lambda: self.open_panel(1))
+        paneles_menu.add_command(label="Abrir Panel 2", command=lambda: self.open_panel(2))
+        paneles_menu.add_command(label="Abrir Panel 3 (Modo diseño)", command=lambda: self.open_panel(3))
+        paneles_menu.add_command(label="Abrir Panel 4 (Modelo)", command=lambda: self.open_panel(3))
+        escena_menu.add_cascade(label="Paneles", menu=paneles_menu)
+        escena_menu.add_separator()
+        escena_menu.add_command(label="Mostrar frames Panel 2", command=self.show_panel2_frames)
+        escena_menu.add_command(label="Mostrar frames Diseño", command=self.show_diseno_frames)
+        escena_menu.add_command(label="Mostrar frames Modelo", command=self.show_modelo_frames)
+        menu_bar.add_cascade(label="Escena", menu=escena_menu)
+
+        modelo_menu = tk.Menu(menu_bar, tearoff=0)
+        modelo_menu.add_command(
+            label="Ejecutar / Generar gráfico",
+            accelerator="F5",
+            command=self.run_model_for_active_panel,
+        )
+        modelo_menu.add_command(
+            label="Recalcular",
+            accelerator="Shift+F5",
+            command=lambda: self.run_model_for_active_panel(force=True),
+        )
+        menu_bar.add_cascade(label="Modelo", menu=modelo_menu)
+
+        analisis_menu = tk.Menu(menu_bar, tearoff=0)
+        analisis_menu.add_command(label="Estadísticas rápidas", command=self.quick_stats)
+        analisis_menu.add_command(
+            label="Comparar escenarios",
+            command=lambda: messagebox.showinfo(
+                "Pendiente",
+                "Comparación de escenarios pendiente: se incorporará un módulo de análisis.",
+            ),
+        )
+        analisis_menu.add_command(
+            label="Perfil lineal",
+            command=lambda: messagebox.showinfo(
+                "Pendiente",
+                "Perfil lineal pendiente: se implementará un visor dedicado.",
+            ),
+        )
+        menu_bar.add_cascade(label="Análisis", menu=analisis_menu)
+
+        ayuda_menu = tk.Menu(menu_bar, tearoff=0)
+        ayuda_menu.add_command(
+            label="Guía rápida",
+            command=lambda: messagebox.showinfo(
+                "Guía rápida",
+                "1) Elegí un panel desde Escena > Paneles.\n"
+                "2) Cargá una imagen base en Panel 2.\n"
+                "3) En Modo diseño agregá árboles o estructuras.\n"
+                "4) Generá el gráfico con F5.\n"
+                "5) Exportá resultados desde Archivo > Exportar.\n"
+                "6) Revisá estadísticas en Análisis.",
+            ),
+        )
+        ayuda_menu.add_command(
+            label="Limitaciones del modelo",
+            command=lambda: messagebox.showinfo(
+                "Limitaciones del modelo",
+                "El modelo actual no contempla microclimas locales ni materiales reflectivos avanzados.\n"
+                "Los resultados dependen de la calidad de la imagen y las variables de entrada.",
+            ),
+        )
+        ayuda_menu.add_command(label="Acerca de…", command=self.show_about)
+        menu_bar.add_cascade(label="Ayuda", menu=ayuda_menu)
+
+        self.root.config(menu=menu_bar)
+
+        self.root.bind_all("<Control-n>", lambda _e: (self.new_project(), "break")[1])
+        self.root.bind_all("<Control-o>", lambda _e: (self.open_project(), "break")[1])
+        self.root.bind_all("<Control-s>", lambda _e: (self.save_project(), "break")[1])
+        self.root.bind_all("<Control-q>", lambda _e: (self.exit_app(), "break")[1])
+        self.root.bind_all("<F5>", lambda _e: (self.run_model_for_active_panel(), "break")[1])
+        self.root.bind_all("<Shift-F5>", lambda _e: (self.run_model_for_active_panel(force=True), "break")[1])
+        self.root.bind_all("<Control-e>", lambda _e: (self.exportar_a_excel(), "break")[1])
+        self.root.bind_all("<Control-p>", lambda _e: (self.exportar_a_pdf(), "break")[1])
+
+    def new_project(self):
+        if not self._confirm_discard_changes("Crear nuevo proyecto"):
+            return
+        self._reset_scene()
+        self._reset_vars_to_defaults()
+        self.current_project_path = None
+        self.is_dirty = False
+
+    def open_project(self):
+        if not self._confirm_discard_changes("Abrir proyecto"):
+            return
+        file_path = filedialog.askopenfilename(
+            title="Abrir proyecto",
+            filetypes=[("Proyecto Sombra", "*.json")],
+        )
+        if not file_path:
+            return
+        project = self._load_project_file(file_path)
+        if not project:
+            return
+        self._apply_project(project)
+        self.current_project_path = file_path
+        self.settings["last_project_path"] = file_path
+        self._write_settings(self.settings)
+        self.is_dirty = False
+
+    def save_project(self):
+        if self.current_project_path:
+            self._save_project_file(self.current_project_path)
+        else:
+            self.save_project_as()
+
+    def save_project_as(self):
+        file_path = filedialog.asksaveasfilename(
+            title="Guardar proyecto como",
+            defaultextension=".json",
+            filetypes=[("Proyecto Sombra", "*.json")],
+        )
+        if not file_path:
+            return
+        self.current_project_path = file_path
+        self.settings["last_project_path"] = file_path
+        self._write_settings(self.settings)
+        self._save_project_file(file_path)
+
+    def exit_app(self):
+        if not self._confirm_discard_changes("Salir"):
+            return
+        if messagebox.askokcancel("Salir", "¿Desea salir de la aplicación?"):
+            self.root.destroy()
+
+    def undo(self):
+        messagebox.showinfo(
+            "Pendiente",
+            "Deshacer pendiente: aún no hay historial de acciones.",
+        )
+
+    def redo(self):
+        messagebox.showinfo(
+            "Pendiente",
+            "Rehacer pendiente: aún no hay historial de acciones.",
+        )
+
+    def open_preferences(self):
+        preferences = tk.Toplevel(self.root)
+        preferences.title("Preferencias")
+        preferences.resizable(False, False)
+        preferences.configure(bg=self.palette["background"])
+
+        ui_mode_var = tk.StringVar(value=self.settings.get("ui_mode", "simple"))
+        units_var = tk.StringVar(value=self.settings.get("units", "C"))
+        country_var = tk.StringVar(value=self.settings.get("default_country", "Argentina"))
+        city_var = tk.StringVar(value=self.settings.get("default_city", "Paraná"))
+        cloudiness_var = tk.StringVar(value=self.settings.get("default_cloudiness", "Despejado"))
+        wind_var = tk.StringVar(value=self.settings.get("default_wind", "moderado"))
+
+        card = tk.Frame(preferences, bg="white", padx=16, pady=14, bd=1, relief="solid")
+        card.grid(row=0, column=0, padx=14, pady=14)
+
+        tk.Label(card, text="Unidades", bg="white", font=("Arial", 9, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Radiobutton(card, text="Celsius", variable=units_var, value="C", bg="white").grid(row=1, column=0, sticky="w")
+        tk.Radiobutton(card, text="Kelvin", variable=units_var, value="K", bg="white").grid(row=1, column=1, sticky="w")
+
+        tk.Label(card, text="Modo UI", bg="white", font=("Arial", 9, "bold")).grid(row=2, column=0, sticky="w", pady=(10, 0))
+        tk.Radiobutton(card, text="Simple", variable=ui_mode_var, value="simple", bg="white").grid(row=3, column=0, sticky="w")
+        tk.Radiobutton(card, text="Avanzado", variable=ui_mode_var, value="advanced", bg="white").grid(row=3, column=1, sticky="w")
+
+        tk.Label(card, text="País por defecto", bg="white", font=("Arial", 9, "bold")).grid(row=4, column=0, sticky="w", pady=(10, 0))
+        if self.locations_data:
+            country_combo = ttk.Combobox(card, textvariable=country_var, values=self.locations_data["countries"], width=22)
+            country_combo.grid(row=5, column=0, columnspan=2, sticky="w")
+        else:
+            tk.Entry(card, textvariable=country_var, width=24).grid(row=5, column=0, columnspan=2, sticky="w")
+
+        tk.Label(card, text="Ciudad por defecto", bg="white", font=("Arial", 9, "bold")).grid(row=6, column=0, sticky="w", pady=(10, 0))
+        if self.locations_data:
+            city_combo = ttk.Combobox(card, textvariable=city_var, width=22)
+            city_combo.grid(row=7, column=0, columnspan=2, sticky="w")
+            if country_var.get() in self.locations_data["cities"]:
+                city_combo["values"] = self.locations_data["cities"][country_var.get()]
+
+            def update_city_options(*_args):
+                cities = self.locations_data["cities"].get(country_var.get(), [])
+                city_combo["values"] = cities
+                if cities and city_var.get() not in cities:
+                    city_var.set(cities[0])
+
+            country_combo.bind("<<ComboboxSelected>>", update_city_options)
+        else:
+            tk.Entry(card, textvariable=city_var, width=24).grid(row=7, column=0, columnspan=2, sticky="w")
+
+        tk.Label(card, text="Nubosidad", bg="white", font=("Arial", 9, "bold")).grid(row=8, column=0, sticky="w", pady=(10, 0))
+        ttk.Combobox(card, textvariable=cloudiness_var, values=["Despejado", "Parcial", "Nublado"], width=22).grid(
+            row=9, column=0, columnspan=2, sticky="w"
+        )
+
+        tk.Label(card, text="Viento", bg="white", font=("Arial", 9, "bold")).grid(row=10, column=0, sticky="w", pady=(10, 0))
+        ttk.Combobox(card, textvariable=wind_var, values=["nulo", "moderado", "fuerte"], width=22).grid(
+            row=11, column=0, columnspan=2, sticky="w"
+        )
+
+        def save_preferences():
+            self.settings.update(
+                {
+                    "ui_mode": ui_mode_var.get(),
+                    "units": units_var.get(),
+                    "default_country": country_var.get(),
+                    "default_city": city_var.get(),
+                    "default_cloudiness": cloudiness_var.get(),
+                    "default_wind": wind_var.get(),
+                }
+            )
+            self._write_settings(self.settings)
+            self.apply_settings(self.settings)
+            preferences.destroy()
+
+        actions = tk.Frame(card, bg="white")
+        actions.grid(row=12, column=0, columnspan=2, pady=(12, 0), sticky="e")
+        tk.Button(actions, text="Guardar", command=save_preferences).grid(row=0, column=0, padx=(0, 8))
+        tk.Button(actions, text="Cancelar", command=preferences.destroy).grid(row=0, column=1)
+
+    def _confirm_discard_changes(self, action_label):
+        if not self.is_dirty:
+            return True
+        response = messagebox.askyesnocancel(
+            "Cambios sin guardar",
+            f"{action_label}: hay cambios sin guardar. ¿Desea guardarlos?",
+        )
+        if response is None:
+            return False
+        if response:
+            self.save_project()
+            return not self.is_dirty
+        return True
+
+    def _reset_scene(self):
+        self.vars["arboles"] = []
+        self.vars["estructuras"] = []
+
+    def _reset_vars_to_defaults(self):
+        defaults = self._build_vars()
+        self._apply_vars_data(self.vars, defaults)
+        self._apply_vars_data(self.vars_modelo, defaults)
+        self.simple_cloudiness.set(self.settings.get("default_cloudiness", "Despejado"))
+        self.simple_country.set(self.settings.get("default_country", self.simple_country.get()))
+        self.simple_city.set(self.settings.get("default_city", self.simple_city.get()))
+        self.modo_modelo.set(self.settings.get("ui_mode", "simple"))
+        self.simple_temp_air_c.set(25.0)
+        if hasattr(self, "city_combo") and self.locations_data:
+            self._update_city_options()
+        self._toggle_modelo_mode()
+        self._clear_frame(self.frame2)
+        self._clear_frame(self.frame7)
+        self._clear_frame(self.frame11)
+        self.last_T = None
+        self.last_shadow = None
+        self.last_meta = None
+
+    def _clear_frame(self, frame):
+        for widget in frame.winfo_children():
+            widget.destroy()
+
+    def _serialize_vars(self, vars_dict):
+        data = {}
+        for key, value in vars_dict.items():
+            if key in ("arboles", "estructuras", "_app_instance"):
+                continue
+            if hasattr(value, "get"):
+                data[key] = value.get()
+            else:
+                data[key] = value
+        return data
+
+    def _serialize_arbol(self, arbol):
+        if isinstance(arbol, dict):
+            return arbol
+        return {
+            "x": getattr(arbol, "x", 0),
+            "y": getattr(arbol, "y", 0),
+            "radio_copa": getattr(arbol, "radio_copa", 0),
+            "altura": getattr(arbol, "h", getattr(arbol, "altura", 0)),
+            "rho_copa": getattr(arbol, "rho_copa", 0),
+            "nombre": getattr(arbol, "nombre", None),
+        }
+
+    def _serialize_estructura(self, estructura):
+        if isinstance(estructura, dict):
+            return estructura
+        return {
+            "tipo": getattr(estructura, "tipo", None),
+            "x1": getattr(estructura, "x1", 0),
+            "y1": getattr(estructura, "y1", 0),
+            "x2": getattr(estructura, "x2", 0),
+            "y2": getattr(estructura, "y2", 0),
+            "altura": getattr(estructura, "altura", 0),
+            "material": getattr(estructura, "material", None),
+            "opacidad": getattr(estructura, "opacidad", 1),
+            "nombre": getattr(estructura, "nombre", None),
+        }
+
+    def _deserialize_arboles(self, items):
+        arboles = []
+        for item in items:
+            if isinstance(item, dict):
+                arboles.append(
+                    design.Arbol(
+                        float(item.get("x", 0)),
+                        float(item.get("y", 0)),
+                        float(item.get("altura", 0)),
+                        float(item.get("rho_copa", 0)),
+                        float(item.get("radio_copa", 0)),
+                    )
+                )
+            else:
+                arboles.append(item)
+        return arboles
+
+    def _deserialize_estructuras(self, items):
+        estructuras = []
+        for item in items:
+            if isinstance(item, dict):
+                estructuras.append(
+                    design.Estructura(
+                        item.get("tipo", "Sendero"),
+                        float(item.get("x1", 0)),
+                        float(item.get("y1", 0)),
+                        float(item.get("x2", 0)),
+                        float(item.get("y2", 0)),
+                        altura=float(item.get("altura", 0)),
+                        opacidad=float(item.get("opacidad", 1)),
+                        material=item.get("material"),
+                    )
+                )
+            else:
+                estructuras.append(item)
+        return estructuras
+
+    def _apply_vars_data(self, vars_dict, data):
+        for key, value in data.items():
+            if key in ("arboles", "estructuras"):
+                continue
+            if key in vars_dict and hasattr(vars_dict[key], "set"):
+                if hasattr(value, "get"):
+                    vars_dict[key].set(value.get())
+                else:
+                    vars_dict[key].set(value)
+
+    def _build_project_payload(self):
+        return {
+            "version": 1,
+            "meta": {
+                "name": os.path.basename(self.current_project_path or "Proyecto"),
+                "saved_at": datetime.now().isoformat(),
+                "app": "sombra-poo",
+            },
+            "vars": self._serialize_vars(self.vars),
+            "ui": {
+                "active_panel": self.active_panel,
+                "mode": self.modo_modelo.get(),
+                "selected_city": self.simple_city.get(),
+                "selected_country": self.simple_country.get(),
+            },
+            "scene": {
+                "arboles": [self._serialize_arbol(a) for a in self.vars.get("arboles", [])],
+                "estructuras": [self._serialize_estructura(e) for e in self.vars.get("estructuras", [])],
+            },
+        }
+
+    def _save_project_file(self, path):
+        payload = self._build_project_payload()
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+        self.is_dirty = False
+        self.settings["last_project_path"] = path
+        self._write_settings(self.settings)
+
+    def _load_project_file(self, path):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if data.get("version") != 1:
+                messagebox.showerror("Error", "Versión de proyecto no soportada.")
+                return None
+            return data
+        except (OSError, json.JSONDecodeError) as exc:
+            messagebox.showerror("Error", f"No se pudo abrir el proyecto: {exc}")
+            return None
+
+    def _apply_project(self, project):
+        vars_data = project.get("vars", {})
+        self._apply_vars_data(self.vars, vars_data)
+        self._apply_vars_data(self.vars_modelo, vars_data)
+        scene = project.get("scene", {})
+        self.vars["arboles"] = self._deserialize_arboles(scene.get("arboles", []))
+        self.vars["estructuras"] = self._deserialize_estructuras(scene.get("estructuras", []))
+
+        ui = project.get("ui", {})
+        self.modo_modelo.set(ui.get("mode", self.modo_modelo.get()))
+        self.simple_country.set(ui.get("selected_country", self.simple_country.get()))
+        if self.locations_data:
+            self._update_city_options()
+        self.simple_city.set(ui.get("selected_city", self.simple_city.get()))
+        self._toggle_modelo_mode()
+
+        if hasattr(self, "entry_lat") and self.entry_lat:
+            self.entry_lat.delete(0, tk.END)
+            self.entry_lat.insert(0, str(self.vars["lat"].get()))
+        if hasattr(self, "entry_lon") and self.entry_lon:
+            self.entry_lon.delete(0, tk.END)
+            self.entry_lon.insert(0, str(self.vars["lon"].get()))
+        if hasattr(self, "entry_temp") and self.entry_temp:
+            self.entry_temp.delete(0, tk.END)
+            self.entry_temp.insert(0, str(self.simple_temp_air_c.get()))
+
+        target_panel = ui.get("active_panel")
+        if isinstance(target_panel, int) and 0 <= target_panel < len(self.panel_frames):
+            self.open_panel(target_panel)
+
+    def run_model_for_active_panel(self, force=False):
+        if self.active_panel is None:
+            messagebox.showinfo(
+                "Pendiente",
+                "Seleccione un panel antes de ejecutar el modelo.",
+            )
+            return
+
+        if self.active_panel in (3, 4):
+            self.generar_grafico_modelo()
+            return
+
+        if self.active_panel == 2:
+            self.actualizar_grafico_diseno(self.frame7)
+            return
+
+        if self.active_panel == 1:
+            self.render_grafico_en_frame(self.frame2, self.imagen)
+            return
+
+        messagebox.showinfo(
+            "Pendiente",
+            "No hay gráfico disponible para el panel activo.",
+        )
+
+    def quick_stats(self):
+        if self.last_T is None:
+            messagebox.showinfo(
+                "Pendiente",
+                "Ejecutá el modelo primero (F5) para ver estadísticas.",
+            )
+            return
+        unit = self.settings.get("units", "C")
+        data = np.array(self.last_T, dtype=float)
+        if unit == "C":
+            data = data - 273.15
+        min_val = float(np.nanmin(data))
+        max_val = float(np.nanmax(data))
+        mean_val = float(np.nanmean(data))
+        lines = [
+            f"T mínimo: {min_val:.2f} °{unit}",
+            f"T máximo: {max_val:.2f} °{unit}",
+            f"T promedio: {mean_val:.2f} °{unit}",
+        ]
+        if self.last_shadow is not None:
+            shadow = np.array(self.last_shadow, dtype=float)
+            sombra_pct = (1 - shadow).mean() * 100
+            lines.append(f"% sombra promedio: {sombra_pct:.2f}%")
+        messagebox.showinfo("Estadísticas rápidas", "\n".join(lines))
+
+    def show_about(self):
+        app_name = self.root.title()
+        version = getattr(self, "version", "N/D")
+        messagebox.showinfo(
+            "Acerca de",
+            f"{app_name}\nVersión: {version}\nAplicación para análisis de sombra urbana.",
+        )
+    def setup_status_bar(self):
+      
+        self.frame6.configure(bg=self.palette["accent"])
+        connection_start = getattr(self, "connection_start", datetime.now())
+        username = getattr(self, "username", "Usuario")
         date_time_label = tk.Label(
             self.frame6,
-            text=f"Fecha y Hora: {now.strftime('%Y-%m-%d %H:%M:%S')}",
+            text=f"Conexión: {connection_start.strftime('%Y-%m-%d %H:%M:%S')}",
             bg=self.palette["accent"],
             fg="#2c3e50",
             font=("Arial", 9, "bold"),
         )
         date_time_label.pack(side="right", padx=10)
-        for i in range(1, 4):
-            #label = tk.Label(self.frame6, text=f"Etiqueta {i}")
-            label = tk.Label(
-                self.frame6,
-                text=f"Etiqueta {i}",
-                bg=self.palette["accent"],
-                fg="#4a4f63",
-                font=("Arial", 9),
-            )
-            label.pack(side="right", padx=10)
+        user_label = tk.Label(
+            self.frame6,
+            text=f"Usuario: {username}",
+            bg=self.palette["accent"],
+            fg="#4a4f63",
+            font=("Arial", 9),
+        )
+        user_label.pack(side="right", padx=10)
+
+        brand_label = tk.Label(
+            self.frame6,
+            text="3Esfera",
+            bg=self.palette["accent"],
+            fg="#4a4f63",
+            font=("Arial", 9),
+        )
+        brand_label.pack(side="right", padx=10)
     def create_card(self, parent):
         return tk.Frame(
             parent,

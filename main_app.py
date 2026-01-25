@@ -1,3 +1,4 @@
+from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox
 from tkinter import simpledialog
@@ -114,6 +115,8 @@ class MainApp:
         user = self.db_manager.get_user(username)
 
         if user and user[2] == password:
+            self.current_user = username
+            self.connection_start = datetime.now()
             if user[3] == 1:  # Admin user
                 self.admin_options()
             else:  # Regular user
@@ -171,6 +174,8 @@ class MainApp:
 
         root_2 = tk.Toplevel()
         app = App(root_2)  # Pasar self.root como parámetro
+        app.username = getattr(self, "current_user", "Usuario")
+        app.connection_start = getattr(self, "connection_start", datetime.now())
         self.root.withdraw()  # Oculta la ventana de login
         
     def open_user_management(self):
