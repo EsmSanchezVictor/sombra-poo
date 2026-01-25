@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "ui_mode": "simple",
+  "units": "C",
+  "default_country": "Argentina",
+  "default_city": "Paraná",
+  "default_cloudiness": "Despejado",
+  "default_wind": "moderado",
+  "last_project_path": "G:/atico del proyecto sombra/proyecro test.json"
+}

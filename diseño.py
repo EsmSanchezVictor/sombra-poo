@@ -161,6 +161,8 @@ def mostrar_dialogo_arbol(x, y,app):
                 radio_copa=float(entries['Radio Copa (m):'].get())
             )
             app.vars['arboles'].append(nuevo_arbol)
+            if hasattr(app, "mark_dirty"):
+                app.mark_dirty()
             #actualizar_grafico(app.vars, app.frame2)
             target_frame = getattr(app, "frame7", app.frame2)
             actualizar_grafico(app.vars, target_frame)
@@ -205,6 +207,8 @@ def mostrar_dialogo_estructura(x1, y1, x2, y2,app):
                 material=entries['Material:'].get()
             )
             app.vars['estructuras'].append(nueva_estructura)
+            if hasattr(app, "mark_dirty"):
+                app.mark_dirty()
             #actualizar_grafico(app.vars,app.frame2)
             target_frame = getattr(app, "frame7", app.frame2)
             actualizar_grafico(app.vars, target_frame)
@@ -281,6 +285,8 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
             #actualizar_grafico(vars, app.frame2)
             target_frame = getattr(app, "frame7", app.frame2)
             actualizar_grafico(vars, target_frame)
+            if hasattr(app, "mark_dirty"):
+                app.mark_dirty()
             dialogo.destroy()
         except ValueError:
             messagebox.showerror("Error", "Valores inválidos")
@@ -294,6 +300,8 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
             #actualizar_grafico(vars, app.frame2)
             target_frame = getattr(app, "frame7", app.frame2)
             actualizar_grafico(vars, target_frame)
+            if hasattr(app, "mark_dirty"):
+                app.mark_dirty()            
             dialogo.destroy()
     
     ttk.Button(dialogo, text="Guardar", command=guardar).grid(row=len(campos)+1, column=0)
