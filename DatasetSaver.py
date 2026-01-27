@@ -3,7 +3,7 @@ import json
 import numpy as np
 import cv2
 from datetime import datetime
-from PIL import Image
+#from PIL import Image
 
 class DatasetSaver:
     def __init__(self, app):
@@ -79,7 +79,10 @@ class DatasetSaver:
             # Guardar imagen original
             img_path = os.path.join('imagenes', img_filename)
             cv2.imwrite(img_path, cv2.cvtColor(self.app.img_rgb, cv2.COLOR_RGB2BGR))
-            
+
+            # Registrar último recurso guardado para snapshots
+            self.app.last_image_path = img_path
+                        
             # Crear y guardar máscara
             self.save_mask(img_filename, mask_filename)
             
