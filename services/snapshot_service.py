@@ -1,60 +1,63 @@
+"""Servicio para guardar snapshots del flujo de proyecto."""
+
+from __future__ import annotations
+
 import os
-from typing import Any, Optional
+import shutil
+from tkinter import messagebox
 
-import numpy as np
 import pandas as pd
-from PIL import Image
-
-from core.project import Project
 
 
 class SnapshotService:
-    def save_snapshot(self, app: Any, project: Project, state: Optional[dict] = None) -> Optional[int]:
-        if project is None:
-            return None
+    """Guarda imágenes, curvas y matrices asociadas a un proyecto."""
+
+    def __init__(self, app, project_manager):
+        self.app = app
+        self.project_manager = project_manager
+
+    def save_snapshot(self) -> None:
+        """Guarda los artefactos del último cálculo en la estructura del proyecto."""
+        project = self.project_manager.current_project
+        if not project:
+            messagebox.showwarning("Proyecto", "No hay un proyecto abierto para guardar snapshot.")
+            return
         project.ensure_structure()
-        state = state or {"next_n": 1}
-        n = project.allocate_n(state)
+        n = project.allocate_n()
 
-        if getattr(app, "img_rgb", None) is not None:
-            img = app.img_rgb
-            if isinstance(img, Image.Image):
-                image = img
-            else:
-                image = Image.fromarray(img)
-            image.save(os.path.join(project.images_dir, f"elemento{n}.png"))
+        # Definir rutas destino
+        img_path = os.path.join(project.root_path, "imagenes", f"elemento{n}.png")
+        curve_path = os.path.join(project.root_path, "curvas", f"Celemento{n}.png")
+        matrix_path = os.path.join(project.root_path, "matrices", f"MAelemento{n}.xlsx")
+        mask_path = os.path.join(project.root_path, "mascaras", f"Melemento{n}.xlsx")
+        model_excel = os.path.join(project.root_path, "excels", "modelo.xlsx")
+        edit_excel = os.path.join(project.root_path, "excels", "edicion.xlsx")
 
-        if getattr(app, "curva_img_pil_original", None) is not None:
-            app.curva_img_pil_original.save(os.path.join(project.curves_dir, f"Celemento{n}.png"))
+        # Guardar figuras disponibles
+        if getattr(self.app, "fig1", None) is not None:
+            self.app.fig1.savefig(img_path, dpi=150, bbox_inches="tight")
+        if getattr(self.app, "fig2", None) is not None:
+            self.app.fig2.savefig(curve_path, dpi=150, bbox_inches="tight")
 
-        matrix = getattr(app, "tmrt_map", None)
-        if matrix is None and getattr(app, "shape_selector", None) is not None:
-            matrix = getattr(app.shape_selector, "area_seleccionada", None)
-        if matrix is not None:
-            pd.DataFrame(np.array(matrix)).to_excel(
-                os.path.join(project.matrices_dir, f"MAelemento{n}.xlsx"),
-                index=False,
-            )
+        # Guardar matrices si están presentes en la selección
+        if getattr(self.app, "shape_selector", None) is not None:
+            if getattr(self.app.shape_selector, "area_seleccionada", None) is not None:
+                pd.DataFrame(self.app.shape_selector.area_seleccionada).to_excel(matrix_path, index=False)
+            if getattr(self.app.shape_selector, "area_referencia", None) is not None:
+                pd.DataFrame(self.app.shape_selector.area_referencia).to_excel(mask_path, index=False)
 
-        mask = getattr(app, "mask", None)
-        if mask is not None:
-            pd.DataFrame(np.array(mask)).to_excel(
-                os.path.join(project.masks_dir, f"Melemento{n}.xlsx"),
-                index=False,
-            )
+        # Copiar artefactos adicionales si existen
+        self._copy_if_exists(self.app.last_model_excel_path, model_excel, "excel modelo")
+        self._copy_if_exists(self.app.last_edit_excel_path, edit_excel, "excel edición")
 
-        model_data = getattr(app, "last_T", None)
-        if model_data is not None:
-            pd.DataFrame(np.array(model_data)).to_excel(
-                os.path.join(project.excels_dir, "modelo.xlsx"),
-                index=False,
-            )
+        # Guardar el JSON del proyecto actualizado
+        self.project_manager.save_project()
 
-        edit_data = getattr(app, "last_shadow", None)
-        if edit_data is not None:
-            pd.DataFrame(np.array(edit_data)).to_excel(
-                os.path.join(project.excels_dir, "edicion.xlsx"),
-                index=False,
-            )
-
-        return n
+    def _copy_if_exists(self, source: str | None, target: str, label: str) -> None:
+        """Copia un archivo si existe en origen, mostrando aviso si falta."""
+        if not source:
+            return
+        if not os.path.exists(source):
+            messagebox.showwarning("Snapshot", f"No se encontró {label} para guardar.")
+            return
+        shutil.copy(source, target)

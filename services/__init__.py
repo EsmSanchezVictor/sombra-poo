@@ -1,0 +1,1 @@
+"""Paquete de servicios auxiliares de la aplicación."""

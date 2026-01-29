@@ -2,11 +2,9 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox
 from tkinter import simpledialog
-from app import App
-#from app_copy import App
+from ui.app_ui import SombraApp
 from add_user_window import AddUserWindow
 from modify_user_window import ModifyUserWindow
-#from gui_copy import App
 
 class MainApp:
     def __init__(self, root, db_manager):
@@ -173,7 +171,8 @@ class MainApp:
     def open_main_app(self):
 
         root_2 = tk.Toplevel()
-        app = App(root_2)  # Pasar self.root como parámetro
+        # Iniciar la UI principal en una nueva ventana
+        app = SombraApp(root_2)
         app.username = getattr(self, "current_user", "Usuario")
         app.connection_start = getattr(self, "connection_start", datetime.now())
         self.root.withdraw()  # Oculta la ventana de login

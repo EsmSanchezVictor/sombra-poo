@@ -1,0 +1,1 @@
+"""Paquete core para lógica de estado y proyectos."""

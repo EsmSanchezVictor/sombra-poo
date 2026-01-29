@@ -2,32 +2,30 @@ from datetime import datetime
 from io import BytesIO
 import csv
 import os
-import json
 import tkinter as tk
 from tkinter import ttk
+
 import numpy as np
-from matplotlib import cm
-import math
-from tkinter import filedialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
-from shape_selection import ShapeSelector
+from PIL import Image, ImageTk
+from tkinter import filedialog, messagebox
+
+from DatasetSaver import DatasetSaver
+from core.app_state import AppState, SettingsManager
+from core.project_manager import ProjectManager
 from image_processor import ImageProcessor
+from mouse_pixel_value import MouseHoverPixelValueWithTooltip
 from save_pdf import PDFReportGenerator
+from services.snapshot_service import SnapshotService
+from shape_selection import ShapeSelector
 from shadow_temp import Temperatura
 from temp_graph import TemperatureGraph
-#from mouse_pixel_value  import MouseHoverPixelValueWithTooltip
+from ui.menu_bar import MenuBar
 from utils import export_to_excel
 import diseño as design
 import modelo_con_excel as modelo
-from DatasetSaver import DatasetSaver
-from tkinter import messagebox
-from PIL import Image, ImageTk
 
-from core.app_state import AppState
-from core.project_manager import ProjectManager
-from services.snapshot_service import SnapshotService
-from ui import menu_bar
 
 class SombraApp:
     def __init__(self, root):
@@ -54,15 +52,22 @@ class SombraApp:
         }
 
         self.root.configure(bg=self.palette["background"])
-        self.settings_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "settings.json")
-        self.settings = self.load_settings()
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        self.base_dir = base_dir
+        self.settings_path = os.path.join(base_dir, "data", "settings.json")
+        self.settings_manager = SettingsManager(self.settings_path)
+        self.settings = self.settings_manager.load()
         self.current_project_path = self.settings.get("last_project_path")
         self.is_dirty = False
         self.last_T = None
         self.last_shadow = None
         self.last_meta = None
-        self.project_manager = ProjectManager(app_name="sombra-poo")
-        self.snapshot_service = SnapshotService()
+        self.last_model_excel_path = None
+        self.last_edit_excel_path = None
+        self.last_image_path = None
+        self.last_curve_path = None
+        self.last_matrix_path = None
+        self.last_mask_path = None
 
         # Crear frames principales con una estética consistente
         self.frame0 = tk.Frame(
@@ -224,6 +229,11 @@ class SombraApp:
         self.image_processor = ImageProcessor()
         self.shape_selector = ShapeSelector(self) 
         self.dataset_saver = DatasetSaver(self)
+        # Servicios de estado y proyecto
+        self.app_state = AppState(self)
+        self.project_manager = ProjectManager(self, self.app_state, self.settings_manager)
+        self.snapshot_service = SnapshotService(self, self.project_manager)
+        self.menu_bar = MenuBar(self)
         self.porcentaje_sombra = None
         self.tmrt_result = None
         self.ref_gray_mean = None
@@ -235,11 +245,6 @@ class SombraApp:
         self._shadow_hover_cid = None
         self._shadow_hover_canvas = None
         self._shadow_hover_annotation = None
-        self.porcentaje_sombra = None
-        self.tmrt_result = None
-        self.ref_gray_mean = None
-        self.tmrt_map = None
-        self.original_rgb = None
         self.mouse_hover_pixel_value = None
         self.curva_frame = None
         self.curva_label = None
@@ -288,6 +293,9 @@ class SombraApp:
             panel.place_forget()
             self.panel_frames.append(panel)
 
+        # Ocultar paneles al inicio
+        self.hide_all_frames()
+
         # Inicializar variable
         self.setup_variables()
         # Calculadora Tmrt (se instancia cuando se calcula)
@@ -309,8 +317,7 @@ class SombraApp:
         self.is_animating = False
 
         # Inicializar componentes
-        menu_bar.build_menu(self)
-        self.hide_all_frames()
+        self.menu_bar.setup()
         self.setup_status_bar()
         self.resultados(self.frame4)
         self.temp_sombra(self.frame5)
@@ -374,7 +381,7 @@ class SombraApp:
         self.simple_city = tk.StringVar()
         self.simple_cloudiness = tk.StringVar(value="Despejado")
         self.simple_temp_air_c = tk.DoubleVar(value=25.0)
-        self.locations_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "locations_ar.csv")
+        self.locations_path = os.path.join(self.base_dir, "data", "locations_ar.csv")
         self.locations_data, self.locations_error = self.load_locations_csv(self.locations_path)
         if self.locations_data and self.locations_data["countries"]:
             self.simple_country.set(self.locations_data["countries"][0])
@@ -382,64 +389,12 @@ class SombraApp:
         self.controles = self._build_controles(self.vars)
         self.controles_modelo = self._build_controles(self.vars_modelo)
 
-    def load_settings(self):
-        defaults = self._default_settings()
-        os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
-        if not os.path.exists(self.settings_path):
-            self._write_settings(defaults)
-            return defaults
-        try:
-            with open(self.settings_path, "r", encoding="utf-8") as handle:
-                data = json.load(handle)
-            if data.get("version") != defaults["version"]:
-                return defaults
-            return {**defaults, **data}
-        except (OSError, json.JSONDecodeError):
-            return defaults
-
-    def _write_settings(self, data):
-        with open(self.settings_path, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2, ensure_ascii=False)
-
-    def _default_settings(self):
-        return {
-            "version": 1,
-            "ui_mode": "simple",
-            "units": "C",
-            "default_country": "Argentina",
-            "default_city": "Paraná",
-            "default_cloudiness": "Despejado",
-            "default_wind": "moderado",
-            "last_project_path": None,
-        }
-
     def apply_settings(self, settings):
-        if not settings:
-            return
-        self.modo_modelo.set(settings.get("ui_mode", "simple"))
-        self.simple_cloudiness.set(settings.get("default_cloudiness", "Despejado"))
-        self.simple_country.set(settings.get("default_country", self.simple_country.get()))
-        self.simple_city.set(settings.get("default_city", self.simple_city.get()))
-        default_wind = settings.get("default_wind", "moderado")
-        if "viento" in self.vars:
-            self.vars["viento"].set(default_wind)
-        if "viento" in self.vars_modelo:
-            self.vars_modelo["viento"].set(default_wind)
-        if hasattr(self, "city_combo") and self.locations_data:
-            self._update_city_options()
-        self._toggle_modelo_mode()
+        """Aplica preferencias usando el gestor de settings."""
+        self.settings_manager.apply_to_app(self, settings)
 
     def mark_dirty(self):
         self.is_dirty = True
-
-    def _ensure_project_open(self, action_label):
-        if not self.project_manager.current_project:
-            messagebox.showwarning(
-                "Proyecto requerido",
-                f"Abra o guarde un proyecto antes de {action_label}.",
-            )
-            return False
-        return True
 
     def _build_vars(self):
         return {
@@ -566,47 +521,102 @@ class SombraApp:
 
         for widget in panel.winfo_children():
             widget.destroy()        
-        
-        diseno_label = tk.Label(panel, text="Modo de Edición:", bg=panel.cget("bg"), fg="black")
-        diseno_label.grid(row=0, column=0,sticky="w", padx=10, pady=10)
-        
-                
-        # Botone para añadir arbol 
-        add_arbol = tk.Button(panel, text="Añadir Árbol",command=lambda: design.establecer_modo('arbol',self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        add_arbol.grid(row=2, column=0,sticky="w",padx=10, pady=3)
 
-        # Botone para añadir arbol 
-        add_estructura = tk.Button(panel, text="Añadir Estructura",command=lambda: design.establecer_modo('estructura',self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        add_estructura.grid(row=2, column=0,sticky="w",padx=100, pady=3) 
+        panel.grid_columnconfigure(0, weight=1)
+        contenido = tk.Frame(panel, bg=panel.cget("bg"))
+        contenido.grid(row=0, column=0, sticky="nsew", padx=16, pady=10)
+        contenido.grid_columnconfigure(0, weight=1)
 
-        # Botone para añadir arbol 
-        seleccionar = tk.Button(panel, text="Seleccionar",command=lambda: design.establecer_modo(None,self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        seleccionar.grid(row=3, column=0,sticky="w",padx=60, pady=3)        
-        
-        
-        # Botone guardar como
-        guardar = tk.Button(panel, text="Guardar como",command=lambda:design.guardar_como(self.vars,self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        guardar.grid(row=4, column=0,sticky="w",padx=10, pady=10)
+        diseno_label = tk.Label(contenido, text="Modo de Edición:", bg=panel.cget("bg"), fg="black")
+        diseno_label.grid(row=0, column=0, sticky="w", pady=(0, 8))
 
-        # Botone abrir
-        abrir = tk.Button(panel, text="Abrir",command=lambda:design.abrir_archivo(self.vars,self), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        abrir.grid(row=4, column=0,sticky="w",padx=120, pady=10)
+        acciones = tk.Frame(contenido, bg=panel.cget("bg"))
+        acciones.grid(row=1, column=0, sticky="ew", pady=4)
+        acciones.grid_columnconfigure(0, weight=1)
+        acciones.grid_columnconfigure(1, weight=1)
 
-        # Botone para Generar Gráfico 
-        grafico = tk.Button(panel, text="Generar gráfico",command=lambda: self.actualizar_grafico_diseno(self.frame7), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))        
-        grafico.grid(row=5, column=0,sticky="w",padx=10, pady=8)   
-        # Botone para Vista 3D 
-        vista_3d = tk.Button(panel, text="Vista 3D", command=lambda:design.generar_3d(self.vars), bg='#4CAF50', fg='white', font=("Arial", 8, "bold"))
-        vista_3d.grid(row=5, column=0,sticky="w",padx=120, pady=8)     
-        
-        # Selector de viento
-        Label_viento=tk.Label(panel, text="Viento")
-        Label_viento.grid(sticky="w",padx=10, pady=3) 
-        lista_viento=ttk.Combobox(panel, textvariable=self.vars["viento"],values=["nulo", "moderado", "fuerte"])
-        lista_viento.grid(sticky="w",padx=10, pady=3) 
-        
-        panelin = tk.Frame(self.panel_frames[2])
-        panelin.grid(row=1, column=0, sticky="nsew", padx=0, pady=2) 
+        # Botones principales
+        add_arbol = tk.Button(
+            acciones,
+            text="Añadir Árbol",
+            command=lambda: design.establecer_modo('arbol', self),
+            bg='#4CAF50',
+            fg='white',
+            font=("Arial", 8, "bold"),
+        )
+        add_arbol.grid(row=0, column=0, sticky="w", padx=(0, 8), pady=3)
+
+        add_estructura = tk.Button(
+            acciones,
+            text="Añadir Estructura",
+            command=lambda: design.establecer_modo('estructura', self),
+            bg='#4CAF50',
+            fg='white',
+            font=("Arial", 8, "bold"),
+        )
+        add_estructura.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=3)
+
+        seleccionar = tk.Button(
+            acciones,
+            text="Seleccionar",
+            command=lambda: design.establecer_modo(None, self),
+            bg='#4CAF50',
+            fg='white',
+            font=("Arial", 8, "bold"),
+        )
+        seleccionar.grid(row=1, column=0, columnspan=2, sticky="w", pady=3)
+
+        guardar = tk.Button(
+            acciones,
+            text="Guardar como",
+            command=lambda: design.guardar_como(self.vars, self),
+            bg='#4CAF50',
+            fg='white',
+            font=("Arial", 8, "bold"),
+        )
+        guardar.grid(row=2, column=0, sticky="w", padx=(0, 8), pady=6)
+
+        abrir = tk.Button(
+            acciones,
+            text="Abrir",
+            command=lambda: design.abrir_archivo(self.vars, self),
+            bg='#4CAF50',
+            fg='white',
+            font=("Arial", 8, "bold"),
+        )
+        abrir.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=6)
+
+        grafico = tk.Button(
+            acciones,
+            text="Generar gráfico",
+            command=lambda: self.actualizar_grafico_diseno(self.frame7),
+            bg='#4CAF50',
+            fg='white',
+            font=("Arial", 8, "bold"),
+        )
+        grafico.grid(row=3, column=0, sticky="w", padx=(0, 8), pady=4)
+
+        vista_3d = tk.Button(
+            acciones,
+            text="Vista 3D",
+            command=lambda: design.generar_3d(self.vars),
+            bg='#4CAF50',
+            fg='white',
+            font=("Arial", 8, "bold"),
+        )
+        vista_3d.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=4)
+
+        Label_viento = tk.Label(contenido, text="Viento", bg=panel.cget("bg"))
+        Label_viento.grid(row=2, column=0, sticky="w", pady=(8, 2))
+        lista_viento = ttk.Combobox(
+            contenido,
+            textvariable=self.vars["viento"],
+            values=["nulo", "moderado", "fuerte"],
+        )
+        lista_viento.grid(row=3, column=0, sticky="ew", pady=2)
+
+        panelin = tk.Frame(contenido, bg=panel.cget("bg"))
+        panelin.grid(row=4, column=0, sticky="nsew", pady=6)
         for texto, var, fila, rango, es_fecha in self.controles:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
     def setup_panel_4(self):
@@ -616,12 +626,17 @@ class SombraApp:
         
         for widget in panel.winfo_children():
             widget.destroy()        
-        
-        diseno_label = tk.Label(panel, text="Modelo", bg=panel.cget("bg"), fg="black")
-        diseno_label.grid(row=0, column=0, sticky="w", padx=10, pady=1)
 
-        modo_frame = tk.Frame(panel, bg=panel.cget("bg"))
-        modo_frame.grid(row=1, column=0, sticky="w", padx=10, pady=4)
+        panel.grid_columnconfigure(0, weight=1)
+        contenido = tk.Frame(panel, bg=panel.cget("bg"))
+        contenido.grid(row=0, column=0, sticky="nsew", padx=16, pady=10)
+        contenido.grid_columnconfigure(0, weight=1)
+
+        diseno_label = tk.Label(contenido, text="Modelo", bg=panel.cget("bg"), fg="black")
+        diseno_label.grid(row=0, column=0, sticky="w", pady=(0, 6))
+
+        modo_frame = tk.Frame(contenido, bg=panel.cget("bg"))
+        modo_frame.grid(row=1, column=0, sticky="w", pady=4)
         self.simple_mode_radio = tk.Radiobutton(
             modo_frame,
             text="Modo Simple",
@@ -641,8 +656,8 @@ class SombraApp:
         )
         self.advanced_mode_radio.grid(row=0, column=1, sticky="w", padx=10)
 
-        acciones_frame = tk.Frame(panel, bg=panel.cget("bg"))
-        acciones_frame.grid(row=4, column=0, sticky="w", padx=10, pady=4)
+        acciones_frame = tk.Frame(contenido, bg=panel.cget("bg"))
+        acciones_frame.grid(row=4, column=0, sticky="w", pady=(6, 0))
         tk.Button(
             acciones_frame,
             text="Cargar Excel",
@@ -668,8 +683,9 @@ class SombraApp:
             font=("Arial", 8, "bold"),
         ).grid(row=0, column=2, sticky="w", padx=10, pady=3)
 
-        self.simple_frame = tk.Frame(panel, bg=panel.cget("bg"))
-        self.simple_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=6)
+        self.simple_frame = tk.Frame(contenido, bg=panel.cget("bg"))
+        self.simple_frame.grid(row=2, column=0, sticky="nsew", pady=6)
+        self.simple_frame.grid_columnconfigure(1, weight=1)
 
         if self.locations_error:
             tk.Label(
@@ -689,7 +705,7 @@ class SombraApp:
             state="readonly" if self.locations_data else "disabled",
             width=22,
         )
-        self.country_combo.grid(row=1, column=1, sticky="w", pady=2)
+        self.country_combo.grid(row=1, column=1, sticky="ew", pady=2, padx=(8, 0))
         self.country_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_city_options())
 
         tk.Label(self.simple_frame, text="Ciudad", bg=panel.cget("bg")).grid(row=2, column=0, sticky="w", pady=2)
@@ -700,7 +716,7 @@ class SombraApp:
             width=22,
             state="normal" if self.locations_data else "disabled",
         )
-        self.city_combo.grid(row=2, column=1, sticky="w", pady=2)
+        self.city_combo.grid(row=2, column=1, sticky="ew", pady=2, padx=(8, 0))
         self.city_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_location(False))
         self.city_combo.bind("<KeyRelease>", self._filter_city_options)
 
@@ -712,7 +728,7 @@ class SombraApp:
             fg="white",
             font=("Arial", 8, "bold"),
             state="normal" if self.locations_data else "disabled",
-        ).grid(row=3, column=1, sticky="w", pady=4)
+        ).grid(row=3, column=1, sticky="w", pady=4, padx=(8, 0))
 
         tk.Label(self.simple_frame, text="Nubosidad", bg=panel.cget("bg")).grid(row=4, column=0, sticky="w", pady=2)
         ttk.Combobox(
@@ -721,11 +737,11 @@ class SombraApp:
             values=["Despejado", "Parcial", "Nublado"],
             state="readonly",
             width=22,
-        ).grid(row=4, column=1, sticky="w", pady=2)
+        ).grid(row=4, column=1, sticky="ew", pady=2, padx=(8, 0))
 
         tk.Label(self.simple_frame, text="Temperatura aire (°C)", bg=panel.cget("bg")).grid(row=5, column=0, sticky="w", pady=2)
         tk.Entry(self.simple_frame, textvariable=self.simple_temp_air_c, width=10).grid(
-            row=5, column=1, sticky="w", pady=2
+            row=5, column=1, sticky="w", pady=2, padx=(8, 0)
         )
         tk.Label(self.simple_frame, text="Viento", bg=panel.cget("bg")).grid(row=6, column=0, sticky="w", pady=2)
         ttk.Combobox(
@@ -733,10 +749,11 @@ class SombraApp:
             textvariable=self.vars_modelo["viento"],
             values=["nulo", "moderado", "fuerte"],
             width=22,
-        ).grid(row=6, column=1, sticky="w", pady=2)
+        ).grid(row=6, column=1, sticky="ew", pady=2, padx=(8, 0))
 
-        self.advanced_frame = tk.Frame(panel, bg=panel.cget("bg"))
-        self.advanced_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=6)
+        self.advanced_frame = tk.Frame(contenido, bg=panel.cget("bg"))
+        self.advanced_frame.grid(row=2, column=0, sticky="nsew", pady=6)
+        self.advanced_frame.grid_columnconfigure(1, weight=1)
 
         tk.Label(self.advanced_frame, text="Viento", bg=panel.cget("bg")).grid(row=0, column=0, sticky="w", pady=2)
         ttk.Combobox(
@@ -744,7 +761,7 @@ class SombraApp:
             textvariable=self.vars_modelo["viento"],
             values=["nulo", "moderado", "fuerte"],
             width=22,
-        ).grid(row=0, column=1, sticky="w", pady=2)
+        ).grid(row=0, column=1, sticky="ew", pady=2, padx=(8, 0))
 
         tk.Label(self.advanced_frame, text="Configuraciones rápidas", bg=panel.cget("bg")).grid(
             row=1, column=0, sticky="w", pady=6
@@ -783,7 +800,7 @@ class SombraApp:
         ).grid(row=3, column=1, sticky="w", padx=10, pady=3)
 
         panelin = tk.Frame(self.advanced_frame, bg=panel.cget("bg"))
-        panelin.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=0, pady=10) 
+        panelin.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=10)
         for texto, var, fila, rango, es_fecha in self.controles_modelo:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
         self.vars_modelo["graph_frame"] = self.frame11
@@ -931,6 +948,10 @@ class SombraApp:
         else:
             self.panel_frames[index].place_forget()
             self.is_animating = False
+    def hide_all_frames(self):
+        """Oculta todos los paneles desplegables."""
+        for frame in self.panel_frames:
+            frame.place_forget()
     def _toggle_frames(self, frames_to_show, frames_to_hide):
         for frame in frames_to_hide:
             frame.grid_remove()
@@ -940,24 +961,6 @@ class SombraApp:
         self._toggle_frames(
             [self.frame2, self.frame3, self.frame4, self.frame5],
             [self.frame7, self.frame8, self.frame9, self.frame10, self.frame11, self.frame12, self.frame13, self.frame14],
-        )
-    def hide_all_frames(self):
-        self._toggle_frames(
-            [],
-            [
-                self.frame2,
-                self.frame3,
-                self.frame4,
-                self.frame5,
-                self.frame7,
-                self.frame8,
-                self.frame9,
-                self.frame10,
-                self.frame11,
-                self.frame12,
-                self.frame13,
-                self.frame14,
-            ],
         )
     def show_diseno_frames(self):
         self._toggle_frames(
@@ -982,94 +985,38 @@ class SombraApp:
         for i, button in enumerate(self.buttons):
             button.grid_forget()
             button.grid(row=i, column=0, sticky="ew")
+
     def new_project(self):
-        if not self._confirm_discard_changes("Crear nuevo proyecto"):
-            return
-        self._reset_scene()
-        self._reset_vars_to_defaults()
-        self.current_project_path = None
+        """Crea un proyecto nuevo utilizando ProjectManager."""
         self.project_manager.new_project()
-        self.is_dirty = False
 
     def open_project(self):
+        """Abre un proyecto utilizando ProjectManager."""
         if not self._confirm_discard_changes("Abrir proyecto"):
             return
-        file_path = filedialog.askopenfilename(
-            title="Abrir proyecto",
-            filetypes=[("Proyecto Sombra", "*.json")],
-        )
-        if not file_path:
-            return
-        defaults = AppState.serialize_vars(self._build_vars())
-        state = self.project_manager.load_project(file_path, defaults)
-        if not state:
-            messagebox.showerror("Error", "No se pudo abrir el proyecto.")
-            return
-        self._apply_project_state(state)
-        self.current_project_path = file_path
-        self.settings["last_project_path"] = file_path
-        self._write_settings(self.settings)
-        self.is_dirty = False
+        self.project_manager.open_project()
 
     def save_project(self):
-        if self.current_project_path:
-            self._save_project_file(self.current_project_path)
-        else:
-            self.save_project_as()
+        """Guarda el proyecto actual."""
+        self.project_manager.save_project()
 
     def save_project_as(self):
-        file_path = filedialog.asksaveasfilename(
-            title="Guardar proyecto como",
-            defaultextension=".json",
-            filetypes=[("Proyecto Sombra", "*.json")],
-        )
-        if not file_path:
-            return
-        self.current_project_path = file_path
-        self.settings["last_project_path"] = file_path
-        self._write_settings(self.settings)
-        self._save_project_file(file_path)
+        """Guarda el proyecto en un nuevo destino."""
+        self.project_manager.save_project_as()
 
     def export_project(self):
-        if not self._ensure_project_open("exportar el proyecto"):
-            return
-        file_path = filedialog.asksaveasfilename(
-            title="Exportar proyecto",
-            defaultextension=".3es",
-            filetypes=[("Proyecto Sombra", "*.3es")],
-        )
-        if not file_path:
-            return
-        self.project_manager.export_project(self.project_manager.current_project, file_path)
+        """Exporta el proyecto a .3es."""
+        self.project_manager.export_project()
 
     def import_project(self):
+        """Importa un .3es y lo abre."""
         if not self._confirm_discard_changes("Importar proyecto"):
             return
-        file_path = filedialog.askopenfilename(
-            title="Importar proyecto",
-            filetypes=[("Proyecto Sombra", "*.3es")],
-        )
-        if not file_path:
-            return
-        config_path = self.project_manager.import_project(file_path)
-        if not config_path:
-            messagebox.showerror("Error", "No se pudo importar el proyecto.")
-            return
-        defaults = AppState.serialize_vars(self._build_vars())
-        state = self.project_manager.load_project(config_path, defaults)
-        if not state:
-            messagebox.showerror("Error", "No se pudo abrir el proyecto importado.")
-            return
-        self._apply_project_state(state)
-        self.current_project_path = config_path
-        self.settings["last_project_path"] = config_path
-        self._write_settings(self.settings)
-        self.is_dirty = False
+        self.project_manager.import_project()
 
-    def clear_last_results(self):
-        self.last_T = None
-        self.last_shadow = None
-        self.last_meta = None
+    def save_snapshot(self):
+        """Guarda un snapshot del proyecto actual."""
+        self.snapshot_service.save_snapshot()
 
     def exit_app(self):
         if not self._confirm_discard_changes("Salir"):
@@ -1158,7 +1105,7 @@ class SombraApp:
                     "default_wind": wind_var.get(),
                 }
             )
-            self._write_settings(self.settings)
+            self.settings_manager.write(self.settings)
             self.apply_settings(self.settings)
             preferences.destroy()
 
@@ -1187,8 +1134,8 @@ class SombraApp:
 
     def _reset_vars_to_defaults(self):
         defaults = self._build_vars()
-        AppState.apply_vars_data(self.vars, defaults)
-        AppState.apply_vars_data(self.vars_modelo, defaults)
+        self._apply_vars_data(self.vars, defaults)
+        self._apply_vars_data(self.vars_modelo, defaults)
         self.simple_cloudiness.set(self.settings.get("default_cloudiness", "Despejado"))
         self.simple_country.set(self.settings.get("default_country", self.simple_country.get()))
         self.simple_city.set(self.settings.get("default_city", self.simple_city.get()))
@@ -1208,18 +1155,15 @@ class SombraApp:
         for widget in frame.winfo_children():
             widget.destroy()
 
-    def _build_project_state(self):
-        return AppState.from_app(self, next_n=self.project_manager.next_n)
-
-    def _save_project_file(self, path):
-        state = self._build_project_state()
-        self.project_manager.save_project(path, state)
-        self.is_dirty = False
-        self.settings["last_project_path"] = path
-        self._write_settings(self.settings)
-
-    def _apply_project_state(self, state: AppState):
-        state.apply_to_app(self, design)
+    def _apply_vars_data(self, vars_dict, data):
+        for key, value in data.items():
+            if key in ("arboles", "estructuras"):
+                continue
+            if key in vars_dict and hasattr(vars_dict[key], "set"):
+                if hasattr(value, "get"):
+                    vars_dict[key].set(value.get())
+                else:
+                    vars_dict[key].set(value)
 
     def run_model_for_active_panel(self, force=False):
         if self.active_panel is None:
@@ -1278,6 +1222,9 @@ class SombraApp:
             "Acerca de",
             f"{app_name}\nVersión: {version}\nAplicación para análisis de sombra urbana.",
         )
+    def _open_link(self, label, url):
+        """Muestra un mensaje informativo para enlaces externos."""
+        messagebox.showinfo("Enlace", f"Abrir {label}: {url}")
     def setup_status_bar(self):
       
         self.frame6.configure(bg=self.palette["accent"])
@@ -1428,6 +1375,7 @@ class SombraApp:
         if file_path:
             self.img, self.img_rgb = self.image_processor.load_image(file_path)
             self.original_rgb = self.img_rgb
+            self.last_image_path = file_path
             self.ax1.clear()
             self.ax1.imshow(self.img_rgb)
             self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
@@ -1482,7 +1430,6 @@ class SombraApp:
             )
             self.porcentaje_sombra = porcentaje_sombra
             self.lbl_porcentaje_sombra.config(text=f"Porcentaje de sombra: {porcentaje_sombra:.2f}%")
-            self.mark_dirty()
 
             # Habilitar los botones para curvas de nivel y exportar
             self.curve_button.config(state=tk.NORMAL)  # Habilitar el botón de curvas de nivel
@@ -1491,10 +1438,10 @@ class SombraApp:
         else:
             print("Error: No se ha seleccionado un área válida.")
     def exportar_a_excel(self):
-        if not self._ensure_project_open("exportar a Excel"):
-            return
         if self.shape_selector.area_seleccionada is not None:
-            export_to_excel(self.shape_selector.area_seleccionada)
+            file_path = export_to_excel(self.shape_selector.area_seleccionada)
+            if file_path:
+                self.last_matrix_path = file_path
     def mostrar_curvas_nivel(self):
         if self.shape_selector.area_seleccionada is not None:
             
@@ -1555,8 +1502,6 @@ class SombraApp:
         self.curva_label.image = self.curva_photo
 
     def exportar_a_pdf(self):
-        if not self._ensure_project_open("exportar a PDF"):
-            return
         pdf_generator = PDFReportGenerator(self)
         pdf_generator.generate_report()    
     def actualizar_dia(fecha_str, dia_var):
@@ -1589,8 +1534,6 @@ class SombraApp:
         self.canvas_diseno.mpl_connect('button_press_event', lambda event: design.manejar_click(event, self))
     def save_dataset(self):
         """Método para manejar el guardado del dataset"""
-        if not self._ensure_project_open("guardar el dataset"):
-            return
         if not hasattr(self, 'img_rgb') or self.img_rgb is None:
             messagebox.showerror("Error", "No hay imagen cargada")
             return
@@ -1602,17 +1545,8 @@ class SombraApp:
         try:
             self.dataset_saver.save_dataset()
             messagebox.showinfo("Éxito", "Dataset guardado correctamente")
-            self._save_snapshot()
         except Exception as e:
                         messagebox.showerror("Error", f"No se pudo guardar el dataset: {str(e)}")
-
-    def _save_snapshot(self):
-        if not self.project_manager.current_project or not self.current_project_path:
-            return
-        state_info = {"next_n": self.project_manager.next_n}
-        self.snapshot_service.save_snapshot(self, self.project_manager.current_project, state_info)
-        self.project_manager.next_n = state_info.get("next_n", self.project_manager.next_n)
-        self._save_project_file(self.current_project_path)
 
     def _setup_hover_tmrt_map(self, ax, canvas, data_2d):
         if self._tmrt_hover_canvas is not None and self._tmrt_hover_cid is not None:

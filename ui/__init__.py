@@ -1,0 +1,1 @@
+"""Paquete UI con componentes de interfaz."""

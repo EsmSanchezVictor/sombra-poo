@@ -85,6 +85,7 @@ class DatasetSaver:
                         
             # Crear y guardar máscara
             self.save_mask(img_filename, mask_filename)
+            self.app.last_mask_path = os.path.join('mascaras', mask_filename)
             
             # Actualizar archivo JSON
             self.update_mask_json(img_filename, mask_filename)
