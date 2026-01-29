@@ -12,7 +12,8 @@ from PIL import Image, ImageTk
 from tkinter import filedialog, messagebox
 
 from DatasetSaver import DatasetSaver
-from core.app_state import AppState, SettingsManager
+from core.app_state import AppState
+from core.settings_manager import SettingsManager
 from core.project_manager import ProjectManager
 from image_processor import ImageProcessor
 from mouse_pixel_value import MouseHoverPixelValueWithTooltip
