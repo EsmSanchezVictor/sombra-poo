@@ -1,38 +1,40 @@
+"""Representa la estructura física de un proyecto en disco."""
+
+from __future__ import annotations
+
 import os
-from dataclasses import dataclass
-from typing import Dict
 
 
-@dataclass
 class Project:
-    root_path: str
+    """Gestiona rutas, carpeta base y numeración incremental."""
 
-    def __post_init__(self) -> None:
-        self.root_path = os.path.abspath(self.root_path)
-        self.config_dir = os.path.join(self.root_path, "config")
-        self.images_dir = os.path.join(self.root_path, "imagenes")
-        self.curves_dir = os.path.join(self.root_path, "curvas")
-        self.matrices_dir = os.path.join(self.root_path, "matrices")
-        self.masks_dir = os.path.join(self.root_path, "mascaras")
-        self.excels_dir = os.path.join(self.root_path, "excels")
+    def __init__(self, root_path: str, config_path: str | None = None):
+        self.root_path = root_path
+        self.config_path = config_path or os.path.join(root_path, "config", "project.json")
+        self.next_n = 1
 
-    def ensure_structure(self) -> None:
-        for path in (
-            self.root_path,
-            self.config_dir,
-            self.images_dir,
-            self.curves_dir,
-            self.matrices_dir,
-            self.masks_dir,
-            self.excels_dir,
-        ):
-            os.makedirs(path, exist_ok=True)
+    @classmethod
+    def from_config_path(cls, config_path: str) -> "Project":
+        """Crea el proyecto a partir de un path a project.json."""
+        config_dir = os.path.dirname(config_path)
+        if os.path.basename(config_path) == "project.json" and os.path.basename(config_dir) == "config":
+            root_path = os.path.dirname(config_dir)
+        else:
+            root_path = os.path.dirname(config_path)
+        return cls(root_path, config_path)
 
     @property
-    def config_path(self) -> str:
-        return os.path.join(self.config_dir, "project.json")
+    def name(self) -> str:
+        """Nombre legible del proyecto."""
+        return os.path.basename(self.root_path) or "Proyecto"
 
-    def allocate_n(self, state: Dict[str, int]) -> int:
-        current = int(state.get("next_n", 1))
-        state["next_n"] = current + 1
-        return current
+    def ensure_structure(self) -> None:
+        """Crea la estructura estándar de carpetas."""
+        for folder in ("imagenes", "curvas", "matrices", "mascaras", "excels", "config"):
+            os.makedirs(os.path.join(self.root_path, folder), exist_ok=True)
+
+    def allocate_n(self) -> int:
+        """Obtiene el siguiente índice incremental para snapshots."""
+        n = self.next_n
+        self.next_n += 1
+        return n

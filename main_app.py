@@ -87,8 +87,10 @@ class MainApp:
         login_btn.grid(row=5, column=0, sticky="ew", pady=(0, 8)) 
 
     def on_close(self):
-        self.root.destroy()  # Cierra la ventana actual (root_2)
-        self.login_root.destroy()  # Cierra la ventana de login (root)
+        if self.root.winfo_exists():
+            self.root.destroy()  # Cierra la ventana actual (root_2)
+        if self.login_root.winfo_exists():
+            self.login_root.destroy()  # Cierra la ventana de login (root)
         
     def center_window(self, width, height):
         self.root.update_idletasks()
