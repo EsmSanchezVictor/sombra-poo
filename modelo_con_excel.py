@@ -137,10 +137,11 @@ def sombra_estructuras(X, Y, estructuras, theta_sol, azimut_sol):
     return np.clip(sombra_total, 0, 1)
 def calcular_coeficiente_conveccion(viento):
     return {"nulo": 5, "moderado": 15, "fuerte": 25}.get(viento, 10)
-def cargar_excel(vars):
-    filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
+def cargar_excel(vars, filepath=None):
+    if filepath is None:
+        filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
     if not filepath:
-        return
+        return None
     
     try:
         # Cargar árboles
@@ -149,8 +150,7 @@ def cargar_excel(vars):
         numeric_cols_arboles = ['X', 'Y', 'Altura (m)', 'Densidad_copa (0-1)', 'Radio_copa (m)']
         df_arboles[numeric_cols_arboles] = df_arboles[numeric_cols_arboles].apply(pd.to_numeric, errors='coerce').fillna(0)
         vars['arboles'] = [
-            Arbol(row['X'], row['Y'], row['Altura (m)'],
-                  row['Densidad_copa (0-1)'], row['Radio_copa (m)']) 
+            Arbol(row['X'], row['Y'], row['Altura (m)'],row['Densidad_copa (0-1)'], row['Radio_copa (m)']) 
             for _, row in df_arboles.iterrows()
         ]
         
@@ -178,8 +178,10 @@ def cargar_excel(vars):
         
         messagebox.showinfo("Éxito", "Datos cargados correctamente")
         vars['_update_required'] = True
+        return filepath
     except Exception as e:
         messagebox.showerror("Error", f"Error al cargar archivo:\n{str(e)}")
+        return None
 def generar_grafico(vars, frame):
     if '_update_required' not in vars or not vars['_update_required']:
         return

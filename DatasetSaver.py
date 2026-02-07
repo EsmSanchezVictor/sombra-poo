@@ -62,22 +62,24 @@ class DatasetSaver:
 
     def save_dataset(self):
         """Guarda la imagen y la máscara en los directorios correspondientes"""
+        project = getattr(self.app, "project_manager", None)
+        current_project = project.current_project if project else None
+        if not current_project:
+            return
         if not self.app.img_rgb.size or not self.app.shape_selector.area_seleccionada.size:
             print("Error: No hay imagen o área seleccionada para guardar")
             return
             
         try:
-            # Crear directorios si no existen
-            os.makedirs('imagenes', exist_ok=True)
-            os.makedirs('mascaras', exist_ok=True)
+            current_project.ensure_structure()
+            n = current_project.allocate_n()
             
             # Generar nombre de archivo único basado en timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            img_filename = f"{timestamp}.jpg"
-            mask_filename = f"{timestamp}_mask.png"
+            img_filename = f"elemento{n}.jpg"
+            mask_filename = f"Melemento{n}.png"
             
             # Guardar imagen original
-            img_path = os.path.join('imagenes', img_filename)
+            img_path = os.path.join(current_project.root_path, "imagenes", img_filename)
             cv2.imwrite(img_path, cv2.cvtColor(self.app.img_rgb, cv2.COLOR_RGB2BGR))
 
             # Registrar último recurso guardado para snapshots
@@ -85,7 +87,7 @@ class DatasetSaver:
                         
             # Crear y guardar máscara
             self.save_mask(img_filename, mask_filename)
-            self.app.last_mask_path = os.path.join('mascaras', mask_filename)
+            self.app.last_mask_path = os.path.join(current_project.root_path, "mascaras", mask_filename)
             
             # Actualizar archivo JSON
             self.update_mask_json(img_filename, mask_filename)
@@ -93,13 +95,15 @@ class DatasetSaver:
             print(f"Datos guardados correctamente: {img_filename}")
         except Exception as e:
             print(f"Error al guardar dataset: {str(e)}")
-
+            self.app.project_manager.save_project()
 
     def update_mask_json(self, img_filename, mask_filename):
         """Actualiza el archivo JSON con los nuevos datos de la máscara"""
         try:
+            current_project = self.app.project_manager.current_project
             # Obtener tamaño de la imagen
-            img_size = os.path.getsize(os.path.join('imagenes', img_filename))
+            img_size = os.path.getsize(os.path.join(current_project.root_path, "imagenes", img_filename))
+            
             
             # Generar estructura de datos para la máscara
             mask_entry = {
@@ -178,6 +182,7 @@ class DatasetSaver:
     def save_mask(self, img_filename, mask_filename):
         """Crea y guarda la máscara como imagen PNG binaria"""
         try:
+            current_project = self.app.project_manager.current_project
             # Verificar que hay una imagen cargada
             if not hasattr(self.app, 'img_rgb') or self.app.img_rgb is None:
                 raise ValueError("No hay imagen cargada para crear la máscara")
@@ -242,10 +247,10 @@ class DatasetSaver:
                 raise ValueError(f"Tipo de selección no soportado: {selection_type}")
 
             # Crear directorio si no existe
-            os.makedirs('mascaras', exist_ok=True)
+            os.makedirs(os.path.join(current_project.root_path, "mascaras"), exist_ok=True)
             
             # Guardar máscara como imagen PNG binaria (blanco=selección, negro=fondo)
-            mask_path = os.path.join('mascaras', mask_filename)
+            mask_path = os.path.join(current_project.root_path, "mascaras", mask_filename)
             if not cv2.imwrite(mask_path, mask):
                 raise RuntimeError(f"No se pudo guardar la máscara en {mask_path}")
 

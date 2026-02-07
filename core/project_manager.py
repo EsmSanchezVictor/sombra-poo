@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import zipfile
 from tkinter import filedialog, messagebox
 
 from core.project import Project
+from ui import dialogs
 
 
 class ProjectManager:
@@ -21,21 +23,35 @@ class ProjectManager:
         self.projects_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "proyectos"))
 
     def new_project(self) -> None:
-        """Inicia un proyecto vacío, preservando la UI."""
+        """Crea un proyecto con nombre y ubicación."""
         if not self.app._confirm_discard_changes("Nuevo proyecto"):
             return
+        name = dialogs.ask_project_name(self.app.root)
+        if not name:
+            return
+        location = dialogs.ask_project_location(self.app.root, self.app.locations_data)
+        if not location:
+            messagebox.showwarning("Nuevo proyecto", "Debe seleccionar una ubicación válida.")
+            return
+        project_dir = os.path.join(self.projects_root, name)
+        if os.path.exists(project_dir):
+            messagebox.showwarning("Nuevo proyecto", "Ya existe un proyecto con ese nombre.")
+            return
+        project = Project(project_dir)
+        project.ensure_structure()
+        self.current_project = project
+        self.app.current_project_path = project.config_path
         self.app._reset_scene()
         self.app._reset_vars_to_defaults()
-        self.current_project = None
-        self.app.current_project_path = None
+        self.app.apply_project_location(location)
         self.app.is_dirty = False
+        self._save_project_file(project.config_path)
+        self._update_last_project_path(project.config_path)
+        self.app.on_project_loaded()
 
     def open_project(self) -> None:
         """Abre un proyecto desde un JSON."""
-        file_path = filedialog.askopenfilename(
-            title="Abrir proyecto",
-            filetypes=[("Proyecto JSON", "*.json")],
-        )
+        file_path = self._select_project_path()
         if not file_path:
             return
         payload = self._load_project_file(file_path)
@@ -44,11 +60,12 @@ class ProjectManager:
         project = Project.from_config_path(file_path)
         project.ensure_structure()
         project.next_n = int(payload.get("next_n", 1))
-        self.app_state.apply_payload(payload)
         self.current_project = project
+        self.app_state.apply_payload(payload)        
         self.app.current_project_path = project.config_path
         self.app.is_dirty = False
         self._update_last_project_path(project.config_path)
+        self.app.on_project_loaded()
 
     def save_project(self) -> None:
         """Guarda el proyecto actual o solicita un destino."""
@@ -119,8 +136,8 @@ class ProjectManager:
         project = Project.from_config_path(config_path)
         project.ensure_structure()
         project.next_n = int(payload.get("next_n", 1))
-        self.app_state.apply_payload(payload)
         self.current_project = project
+        self.app_state.apply_payload(payload)        
         self.app.current_project_path = project.config_path
         self.app.is_dirty = False
         self._update_last_project_path(project.config_path)
@@ -134,6 +151,7 @@ class ProjectManager:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, ensure_ascii=False)
+        self._sync_excel_copies()    
         self.app.is_dirty = False
         self._update_last_project_path(path)
 
@@ -158,3 +176,29 @@ class ProjectManager:
             root_path = os.path.splitext(file_path)[0]
             return Project(root_path)
         return Project.from_config_path(file_path)
+
+    def _select_project_path(self) -> str | None:
+        file_path = filedialog.askopenfilename(
+            title="Abrir proyecto",
+            filetypes=[("Proyecto JSON", "*.json"), ("Todos los archivos", "*.*")],
+        )
+        if file_path:
+            return file_path
+        folder = filedialog.askdirectory(title="Abrir carpeta de proyecto")
+        if not folder:
+            return None
+        candidate = os.path.join(folder, "config", "project.json")
+        if os.path.exists(candidate):
+            return candidate
+        messagebox.showerror("Abrir proyecto", "No se encontró config/project.json en la carpeta seleccionada.")
+        return None
+
+    def _sync_excel_copies(self) -> None:
+        if not self.current_project:
+            return
+        target_dir = os.path.join(self.current_project.root_path, "excels")
+        os.makedirs(target_dir, exist_ok=True)
+        if self.app.last_edit_excel_path and os.path.exists(self.app.last_edit_excel_path):
+            shutil.copy(self.app.last_edit_excel_path, os.path.join(target_dir, "edicion.xlsx"))
+        if self.app.last_model_excel_path and os.path.exists(self.app.last_model_excel_path):
+            shutil.copy(self.app.last_model_excel_path, os.path.join(target_dir, "modelo.xlsx"))

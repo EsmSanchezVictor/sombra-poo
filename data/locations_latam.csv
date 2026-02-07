@@ -1,0 +1,46 @@
+country,province,city,lat,lon,tz,kind
+Argentina,Buenos Aires,Buenos Aires,-34.6037,-58.3816,America/Argentina/Buenos_Aires,capital
+Argentina,Córdoba,Córdoba,-31.4201,-64.1888,America/Argentina/Cordoba,capital
+Argentina,Santa Fe,Rosario,-32.9442,-60.6505,America/Argentina/Cordoba,city
+Argentina,Mendoza,Mendoza,-32.8895,-68.8458,America/Argentina/Mendoza,capital
+Argentina,Buenos Aires,La Plata,-34.9205,-57.9536,America/Argentina/Buenos_Aires,capital
+Argentina,Buenos Aires,Mar del Plata,-38.0055,-57.5426,America/Argentina/Buenos_Aires,city
+Argentina,Salta,Salta,-24.7821,-65.4232,America/Argentina/Salta,capital
+Argentina,Tucumán,San Miguel de Tucumán,-26.8083,-65.2176,America/Argentina/Tucuman,capital
+Argentina,Neuquén,Neuquén,-38.9516,-68.0591,America/Argentina/Neuquen,capital
+Argentina,Chubut,Comodoro Rivadavia,-45.8641,-67.4966,America/Argentina/Catamarca,city
+Uruguay,Montevideo,Montevideo,-34.9011,-56.1645,America/Montevideo,capital
+Uruguay,Salto,Salto,-31.3833,-57.9667,America/Montevideo,city
+Paraguay,Asunción,Asunción,-25.2637,-57.5759,America/Asuncion,capital
+Paraguay,Alto Paraná,Ciudad del Este,-25.5096,-54.6110,America/Asuncion,city
+Chile,Región Metropolitana,Santiago,-33.4489,-70.6693,America/Santiago,capital
+Chile,Valparaíso,Valparaíso,-33.0472,-71.6127,America/Santiago,city
+Chile,Biobío,Concepción,-36.8270,-73.0503,America/Santiago,city
+Bolivia,La Paz,La Paz,-16.4897,-68.1193,America/La_Paz,capital
+Bolivia,Santa Cruz,Santa Cruz de la Sierra,-17.7833,-63.1821,America/La_Paz,city
+Perú,Lima,Lima,-12.0464,-77.0428,America/Lima,capital
+Perú,Arequipa,Arequipa,-16.4090,-71.5375,America/Lima,city
+Ecuador,Pichincha,Quito,-0.1807,-78.4678,America/Guayaquil,capital
+Ecuador,Guayas,Guayaquil,-2.1894,-79.8891,America/Guayaquil,city
+Colombia,Bogotá,Bogotá,4.7110,-74.0721,America/Bogota,capital
+Colombia,Antioquia,Medellín,6.2442,-75.5812,America/Bogota,city
+Colombia,Valle del Cauca,Cali,3.4516,-76.5320,America/Bogota,city
+Venezuela,Distrito Capital,Caracas,10.4806,-66.9036,America/Caracas,capital
+Venezuela,Zulia,Maracaibo,10.6545,-71.6406,America/Caracas,city
+Brasil,Distrito Federal,Brasília,-15.7939,-47.8828,America/Sao_Paulo,capital
+Brasil,São Paulo,São Paulo,-23.5505,-46.6333,America/Sao_Paulo,city
+Brasil,Rio de Janeiro,Rio de Janeiro,-22.9068,-43.1729,America/Sao_Paulo,city
+Brasil,Minas Gerais,Belo Horizonte,-19.9167,-43.9345,America/Sao_Paulo,city
+Brasil,Bahia,Salvador,-12.9777,-38.5016,America/Bahia,city
+México,Ciudad de México,Ciudad de México,19.4326,-99.1332,America/Mexico_City,capital
+México,Jalisco,Guadalajara,20.6597,-103.3496,America/Mexico_City,city
+México,Nuevo León,Monterrey,25.6866,-100.3161,America/Monterrey,city
+Guatemala,Guatemala,Guatemala,-14.6349,-90.5069,America/Guatemala,capital
+Guatemala,Quetzaltenango,Quetzaltenango,14.8347,-91.5181,America/Guatemala,city
+Belice,Belize,Belmopán,17.2510,-88.7590,America/Belize,capital
+El Salvador,San Salvador,San Salvador,13.6929,-89.2182,America/El_Salvador,capital
+Honduras,Francisco Morazán,Tegucigalpa,14.0723,-87.1921,America/Tegucigalpa,capital
+Honduras,Cortés,San Pedro Sula,15.5007,-88.0250,America/Tegucigalpa,city
+Nicaragua,Managua,Managua,12.1140,-86.2362,America/Managua,capital
+Costa Rica,San José,San José,9.9281,-84.0907,America/Costa_Rica,capital
+Panamá,Panamá,Panamá,8.9824,-79.5199,America/Panama,capital

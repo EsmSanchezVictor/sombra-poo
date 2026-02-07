@@ -31,17 +31,29 @@ class AppState:
             name=project.name,
             saved_at=datetime.now().isoformat(),
         )
+        ui_state = {
+            "active_panel": self.app.active_panel,
+            "model_mode": self.app.modo_modelo.get(),
+            "edit_mode": getattr(self.app, "modo_edicion", tk.StringVar(value="advanced")).get(),
+            "panel2_advanced": getattr(self.app, "panel2_advanced_mode", tk.BooleanVar(value=False)).get(),
+            "selected_city": self.app.simple_city.get(),
+            "selected_country": self.app.simple_country.get(),
+            "last_image_path": self.app.last_image_path,
+            "last_curve_path": self.app.last_curve_path,
+            "last_matrix_path": self.app.last_matrix_path,
+            "last_mask_path": self.app.last_mask_path,
+            "last_histogram_path": getattr(self.app, "last_histogram_path", None),
+            "edit_excel_path": self.app.last_edit_excel_path,
+            "model_excel_path": self.app.last_model_excel_path,
+        }
         return {
             "version": 1,
             "meta": meta.__dict__,
+            "name": project.name,
+            "location": self.app.current_location or {},
             "next_n": project.next_n,
             "vars": self._serialize_vars(self.app.vars),
-            "ui": {
-                "active_panel": self.app.active_panel,
-                "mode": self.app.modo_modelo.get(),
-                "selected_city": self.app.simple_city.get(),
-                "selected_country": self.app.simple_country.get(),
-            },
+            "ui_state": ui_state,
             "scene": {
                 "arboles": [self._serialize_arbol(a) for a in self.app.vars.get("arboles", [])],
                 "estructuras": [self._serialize_estructura(e) for e in self.app.vars.get("estructuras", [])],
@@ -70,13 +82,25 @@ class AppState:
         self.app.vars["arboles"] = self._deserialize_arboles(scene.get("arboles", []))
         self.app.vars["estructuras"] = self._deserialize_estructuras(scene.get("estructuras", []))
 
-        ui = payload.get("ui", {})
-        self.app.modo_modelo.set(ui.get("mode", self.app.modo_modelo.get()))
+        ui = payload.get("ui_state", payload.get("ui", {}))
+        self.app.modo_modelo.set(ui.get("model_mode", ui.get("mode", self.app.modo_modelo.get())))
+        if hasattr(self.app, "modo_edicion"):
+            self.app.modo_edicion.set(ui.get("edit_mode", self.app.modo_edicion.get()))
+        if hasattr(self.app, "panel2_advanced_mode"):
+            self.app.panel2_advanced_mode.set(ui.get("panel2_advanced", self.app.panel2_advanced_mode.get()))
         self.app.simple_country.set(ui.get("selected_country", self.app.simple_country.get()))
         if self.app.locations_data:
             self.app._update_city_options()
         self.app.simple_city.set(ui.get("selected_city", self.app.simple_city.get()))
         self.app._toggle_modelo_mode()
+        if hasattr(self.app, "_toggle_edicion_mode"):
+            self.app._toggle_edicion_mode()
+        if hasattr(self.app, "_toggle_panel2_advanced"):
+            self.app._toggle_panel2_advanced()
+
+        location = payload.get("location")
+        if location:
+            self.app.apply_project_location(location)
 
         if hasattr(self.app, "entry_lat") and self.app.entry_lat:
             self.app.entry_lat.delete(0, tk.END)
@@ -91,6 +115,15 @@ class AppState:
         target_panel = ui.get("active_panel")
         if isinstance(target_panel, int) and 0 <= target_panel < len(self.app.panel_frames):
             self.app.open_panel(target_panel)
+        
+        self.app.last_image_path = ui.get("last_image_path")
+        self.app.last_curve_path = ui.get("last_curve_path")
+        self.app.last_matrix_path = ui.get("last_matrix_path")
+        self.app.last_mask_path = ui.get("last_mask_path")
+        self.app.last_histogram_path = ui.get("last_histogram_path")
+        self.app.last_edit_excel_path = ui.get("edit_excel_path")
+        self.app.last_model_excel_path = ui.get("model_excel_path")
+        self.app.restore_project_artifacts()
 
     def _serialize_vars(self, vars_dict: dict) -> dict:
         data = {}
