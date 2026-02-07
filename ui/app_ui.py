@@ -511,6 +511,7 @@ class SombraApp:
             return        
         self.original_rgb = self.img_rgb
         self.last_image_path = file_path
+        self._ensure_panel2_image_canvas()
         if hasattr(self, "ax1"):
             self.ax1.clear()
             self.ax1.imshow(self.img_rgb)
@@ -1646,7 +1647,8 @@ class SombraApp:
         self.canvas2.get_tk_widget().pack(side=tk.RIGHT)
     def cargar_imagen(self):
         if not self.require_project("cargar una imagen"):
-            return        
+            return  
+        self.show_panel2_frames()      
         file_path = filedialog.askopenfilename(
             filetypes=[
                 ("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff"),
@@ -1661,6 +1663,7 @@ class SombraApp:
                 return
             self.original_rgb = self.img_rgb
             self.last_image_path = file_path
+            self._ensure_panel2_image_canvas()
             self.ax1.clear()
             self.ax1.imshow(self.img_rgb)
             self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
@@ -1677,6 +1680,17 @@ class SombraApp:
                 )
             else:
                 self.mouse_hover_pixel_value.img_rgb = self.img_rgb
+                
+    def _ensure_panel2_image_canvas(self):
+        canvas = getattr(self, "canvas1", None)
+        if canvas is None:
+            self.imagen(self.frame2)
+            self.activar_mouse()
+            return
+        widget = canvas.get_tk_widget()
+        if not widget.winfo_exists():
+            self.imagen(self.frame2)
+            self.activar_mouse()
     def calculate_temperature_in_shade(self):
         if not self.require_project("calcular temperatura en sombra"):
             return
