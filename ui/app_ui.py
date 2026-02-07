@@ -503,7 +503,12 @@ class SombraApp:
         return path_value
 
     def _load_image_from_path(self, file_path: str):
-        self.img, self.img_rgb = self.image_processor.load_image(file_path)
+        #self.img, self.img_rgb = self.image_processor.load_image(file_path)
+        try:
+            self.img, self.img_rgb = self.image_processor.load_image(file_path)
+        except ValueError as exc:
+            messagebox.showerror("Error", str(exc))
+            return        
         self.original_rgb = self.img_rgb
         self.last_image_path = file_path
         if hasattr(self, "ax1"):
@@ -554,6 +559,7 @@ class SombraApp:
         self.vars = self._build_vars()
         self.vars_modelo = self._build_vars()
         self.modo_modelo = tk.StringVar(value="simple")
+        self.modo_edicion = tk.StringVar(value="simple")
         self.panel2_advanced_mode = tk.BooleanVar(value=False)
         self.simple_country = tk.StringVar()
         self.simple_city = tk.StringVar()
@@ -1641,9 +1647,18 @@ class SombraApp:
     def cargar_imagen(self):
         if not self.require_project("cargar una imagen"):
             return        
-        file_path = filedialog.askopenfilename()
+        file_path = filedialog.askopenfilename(
+            filetypes=[
+                ("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff"),
+                ("Todos los archivos", "*.*"),
+            ]
+        )
         if file_path:
-            self.img, self.img_rgb = self.image_processor.load_image(file_path)
+            try:
+                self.img, self.img_rgb = self.image_processor.load_image(file_path)
+            except ValueError as exc:
+                messagebox.showerror("Error", str(exc))
+                return
             self.original_rgb = self.img_rgb
             self.last_image_path = file_path
             self.ax1.clear()

@@ -87,11 +87,16 @@ class MainApp:
         login_btn.grid(row=5, column=0, sticky="ew", pady=(0, 8)) 
 
     def on_close(self):
-        if self.root.winfo_exists():
-            self.root.destroy()  # Cierra la ventana actual (root_2)
-        if self.login_root.winfo_exists():
-            self.login_root.destroy()  # Cierra la ventana de login (root)
-        
+        try:
+            if self.root.winfo_exists():
+                self.root.destroy()  # Cierra la ventana actual (root_2)
+        except tk.TclError:
+            pass
+        try:
+            if self.login_root.winfo_exists():
+                self.login_root.destroy()  # Cierra la ventana de login (root)
+        except tk.TclError:
+            pass
     def center_window(self, width, height):
         self.root.update_idletasks()
         screen_width = self.root.winfo_screenwidth()
