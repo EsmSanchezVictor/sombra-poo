@@ -4,7 +4,13 @@ import numpy as np
 class ImageProcessor:
     def load_image(self, file_path):
         img = cv2.imread(file_path)
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        #img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        if img is None:
+            raise ValueError("No se pudo leer la imagen seleccionada.")
+        try:
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        except cv2.error as exc:
+            raise ValueError("El archivo seleccionado no es una imagen válida.") from exc
         return img, img_rgb
 
     def convertir_a_grises(self, area, matriz_size):
