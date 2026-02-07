@@ -558,8 +558,9 @@ def guardar(vars, app):
         messagebox.showinfo("Éxito", "Archivo guardado correctamente")
     except Exception as e:
         messagebox.showerror("Error", f"Error al guardar:\n{str(e)}")
-def abrir_archivo(vars, app):
-    filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
+def abrir_archivo(vars, app, filepath=None):
+    if filepath is None:
+        filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
     if filepath:
         try:
             df_arboles = pd.read_excel(filepath, sheet_name='Árboles')
@@ -588,5 +589,8 @@ def abrir_archivo(vars, app):
             target_frame = getattr(app, "frame7", app.frame2)
             actualizar_grafico(vars, target_frame)
             messagebox.showinfo("Éxito", "Archivo cargado correctamente")
+            return filepath
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar archivo:\n{str(e)}")
+            return None
+    return None

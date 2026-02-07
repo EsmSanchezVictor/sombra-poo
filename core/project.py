@@ -30,7 +30,16 @@ class Project:
 
     def ensure_structure(self) -> None:
         """Crea la estructura estándar de carpetas."""
-        for folder in ("imagenes", "curvas", "matrices", "mascaras", "excels", "config"):
+        folders = (
+            "imagenes",
+            "curvas",
+            "matrices",
+            "mascaras",
+            "excels",
+            os.path.join("resultados", "histogramas"),
+            "config",
+        )
+        for folder in folders:
             os.makedirs(os.path.join(self.root_path, folder), exist_ok=True)
 
     def allocate_n(self) -> int:

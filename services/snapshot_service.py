@@ -32,20 +32,29 @@ class SnapshotService:
         mask_path = os.path.join(project.root_path, "mascaras", f"Melemento{n}.xlsx")
         model_excel = os.path.join(project.root_path, "excels", "modelo.xlsx")
         edit_excel = os.path.join(project.root_path, "excels", "edicion.xlsx")
+        histogram_path = os.path.join(project.root_path, "resultados", "histogramas", f"helemento{n}.png")
 
         # Guardar figuras disponibles
         if getattr(self.app, "fig1", None) is not None:
             self.app.fig1.savefig(img_path, dpi=150, bbox_inches="tight")
+            self.app.last_image_path = img_path
         if getattr(self.app, "fig2", None) is not None:
             self.app.fig2.savefig(curve_path, dpi=150, bbox_inches="tight")
-
+            self.app.last_curve_path = curve_path
+            
         # Guardar matrices si están presentes en la selección
         if getattr(self.app, "shape_selector", None) is not None:
             if getattr(self.app.shape_selector, "area_seleccionada", None) is not None:
                 pd.DataFrame(self.app.shape_selector.area_seleccionada).to_excel(matrix_path, index=False)
+                self.app.last_matrix_path = matrix_path
             if getattr(self.app.shape_selector, "area_referencia", None) is not None:
                 pd.DataFrame(self.app.shape_selector.area_referencia).to_excel(mask_path, index=False)
+                self.app.last_mask_path = mask_path
 
+        if getattr(self.app, "last_histogram_path", None):
+            self._copy_if_exists(self.app.last_histogram_path, histogram_path, "histograma")
+            self.app.last_histogram_path = histogram_path
+            
         # Copiar artefactos adicionales si existen
         self._copy_if_exists(self.app.last_model_excel_path, model_excel, "excel modelo")
         self._copy_if_exists(self.app.last_edit_excel_path, edit_excel, "excel edición")

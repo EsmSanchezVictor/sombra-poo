@@ -1,11 +1,11 @@
 from datetime import datetime
 from io import BytesIO
-import csv
 import os
 import tkinter as tk
 from tkinter import ttk
 
 import numpy as np
+import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 from PIL import Image, ImageTk
@@ -18,6 +18,7 @@ from core.project_manager import ProjectManager
 from image_processor import ImageProcessor
 from mouse_pixel_value import MouseHoverPixelValueWithTooltip
 from save_pdf import PDFReportGenerator
+from services.location_service import LocationService
 from services.snapshot_service import SnapshotService
 from shape_selection import ShapeSelector
 from shadow_temp import Temperatura
@@ -59,6 +60,7 @@ class SombraApp:
         self.settings_manager = SettingsManager(self.settings_path)
         self.settings = self.settings_manager.load()
         self.current_project_path = self.settings.get("last_project_path")
+        self.current_location = None        
         self.is_dirty = False
         self.last_T = None
         self.last_shadow = None
@@ -69,6 +71,7 @@ class SombraApp:
         self.last_curve_path = None
         self.last_matrix_path = None
         self.last_mask_path = None
+        self.last_histogram_path = None
 
         # Crear frames principales con una estética consistente
         self.frame0 = tk.Frame(
@@ -216,7 +219,13 @@ class SombraApp:
         self.frame12.grid_remove()
         self.frame13.grid_remove()
         self.frame14.grid_remove()
-        
+
+        self.startup_frame = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )        
         # Configurar pesos de las filas y columnas
         root.grid_rowconfigure(0, weight=0)
         root.grid_rowconfigure(1, weight=1)
@@ -325,49 +334,216 @@ class SombraApp:
         self.imagen(self.frame2)
         self.curva_de_nivel(self.frame3)
         self.activar_mouse()
+        self.setup_startup_screen()
+        self.show_startup_screen()
     
-    def load_locations_csv(self, path):
-        if not os.path.exists(path):
-            return None, f"No se encontró el archivo de ubicaciones: {path}"
-        try:
-            countries = set()
-            cities_by_country = {}
-            lookup = {}
-            with open(path, newline="", encoding="utf-8") as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    country = row.get("country", "").strip()
-                    city = row.get("city", "").strip()
-                    province = row.get("province", "").strip()
-                    if not country or not city:
-                        continue
-                    label = f"{city} ({province})" if province else city
-                    countries.add(country)
-                    cities_by_country.setdefault(country, []).append(label)
-                    lookup[label] = {
-                        "country": country,
-                        "city": city,
-                        "province": province,
-                        "lat": float(row.get("lat", 0) or 0),
-                        "lon": float(row.get("lon", 0) or 0),
-                        "tz": row.get("tz", "").strip(),
-                        "kind": row.get("kind", "").strip(),
-                    }
-            countries_list = sorted(countries)
-            for country in cities_by_country:
-                cities_by_country[country] = sorted(cities_by_country[country])
-            return {"countries": countries_list, "cities": cities_by_country, "lookup": lookup}, None
-        except Exception as exc:
-            return None, f"No se pudo leer el archivo de ubicaciones: {exc}"    
+    
     def activar_mouse(self):
         # Vincular eventos de mouse
         self.canvas1.mpl_connect('button_press_event', self.shape_selector.on_mouse_press)
         self.canvas1.mpl_connect('motion_notify_event', self.shape_selector.on_mouse_move)
         self.canvas1.mpl_connect('button_release_event', self.shape_selector.on_mouse_release)
+    
+    def setup_startup_screen(self):
+        for widget in self.startup_frame.winfo_children():
+            widget.destroy()
+        self.startup_frame.grid_columnconfigure(0, weight=1)
+        title = tk.Label(
+            self.startup_frame,
+            text="Gestión de proyectos",
+            bg=self.palette["panel"],
+            font=("Arial", 12, "bold"),
+        )
+        title.grid(row=0, column=0, padx=20, pady=(20, 8))
+        tk.Label(
+            self.startup_frame,
+            text="Para continuar, cree o abra un proyecto.",
+            bg=self.palette["panel"],
+        ).grid(row=1, column=0, padx=20, pady=(0, 16))
+        tk.Button(
+            self.startup_frame,
+            text="Crear proyecto",
+            command=self.new_project,
+            bg="#4CAF50",
+            fg="white",
+            width=20,
+        ).grid(row=2, column=0, pady=6)
+        tk.Button(
+            self.startup_frame,
+            text="Abrir proyecto",
+            command=self.open_project,
+            bg="#4CAF50",
+            fg="white",
+            width=20,
+        ).grid(row=3, column=0, pady=(0, 16))
+
+    def show_startup_screen(self):
+        self.hide_all_frames()
+        self.set_project_ui_enabled(False)
+        self.startup_frame.grid(row=1, column=1, columnspan=2, rowspan=3, sticky="nsew", padx=30, pady=30)
+        if hasattr(self, "entry_lat") and self.entry_lat:
+            self.entry_lat.config(state="disabled")
+        if hasattr(self, "entry_lon") and self.entry_lon:
+            self.entry_lon.config(state="disabled")
+
+    def hide_startup_screen(self):
+        self.startup_frame.grid_remove()
+
+    def on_project_loaded(self):
+        self.hide_startup_screen()
+        self.set_project_ui_enabled(True)
+        if self.current_location:
+            self._update_location_labels()
+
+    def set_project_ui_enabled(self, enabled: bool):
+        state = tk.NORMAL if enabled else tk.DISABLED
+        for button in getattr(self, "buttons", []):
+            button.config(state=state)
+        if hasattr(self, "calculate_temp_button"):
+            self.calculate_temp_button.config(state=state)
+        if hasattr(self, "cargar_imagen_button"):
+            self.cargar_imagen_button.config(state=state)
+
+    def require_project(self, action_label: str) -> bool:
+        if self.project_manager.current_project is None:
+            messagebox.showwarning("Proyecto requerido", f"Debe crear o abrir un proyecto para {action_label}.")
+            return False
+        return True
+
+    def _run_with_project(self, action_label: str, callback):
+        if not self.require_project(action_label):
+            return
+        callback()
+
+    def apply_project_location(self, location: dict) -> None:
+        self.current_location = location
+        lat = float(location.get("lat", 0))
+        lon = float(location.get("lon", 0))
+        self.vars["lat"].set(lat)
+        self.vars["lon"].set(lon)
+        self.vars_modelo["lat"].set(lat)
+        self.vars_modelo["lon"].set(lon)
+        self.vars["_update_required"] = True
+        self.vars_modelo["_update_required"] = True
+        if hasattr(self, "entry_lat") and self.entry_lat:
+            self.entry_lat.config(state="normal")
+            self.entry_lat.delete(0, tk.END)
+            self.entry_lat.insert(0, str(lat))
+            self.entry_lat.config(state="disabled")
+        if hasattr(self, "entry_lon") and self.entry_lon:
+            self.entry_lon.config(state="normal")
+            self.entry_lon.delete(0, tk.END)
+            self.entry_lon.insert(0, str(lon))
+            self.entry_lon.config(state="disabled")
+        if self.locations_data:
+            self.simple_country.set(location.get("country", ""))
+            self._update_city_options()
+            label = location.get("city", "")
+            if location.get("province"):
+                label = f"{label} ({location.get('province')})"
+            self.simple_city.set(label)
+            if hasattr(self, "country_combo"):
+                self.country_combo.config(state="disabled")
+            if hasattr(self, "city_combo"):
+                self.city_combo.config(state="disabled")
+            if hasattr(self, "apply_location_button"):
+                self.apply_location_button.config(state="disabled")
+        self._update_location_labels()
+
+    def _update_location_labels(self):
+        if not self.current_location:
+            return
+        city = self.current_location.get("city", "")
+        province = self.current_location.get("province", "")
+        country = self.current_location.get("country", "")
+        location_label = f"{city} ({province}) - {country}" if province else f"{city} - {country}"
+        if hasattr(self, "edit_location_label"):
+            self.edit_location_label.config(text=location_label)
+        if hasattr(self, "edit_latlon_label"):
+            self.edit_latlon_label.config(
+                text=f"Lat/Lon: {self.current_location.get('lat', 0)}, {self.current_location.get('lon', 0)}"
+            )
+
+    def restore_project_artifacts(self):
+        self.last_image_path = self._resolve_artifact_path(self.last_image_path, "imagenes")
+        self.last_curve_path = self._resolve_artifact_path(self.last_curve_path, "curvas")
+        self.last_mask_path = self._resolve_artifact_path(self.last_mask_path, "mascaras")
+        if self.last_image_path and os.path.exists(self.last_image_path):
+            self._load_image_from_path(self.last_image_path)
+        if self.last_curve_path and os.path.exists(self.last_curve_path):
+            self._load_curve_from_path(self.last_curve_path)
+        if self.last_mask_path and os.path.exists(self.last_mask_path):
+            self._load_mask_from_path(self.last_mask_path)
+        self._restore_excel_files()
+
+    def _restore_excel_files(self):
+        self.last_edit_excel_path = self._resolve_artifact_path(self.last_edit_excel_path, "excels", "edicion.xlsx")
+        self.last_model_excel_path = self._resolve_artifact_path(self.last_model_excel_path, "excels", "modelo.xlsx")
+        if self.last_edit_excel_path and os.path.exists(self.last_edit_excel_path):
+            loaded = design.abrir_archivo(self.vars, self, filepath=self.last_edit_excel_path)
+            if loaded:
+                self.last_edit_excel_path = loaded
+        if self.last_model_excel_path and os.path.exists(self.last_model_excel_path):
+            loaded = modelo.cargar_excel(self.vars_modelo, filepath=self.last_model_excel_path)
+            if loaded:
+                self.last_model_excel_path = loaded
+
+    def _resolve_artifact_path(self, path_value, folder, filename=None):
+        if path_value and os.path.exists(path_value):
+            return path_value
+        project = self.project_manager.current_project
+        if not project:
+            return path_value
+        if filename:
+            candidate = os.path.join(project.root_path, folder, filename)
+        else:
+            candidate = os.path.join(project.root_path, folder, os.path.basename(path_value)) if path_value else None
+        if candidate and os.path.exists(candidate):
+            return candidate
+        return path_value
+
+    def _load_image_from_path(self, file_path: str):
+        self.img, self.img_rgb = self.image_processor.load_image(file_path)
+        self.original_rgb = self.img_rgb
+        self.last_image_path = file_path
+        if hasattr(self, "ax1"):
+            self.ax1.clear()
+            self.ax1.imshow(self.img_rgb)
+            self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
+            self.canvas1.draw()
+        self.shape_selector.enable_calculo_button()
+
+    def _load_curve_from_path(self, file_path: str):
+        if not self.curva_frame:
+            return
+        img = Image.open(file_path)
+        self.curva_img_pil_original = img
+        resized_img = self._fit_image_to_frame(self.curva_img_pil_original, self.curva_frame)
+        photo = ImageTk.PhotoImage(resized_img)
+        if self.curva_label is None:
+            self.curva_label = tk.Label(self.curva_frame, image=photo, bg=self.curva_frame.cget("bg"))
+            self.curva_label.pack(expand=True, fill='both')
+        else:
+            self.curva_label.configure(image=photo)
+        self.curva_photo = photo
+        self.curva_label.image = photo
+
+    def _load_mask_from_path(self, file_path: str):
+        ext = os.path.splitext(file_path)[1].lower()
+        try:
+            if ext in (".xlsx", ".xls"):
+                data = pd.read_excel(file_path)
+                self.shape_selector.area_referencia = data.to_numpy()
+            elif ext in (".png", ".jpg", ".jpeg"):
+                self.shape_selector.area_referencia = np.array(Image.open(file_path).convert("L"))
+        except Exception:
+            return
+        
     def setup_variables(self):
         """Inicializa las variables de control para la aplicación"""
         self.selection_type = tk.StringVar(value="Polígono")
-        self.matriz_size = tk.IntVar(value=1024)
+        self.matriz_size = tk.IntVar(value=480)
+        self.panel2_advanced_mode = tk.BooleanVar(value=False)        
         self.drawing_mode = None
         self.img = None
         self.img_rgb = None
@@ -378,12 +554,13 @@ class SombraApp:
         self.vars = self._build_vars()
         self.vars_modelo = self._build_vars()
         self.modo_modelo = tk.StringVar(value="simple")
+        self.panel2_advanced_mode = tk.BooleanVar(value=False)
         self.simple_country = tk.StringVar()
         self.simple_city = tk.StringVar()
         self.simple_cloudiness = tk.StringVar(value="Despejado")
         self.simple_temp_air_c = tk.DoubleVar(value=25.0)
-        self.locations_path = os.path.join(self.base_dir, "data", "locations_ar.csv")
-        self.locations_data, self.locations_error = self.load_locations_csv(self.locations_path)
+        self.locations_path = os.path.join(self.base_dir, "data", "locations_latam.csv")
+        self.locations_data, self.locations_error = LocationService(self.locations_path).load()
         if self.locations_data and self.locations_data["countries"]:
             self.simple_country.set(self.locations_data["countries"][0])
         # Controles de parámetros
@@ -453,36 +630,48 @@ class SombraApp:
         self.entry_lat = self.entries[3]
         self.entry_lon = self.entries[4]
         
-        calculate_button = tk.Button(panel, text="Calcular temperatura en sombra", command=self.calculate_temperature_in_shade)
-        calculate_button.pack(padx=20, pady=20)
+        self.calculate_temp_button = tk.Button(
+            panel,
+            text="Calcular temperatura en sombra",
+            command=self.calculate_temperature_in_shade,
+        )
+        self.calculate_temp_button.pack(padx=20, pady=20)
     def setup_panel_2(self):
         """Configura el contenido del Panel 2"""
         panel = self.panel_frames[1]
 
         # Botone para cargar la imagen a analizar 
-        cargar_imagen_button = tk.Button(panel, text="Cargar imagen",command=self.cargar_imagen, bg='#4CAF50', fg='white', font=("Arial", 10, "bold"))
-        cargar_imagen_button.pack(anchor="w",padx=20, pady=10)
-        
-        # Selección de tipo de área
-        area_label = tk.Label(panel, text="Seleccione el tipo de área:", bg=panel.cget("bg"), fg="black")
-        area_label.pack(anchor="w", padx=20, pady=10)
+        self.cargar_imagen_button = tk.Button(
+            panel,
+            text="Cargar imagen",
+            command=self.cargar_imagen,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 10, "bold"),
+        )
+        self.cargar_imagen_button.pack(anchor="w", padx=20, pady=10)
+        tk.Checkbutton(
+            panel,
+            text="Modo avanzado (tamaño de matriz)",
+            variable=self.panel2_advanced_mode,
+            bg=panel.cget("bg"),
+            command=self._toggle_panel2_advanced,
+        ).pack(anchor="w", padx=20, pady=4)
 
-        selection_type = tk.StringVar(value="Rectángulo")  # Variable para seleccionar entre rectángulo y círculo
-        self.rect_button = tk.Radiobutton(panel, text="Rectángulo", variable=selection_type, value="Rectángulo", bg=panel.cget("bg"), fg="black")
-        self.rect_button.pack(anchor="w", padx=20)
 
-        self.circ_button = tk.Radiobutton(panel, text="Círculo", variable=selection_type, value="Círculo", bg=panel.cget("bg"), fg="black")
-        self.circ_button.pack(anchor="w", padx=20)
 
-        self.circ_button = tk.Radiobutton(panel, text="Polígono", variable=selection_type, value="Polígono", bg=panel.cget("bg"), fg="black")
-        self.circ_button.pack(anchor="w", padx=20)
         
         # Selección del tamaño de la matriz
         matrix_label = tk.Label(panel, text="Seleccione el tamaño de la matriz:", bg=panel.cget("bg"), fg="black")
         matrix_label.pack(anchor="w", padx=20, pady=10)
 
-        matrix_size = ttk.Combobox(panel, values=[480, 640, 800, 1024])
-        matrix_size.pack(anchor="w", padx=20, pady=5)
+        self.matrix_size_combo = ttk.Combobox(
+            panel,
+            textvariable=self.matriz_size,
+            values=[480, 640, 800, 1024],
+            state="readonly",
+        )
+        self.matrix_size_combo.pack(anchor="w", padx=20, pady=5)
 
         # Botones de selección de área
         self.area_calc_button = tk.Button(panel, text="Seleccione área de cálculo",bg='blue',fg='white', command=self.shape_selector.select_area_calculo, state=tk.DISABLED)
@@ -513,8 +702,7 @@ class SombraApp:
         
         self.save_dataset_button = tk.Button(panel, text="Guardar Dataset", command=self.save_dataset, state=tk.DISABLED)
         self.save_dataset_button.pack(pady=10)
-        
-        
+        self._toggle_panel2_advanced()
         
     def setup_panel_3(self):
         """Configura el contenido del Panel 3"""
@@ -540,7 +728,7 @@ class SombraApp:
         add_arbol = tk.Button(
             acciones,
             text="Añadir Árbol",
-            command=lambda: design.establecer_modo('arbol', self),
+            command=lambda: self._run_with_project("editar la escena", lambda: design.establecer_modo('arbol', self)),
             bg='#4CAF50',
             fg='white',
             font=("Arial", 8, "bold"),
@@ -550,7 +738,7 @@ class SombraApp:
         add_estructura = tk.Button(
             acciones,
             text="Añadir Estructura",
-            command=lambda: design.establecer_modo('estructura', self),
+            command=lambda: self._run_with_project("editar la escena", lambda: design.establecer_modo('estructura', self)),
             bg='#4CAF50',
             fg='white',
             font=("Arial", 8, "bold"),
@@ -560,7 +748,7 @@ class SombraApp:
         seleccionar = tk.Button(
             acciones,
             text="Seleccionar",
-            command=lambda: design.establecer_modo(None, self),
+            command=lambda: self._run_with_project("editar la escena", lambda: design.establecer_modo(None, self)),
             bg='#4CAF50',
             fg='white',
             font=("Arial", 8, "bold"),
@@ -570,7 +758,7 @@ class SombraApp:
         guardar = tk.Button(
             acciones,
             text="Guardar como",
-            command=lambda: design.guardar_como(self.vars, self),
+            command=lambda: self._run_with_project("guardar el archivo de edición", lambda: design.guardar_como(self.vars, self)),
             bg='#4CAF50',
             fg='white',
             font=("Arial", 8, "bold"),
@@ -580,7 +768,7 @@ class SombraApp:
         abrir = tk.Button(
             acciones,
             text="Abrir",
-            command=lambda: design.abrir_archivo(self.vars, self),
+            command=lambda: self.abrir_excel_edicion(),
             bg='#4CAF50',
             fg='white',
             font=("Arial", 8, "bold"),
@@ -590,7 +778,7 @@ class SombraApp:
         grafico = tk.Button(
             acciones,
             text="Generar gráfico",
-            command=lambda: self.actualizar_grafico_diseno(self.frame7),
+            command=lambda: self._run_with_project("generar el gráfico de edición", lambda: self.actualizar_grafico_diseno(self.frame7)),
             bg='#4CAF50',
             fg='white',
             font=("Arial", 8, "bold"),
@@ -600,26 +788,60 @@ class SombraApp:
         vista_3d = tk.Button(
             acciones,
             text="Vista 3D",
-            command=lambda: design.generar_3d(self.vars),
+            command=lambda: self._run_with_project("generar la vista 3D", lambda: design.generar_3d(self.vars)),
             bg='#4CAF50',
             fg='white',
             font=("Arial", 8, "bold"),
         )
         vista_3d.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=4)
 
-        Label_viento = tk.Label(contenido, text="Viento", bg=panel.cget("bg"))
-        Label_viento.grid(row=2, column=0, sticky="w", pady=(8, 2))
-        lista_viento = ttk.Combobox(
-            contenido,
+        modo_frame = tk.Frame(contenido, bg=panel.cget("bg"))
+        modo_frame.grid(row=2, column=0, sticky="w", pady=4)
+        tk.Radiobutton(
+            modo_frame,
+            text="Modo Simple",
+            variable=self.modo_edicion,
+            value="simple",
+            bg=panel.cget("bg"),
+            command=self._toggle_edicion_mode,
+        ).grid(row=0, column=0, sticky="w")
+        tk.Radiobutton(
+            modo_frame,
+            text="Modo Avanzado",
+            variable=self.modo_edicion,
+            value="advanced",
+            bg=panel.cget("bg"),
+            command=self._toggle_edicion_mode,
+        ).grid(row=0, column=1, sticky="w", padx=10)
+
+        self.simple_edit_frame = tk.Frame(contenido, bg=panel.cget("bg"))
+        self.simple_edit_frame.grid(row=3, column=0, sticky="nsew", pady=6)
+        self.simple_edit_frame.grid_columnconfigure(1, weight=1)
+        tk.Label(self.simple_edit_frame, text="Ubicación fija del proyecto", bg=panel.cget("bg")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
+        )
+        self.edit_location_label = tk.Label(self.simple_edit_frame, text="Sin proyecto", bg=panel.cget("bg"))
+        self.edit_location_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=2)
+        self.edit_latlon_label = tk.Label(self.simple_edit_frame, text="", bg=panel.cget("bg"))
+        self.edit_latlon_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=2)
+
+        self.advanced_edit_frame = tk.Frame(contenido, bg=panel.cget("bg"))
+        self.advanced_edit_frame.grid(row=3, column=0, sticky="nsew", pady=6)
+        self.advanced_edit_frame.grid_columnconfigure(0, weight=1)
+
+        label_viento = tk.Label(self.advanced_edit_frame, text="Viento", bg=panel.cget("bg"))
+        label_viento.grid(row=0, column=0, sticky="w", pady=(8, 2))
+        ttk.Combobox(
+            self.advanced_edit_frame,
             textvariable=self.vars["viento"],
             values=["nulo", "moderado", "fuerte"],
-        )
-        lista_viento.grid(row=3, column=0, sticky="ew", pady=2)
+        ).grid(row=1, column=0, sticky="ew", pady=2)
 
-        panelin = tk.Frame(contenido, bg=panel.cget("bg"))
-        panelin.grid(row=4, column=0, sticky="nsew", pady=6)
+        panelin = tk.Frame(self.advanced_edit_frame, bg=panel.cget("bg"))
+        panelin.grid(row=2, column=0, sticky="nsew", pady=6)
         for texto, var, fila, rango, es_fecha in self.controles:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
+        self._toggle_edicion_mode()    
     def setup_panel_4(self):
         """Configura el contenido del Panel 4"""
         panel = self.panel_frames[3]
@@ -662,7 +884,7 @@ class SombraApp:
         tk.Button(
             acciones_frame,
             text="Cargar Excel",
-            command=lambda: modelo.cargar_excel(self.vars_modelo),
+            command=self.cargar_excel_modelo,
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
@@ -721,7 +943,7 @@ class SombraApp:
         self.city_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_location(False))
         self.city_combo.bind("<KeyRelease>", self._filter_city_options)
 
-        tk.Button(
+        self.apply_location_button = tk.Button(
             self.simple_frame,
             text="Aplicar ubicación",
             command=lambda: self._apply_location(True),
@@ -729,7 +951,8 @@ class SombraApp:
             fg="white",
             font=("Arial", 8, "bold"),
             state="normal" if self.locations_data else "disabled",
-        ).grid(row=3, column=1, sticky="w", pady=4, padx=(8, 0))
+        )
+        self.apply_location_button.grid(row=3, column=1, sticky="w", pady=4, padx=(8, 0))
 
         tk.Label(self.simple_frame, text="Nubosidad", bg=panel.cget("bg")).grid(row=4, column=0, sticky="w", pady=2)
         ttk.Combobox(
@@ -827,6 +1050,22 @@ class SombraApp:
         else:
             self.simple_frame.grid_remove()
             self.advanced_frame.grid()
+    
+    def _toggle_edicion_mode(self):
+        if self.modo_edicion.get() == "simple":
+            self.advanced_edit_frame.grid_remove()
+            self.simple_edit_frame.grid()
+        else:
+            self.simple_edit_frame.grid_remove()
+            self.advanced_edit_frame.grid()
+
+    def _toggle_panel2_advanced(self):
+        if self.panel2_advanced_mode.get():
+            self.matrix_size_combo.config(state="readonly")
+        else:
+            self.matriz_size.set(480)
+            self.matrix_size_combo.config(state="disabled")
+
 
     def _update_city_options(self):
         if not self.locations_data:
@@ -875,6 +1114,8 @@ class SombraApp:
         return True
 
     def generar_grafico_modelo(self):
+        if not self.require_project("generar el gráfico del modelo"):
+            return
         if self.modo_modelo.get() == "simple":
             if self.locations_data:
                 city_label = self.simple_city.get().strip()
@@ -903,18 +1144,22 @@ class SombraApp:
             self.last_shadow = result.get("shadow")
             self.last_meta = result.get("meta")
     def toggle_panel(self, index):
-            if self.is_animating:
-                return
+        if not self.require_project("acceder a los paneles"):
+            return
+        if self.is_animating:
+            return
 
-            if self.active_panel is not None and self.active_panel != index:
-                self.close_panel(self.active_panel)
-                self.frame1.after(250, lambda: self.open_panel(index))  # Espera antes de abrir el nuevo panel
-            elif self.active_panel == index:
-                self.close_panel(self.active_panel)
-                self.active_panel = None
-            else:
-                self.open_panel(index)
+        if self.active_panel is not None and self.active_panel != index:
+            self.close_panel(self.active_panel)
+            self.frame1.after(250, lambda: self.open_panel(index))  # Espera antes de abrir el nuevo panel
+        elif self.active_panel == index:
+            self.close_panel(self.active_panel)
+            self.active_panel = None
+        else:
+            self.open_panel(index)
     def open_panel(self, index):
+        if not self.require_project("acceder a los paneles"):
+            return
         self.active_panel = index
         self.is_animating = True
         self.animate_panel_open(index, 0)
@@ -1017,6 +1262,8 @@ class SombraApp:
 
     def save_snapshot(self):
         """Guarda un snapshot del proyecto actual."""
+        if not self.require_project("guardar un snapshot"):
+            return
         self.snapshot_service.save_snapshot()
 
     def exit_app(self):
@@ -1141,17 +1388,23 @@ class SombraApp:
         self.simple_country.set(self.settings.get("default_country", self.simple_country.get()))
         self.simple_city.set(self.settings.get("default_city", self.simple_city.get()))
         self.modo_modelo.set(self.settings.get("ui_mode", "simple"))
+        self.modo_edicion.set(self.settings.get("ui_mode_edit", "simple"))
+        self.panel2_advanced_mode.set(False)
+        self.matriz_size.set(480)        
         self.simple_temp_air_c.set(25.0)
         if hasattr(self, "city_combo") and self.locations_data:
             self._update_city_options()
         self._toggle_modelo_mode()
+        self._toggle_edicion_mode()
+        self._toggle_panel2_advanced()
         self._clear_frame(self.frame2)
         self._clear_frame(self.frame7)
         self._clear_frame(self.frame11)
         self.last_T = None
         self.last_shadow = None
         self.last_meta = None
-
+        self.current_location = None
+        
     def _clear_frame(self, frame):
         for widget in frame.winfo_children():
             widget.destroy()
@@ -1166,7 +1419,23 @@ class SombraApp:
                 else:
                     vars_dict[key].set(value)
 
+    def abrir_excel_edicion(self):
+        if not self.require_project("abrir un Excel de edición"):
+            return
+        filepath = design.abrir_archivo(self.vars, self)
+        if filepath:
+            self.last_edit_excel_path = filepath
+
+    def cargar_excel_modelo(self):
+        if not self.require_project("abrir un Excel de modelo"):
+            return
+        filepath = modelo.cargar_excel(self.vars_modelo)
+        if filepath:
+            self.last_model_excel_path = filepath
+
     def run_model_for_active_panel(self, force=False):
+        if not self.require_project("ejecutar el modelo"):
+            return
         if self.active_panel is None:
             messagebox.showinfo(
                 "Pendiente",
@@ -1354,7 +1623,6 @@ class SombraApp:
         self.graph_frame.pack(side=tk.RIGHT, padx=10)
     def imagen(self, frame):
         """Configura el área de visualización de imágenes."""
-        #img_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
         img_frame = self.create_card(frame)
         img_frame.pack(expand=True, fill='both', pady=5)
         self.fig1, self.ax1 = plt.subplots() 
@@ -1362,7 +1630,6 @@ class SombraApp:
         self.canvas1.get_tk_widget().pack(side=tk.LEFT)
     def curva_de_nivel(self, frame):
         """Configura el área de curvas de nivel."""
-        #nivel_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
         nivel_frame = self.create_card(frame)
         nivel_frame.pack(expand=True, fill='both', pady=5)
         self.curva_frame = nivel_frame
@@ -1372,6 +1639,8 @@ class SombraApp:
         self.canvas2 = FigureCanvasTkAgg(self.fig2, master=nivel_frame)
         self.canvas2.get_tk_widget().pack(side=tk.RIGHT)
     def cargar_imagen(self):
+        if not self.require_project("cargar una imagen"):
+            return        
         file_path = filedialog.askopenfilename()
         if file_path:
             self.img, self.img_rgb = self.image_processor.load_image(file_path)
@@ -1394,6 +1663,8 @@ class SombraApp:
             else:
                 self.mouse_hover_pixel_value.img_rgb = self.img_rgb
     def calculate_temperature_in_shade(self):
+        if not self.require_project("calcular temperatura en sombra"):
+            return
         try:
             if self.porcentaje_sombra is None:
                 messagebox.showerror("Error", "Primero debe seleccionar el área para calcular el porcentaje de sombra.")
@@ -1422,6 +1693,8 @@ class SombraApp:
         except ValueError as e:
             messagebox.showerror("Error", f"Error al ingresar los datos: {e}")
     def confirmar_seleccion(self):
+        if not self.require_project("confirmar selección"):
+            return
         # Verificamos que ambas áreas hayan sido seleccionadas
         if self.shape_selector.area_seleccionada is not None and self.shape_selector.area_referencia is not None:
             # Cálculo del porcentaje de sombra
@@ -1439,11 +1712,15 @@ class SombraApp:
         else:
             print("Error: No se ha seleccionado un área válida.")
     def exportar_a_excel(self):
+        if not self.require_project("exportar a Excel"):
+            return
         if self.shape_selector.area_seleccionada is not None:
             file_path = export_to_excel(self.shape_selector.area_seleccionada)
             if file_path:
                 self.last_matrix_path = file_path
     def mostrar_curvas_nivel(self):
+        if not self.require_project("generar curvas de nivel"):
+            return
         if self.shape_selector.area_seleccionada is not None:
             
             # Rotar la matriz 90 grados en sentido horario
@@ -1503,6 +1780,8 @@ class SombraApp:
         self.curva_label.image = self.curva_photo
 
     def exportar_a_pdf(self):
+        if not self.require_project("exportar a PDF"):
+            return        
         pdf_generator = PDFReportGenerator(self)
         pdf_generator.generate_report()    
     def actualizar_dia(fecha_str, dia_var):
@@ -1535,10 +1814,12 @@ class SombraApp:
         self.canvas_diseno.mpl_connect('button_press_event', lambda event: design.manejar_click(event, self))
     def save_dataset(self):
         """Método para manejar el guardado del dataset"""
+        
         if not hasattr(self, 'img_rgb') or self.img_rgb is None:
             messagebox.showerror("Error", "No hay imagen cargada")
             return
-            
+        if not self.require_project("guardar el dataset"):
+            return            
         if not hasattr(self.shape_selector, 'area_seleccionada') or self.shape_selector.area_seleccionada is None:
             messagebox.showerror("Error", "No hay área de cálculo seleccionada")
             return
