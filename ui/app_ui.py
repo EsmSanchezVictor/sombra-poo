@@ -1702,9 +1702,18 @@ class SombraApp:
             temp_ambient = float(self.entry_temp.get().replace('\ufeff', '').strip())
             latitude = float(self.entry_lat.get().replace('\ufeff', '').strip())
             longitude = float(self.entry_lon.get().replace('\ufeff', '').strip())
-
+            hora = float(self.entry_time.get().replace('\ufeff', '').strip())
+            fecha_str = self.entry_date.get().replace('\ufeff', '').strip()
+            fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+            
             self.temp_calculator = Temperatura(latitude, longitude)
-            result = self.temp_calculator.calculate_tmrt(temp_ambient, self.porcentaje_sombra, shadow_type="tree")
+            result = self.temp_calculator.calculate_tmrt(
+                temp_ambient,
+                self.porcentaje_sombra,
+                shadow_type="tree",
+                date_value=fecha,
+                time_value=hora,
+            )            
             self.tmrt_result = result
             
             

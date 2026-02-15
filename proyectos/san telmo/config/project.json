@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "meta": {
+    "name": "san telmo",
+    "saved_at": "2026-02-07T19:45:19.645933",
+    "app": "sombra-poo"
+  },
+  "name": "san telmo",
+  "location": {
+    "country": "Argentina",
+    "city": "Buenos Aires",
+    "province": "Buenos Aires",
+    "lat": -34.6037,
+    "lon": -58.3816,
+    "tz": "America/Argentina/Buenos_Aires",
+    "kind": "capital"
+  },
+  "next_n": 1,
+  "vars": {
+    "T_amb_base": 295.0,
+    "I_sol_base": 1000.0,
+    "T_min": 290.0,
+    "T_max": 310.0,
+    "dia": 180,
+    "lat": -34.6037,
+    "lon": -58.3816,
+    "hora": 12.0,
+    "humedad": 0.5,
+    "viento": "moderado",
+    "_update_required": true
+  },
+  "ui_state": {
+    "active_panel": null,
+    "model_mode": "simple",
+    "edit_mode": "simple",
+    "panel2_advanced": false,
+    "selected_city": "Buenos Aires (Buenos Aires)",
+    "selected_country": "Argentina",
+    "last_image_path": null,
+    "last_curve_path": null,
+    "last_matrix_path": null,
+    "last_mask_path": null,
+    "last_histogram_path": null,
+    "edit_excel_path": null,
+    "model_excel_path": null
+  },
+  "scene": {
+    "arboles": [],
+    "estructuras": []
+  }
+}
