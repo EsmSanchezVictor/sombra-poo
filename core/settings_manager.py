@@ -17,6 +17,8 @@ class SettingsManager:
             "version": 1,
             "ui_mode": "simple",
             "units": "C",
+            "temp_unit": "C",
+            "distance_unit": "m",
             "default_country": "Argentina",
             "default_city": "Paraná",
             "default_cloudiness": "Despejado",
@@ -47,6 +49,8 @@ class SettingsManager:
         if not settings:
             return
         app.modo_modelo.set(settings.get("ui_mode", "simple"))
+        app.temp_unit.set(settings.get("temp_unit", settings.get("units", "C")))
+        app.distance_unit.set(settings.get("distance_unit", "m"))
         app.simple_cloudiness.set(settings.get("default_cloudiness", "Despejado"))
         app.simple_country.set(settings.get("default_country", app.simple_country.get()))
         app.simple_city.set(settings.get("default_city", app.simple_city.get()))

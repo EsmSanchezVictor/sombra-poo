@@ -349,9 +349,14 @@ def actualizar_grafico(vars, frame):
     # Cálculo final de temperatura (balance estacionario linealizado)
     T = T_amb + q_solar / (h_c + h_r)
     
+    app_instance = vars.get('_app_instance')
+    temp_unit = app_instance.get_temperature_unit_symbol() if app_instance else "K"
+    distance_unit = app_instance.get_distance_unit() if app_instance else "m"
+    T_display = app_instance.convert_temperature_for_display(T) if app_instance else T    
+    
     # Configuración de niveles para el contorno
-    nivel_min = np.nanmin(T)
-    nivel_max = np.nanmax(T)
+    nivel_min = np.nanmin(T_display)
+    nivel_max = np.nanmax(T_display)
     
     # Manejo de casos especiales
     if np.isnan(nivel_min) or np.isnan(nivel_max):
@@ -374,15 +379,15 @@ def actualizar_grafico(vars, frame):
     
     # Crear el gráfico de contorno
     try:
-        contorno = ax.contourf(X, Y, T, niveles, cmap='viridis', alpha=0.8)
-        ax.contour(X, Y, T, niveles, colors='k', linewidths=0.5)
+        contorno = ax.contourf(X, Y, T_display, niveles, cmap='viridis', alpha=0.8)
+        ax.contour(X, Y, T_display, niveles, colors='k', linewidths=0.5)
     except ValueError as e:
         messagebox.showerror("Error", f"Problema al generar el gráfico: {str(e)}")
         return
     
     # Barra de color
-    cbar = fig.colorbar(contorno, ax=ax)
-    cbar.set_label('Temperatura (K)', rotation=270, labelpad=20)
+    cbar = fig.colorbar(contorno, ax=ax, orientation='horizontal', pad=0.12)
+    cbar.set_label(f'Temperatura ({temp_unit})')
     
     # Dibujar elementos del modelo
     if  vars['arboles']:
@@ -407,6 +412,8 @@ def actualizar_grafico(vars, frame):
     
     # Configuración adicional del gráfico
     ax.set_title('Distribución de Temperatura')
+    ax.set_xlabel(f'Distancia ({distance_unit})')
+    ax.set_ylabel(f'Distancia ({distance_unit})')
     #ax.legend(loc='upper right', fontsize=8)
     ax.grid(True, linestyle='--', alpha=0.5)
     
@@ -416,7 +423,7 @@ def actualizar_grafico(vars, frame):
         f"Hora: { vars['hora'].get():.1f}\n"
         f"Radiación solar: {I_sol:.1f} W/m²\n"
         f"Viento: { vars['viento'].get()}\n"
-        f"Temp ambiente: {T_amb:.1f} K"
+        f"Temp ambiente: {(app_instance.convert_temperature_for_display(T_amb) if app_instance else T_amb):.1f} {temp_unit}"
     )
     ax.text(0.02, 0.98, info_text, transform=ax.transAxes,
             verticalalignment='top', bbox=dict(facecolor='white', alpha=0.8))

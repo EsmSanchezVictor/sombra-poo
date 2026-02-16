@@ -17,9 +17,12 @@ class ShapeSelector:
         self.temp_line = None     # Línea temporal durante el dibujo
         self.polygon_closed = False  # Indica si el polígono está cerrado
         self.current_polygon_patch = None  # Para el polígono actual en dibujo
-
+        self.selection_enabled = False
+        
     def on_mouse_press(self, event):
         """Maneja el evento de clic del ratón para iniciar la selección del área."""
+        if not self.selection_enabled or self.app.drawing_mode not in ("calculo", "referencia"):
+            return
         if self.app.img is not None and event.inaxes == self.app.ax1:
             if self.app.selection_type.get() == "Polígono":
                 if not self.polygon_points:  # Primer punto del polígono
@@ -56,6 +59,8 @@ class ShapeSelector:
 
     def on_mouse_move(self, event):
         """Actualiza el área seleccionada mientras el ratón se mueve."""
+        if not self.selection_enabled or self.app.drawing_mode not in ("calculo", "referencia"):
+            return
         if self.app.selection_type.get() == "Polígono" and self.polygon_points and not self.polygon_closed:
             # Actualizar línea temporal
             if self.temp_line:
@@ -76,6 +81,8 @@ class ShapeSelector:
 
     def on_mouse_release(self, event):
         """Completa la selección cuando el ratón se suelta."""
+        if not self.selection_enabled or self.app.drawing_mode not in ("calculo", "referencia"):
+            return
         if self.app.selection_type.get() != "Polígono" and self.start_point is not None and event.inaxes == self.app.ax1:
             self.end_point = (event.xdata, event.ydata)
             try:
@@ -120,6 +127,8 @@ class ShapeSelector:
 
     def finalize_polygon_selection(self):
         """Finaliza la selección del polígono y procesa el área."""
+        if not self.selection_enabled or self.app.drawing_mode not in ("calculo", "referencia"):
+            return
         if  self.app.drawing_mode == "calculo":    # aca cambien 
             self.polygon_points_aux=self.polygon_points
         if len(self.polygon_points) < 3:
@@ -364,12 +373,46 @@ class ShapeSelector:
         self.app.save_dataset_button.config(state='normal')
 
     def select_area_calculo(self):
+        self.app.selection_mode = "calc"
         self.app.drawing_mode = "calculo"
+        self.selection_enabled = True
         self.reset_polygon()
 
     def select_area_referencia(self):
+        self.app.selection_mode = "ref"
         self.app.drawing_mode = "referencia"
+        self.selection_enabled = True
         self.reset_polygon()
+        
+
+    def disable_selection(self):
+        self.selection_enabled = False
+        self.app.selection_mode = None
+        self.app.drawing_mode = None
+        self.start_point = None
+        self.end_point = None
+        if self.temp_line:
+            self.temp_line.remove()
+            self.temp_line = None
+        if self.current_polygon_patch:
+            self.current_polygon_patch.remove()
+            self.current_polygon_patch = None
+        if hasattr(self.app, "canvas1") and self.app.canvas1 is not None:
+            self.app.canvas1.draw_idle()
+
+    def clear_panel2_selection(self):
+        self.disable_selection()
+        self.area_seleccionada = None
+        self.area_referencia = None
+        self.polygon_points = []
+        self.polygon_points_aux = []
+        self.polygon_closed = False
+        if self.shape_patch_calculo:
+            self.shape_patch_calculo.remove()
+            self.shape_patch_calculo = None
+        if self.shape_patch_referencia:
+            self.shape_patch_referencia.remove()
+            self.shape_patch_referencia = None
         
     def mostrar_puntos_poligono(self):
         """Muestra en consola los puntos actuales del polígono con su índice"""

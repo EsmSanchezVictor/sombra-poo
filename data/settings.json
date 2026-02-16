@@ -2,6 +2,8 @@
   "version": 1,
   "ui_mode": "simple",
   "units": "C",
+  "temp_unit": "C",
+  "distance_unit": "m",
   "default_country": "Argentina",
   "default_city": "Paraná",
   "default_cloudiness": "Despejado",

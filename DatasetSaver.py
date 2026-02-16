@@ -60,7 +60,7 @@ class DatasetSaver:
                 "_via_image_id_list": []
             }
 
-    def save_dataset(self):
+    def save_dataset(self, img_filename=None, mask_filename=None, save_image=True):
         """Guarda la imagen y la máscara en los directorios correspondientes"""
         project = getattr(self.app, "project_manager", None)
         current_project = project.current_project if project else None
@@ -72,15 +72,17 @@ class DatasetSaver:
             
         try:
             current_project.ensure_structure()
-            n = current_project.allocate_n()
+            if img_filename is None or mask_filename is None:
+                n = current_project.allocate_n()
             
             # Generar nombre de archivo único basado en timestamp
-            img_filename = f"elemento{n}.jpg"
-            mask_filename = f"Melemento{n}.png"
+            img_filename = img_filename or f"elemento{n}.jpg"
+            mask_filename = mask_filename or f"Melemento{n}.png"
             
             # Guardar imagen original
             img_path = os.path.join(current_project.root_path, "imagenes", img_filename)
-            cv2.imwrite(img_path, cv2.cvtColor(self.app.img_rgb, cv2.COLOR_RGB2BGR))
+            if save_image:
+                cv2.imwrite(img_path, cv2.cvtColor(self.app.img_rgb, cv2.COLOR_RGB2BGR))
 
             # Registrar último recurso guardado para snapshots
             self.app.last_image_path = img_path
