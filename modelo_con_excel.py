@@ -237,10 +237,14 @@ def generar_grafico(vars, frame):
     vars["X"] = X
     vars["Y"] = Y
     vars["T"] = T
-    
+    app_instance = vars.get('_app_instance')
+    temp_unit = app_instance.get_temperature_unit_symbol() if app_instance else "K"
+    distance_unit = app_instance.get_distance_unit() if app_instance else "m"
+    T_display = app_instance.convert_temperature_for_display(T) if app_instance else T
+        
     # Configuración del gráfico
-    tmin = float(np.nanmin(T))
-    tmax = float(np.nanmax(T))
+    tmin = float(np.nanmin(T_display))
+    tmax = float(np.nanmax(T_display))
     margin = 1.0  
     if debug:
         print("T min/max:", tmin, tmax)
@@ -261,11 +265,13 @@ def generar_grafico(vars, frame):
         delta = max(margin, 0.01 * abs(tmin))
         niveles = np.array([tmin_auto - delta, tmax_auto + delta])
         
-    contorno = ax.contourf(X, Y, T, niveles, cmap='viridis', alpha=0.8)
-    ax.contour(X, Y, T, niveles, colors='k', linewidths=0.5)  # Añadir líneas de contorno
+    contorno = ax.contourf(X, Y, T_display, niveles, cmap='viridis', alpha=0.8)
+    ax.contour(X, Y, T_display, niveles, colors='k', linewidths=0.5)  # Añadir líneas de contorno
     ax.set_title('Distribución de temperatura', fontsize=12, pad=10)
-    fig.colorbar(contorno, ax=ax).set_label('Temperatura (K)', rotation=270, labelpad=20)
-    ax.contour(X, Y, T, niveles, colors='black', linewidths=1.5)
+    fig.colorbar(contorno, ax=ax, orientation='horizontal', pad=0.12).set_label(f'Temperatura ({temp_unit})')
+    ax.contour(X, Y, T_display, niveles, colors='black', linewidths=1.5)
+    ax.set_xlabel(f'Distancia ({distance_unit})')
+    ax.set_ylabel(f'Distancia ({distance_unit})')
     if debug:
         print(f"Min T: {np.nanmin(T)}, Max T: {np.nanmax(T)}")
 
@@ -294,9 +300,10 @@ def generar_grafico(vars, frame):
                 if math.dist((event.xdata, event.ydata), (arbol.x, arbol.y)) < 5:
                     editar_elemento(vars, arbol=arbol)
                     temp_sombra = T[int(arbol.y), int(arbol.x)]
+                    temp_sombra_display = app_instance.convert_temperature_for_display(temp_sombra) if app_instance else temp_sombra
                     detalles = (
                         f"Árbol en ({arbol.x}, {arbol.y})\n"
-                        f"Temperatura: {temp_sombra:.2f} K\n"
+                        f"Temperatura: {temp_sombra_display:.2f} {temp_unit}\n"
                         f"Altura: {arbol.h} m\n"
                         f"Densidad copa: {arbol.rho_copa}"
                     )

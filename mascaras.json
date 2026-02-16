@@ -157,6 +157,91 @@
         }
       ],
       "file_attributes": {}
+    },
+    "elemento1.jpg1036634": {
+      "filename": "elemento1.jpg",
+      "size": 1036634,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              833,
+              312,
+              267,
+              1825,
+              1848
+            ],
+            "all_points_y": [
+              1025,
+              1191,
+              1218,
+              1250,
+              1155
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
+    },
+    "01_mesquite_g1t068.jpg576918": {
+      "filename": "01_mesquite_g1t068.jpg",
+      "size": 576918,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              114,
+              777,
+              1052,
+              1819,
+              1861
+            ],
+            "all_points_y": [
+              1221,
+              1056,
+              1025,
+              1133,
+              1205
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
+    },
+    "shutterstock_577672450.jpg2813413": {
+      "filename": "shutterstock_577672450.jpg",
+      "size": 2813413,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              30,
+              1904,
+              1899,
+              21,
+              48,
+              43,
+              43
+            ],
+            "all_points_y": [
+              1003,
+              922,
+              1053,
+              1062,
+              994,
+              990,
+              994
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
     }
   },
   "_via_attributes": {
@@ -168,6 +253,9 @@
     "20250504_154700.jpg66018",
     "20250504_160853.jpg6818",
     "20251215_211422.jpg1036634",
-    "20260113_214031.jpg1036634"
+    "20260113_214031.jpg1036634",
+    "elemento1.jpg1036634",
+    "01_mesquite_g1t068.jpg576918",
+    "shutterstock_577672450.jpg2813413"
   ]
 }

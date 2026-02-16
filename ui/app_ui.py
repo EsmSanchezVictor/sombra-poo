@@ -1,6 +1,7 @@
 from datetime import datetime
 from io import BytesIO
 import os
+import shutil
 import tkinter as tk
 from tkinter import ttk
 
@@ -16,7 +17,7 @@ from core.app_state import AppState
 from core.settings_manager import SettingsManager
 from core.project_manager import ProjectManager
 from image_processor import ImageProcessor
-from mouse_pixel_value import MouseHoverPixelValueWithTooltip
+#from mouse_pixel_value import MouseHoverPixelValueWithTooltip
 from save_pdf import PDFReportGenerator
 from services.location_service import LocationService
 from services.snapshot_service import SnapshotService
@@ -377,6 +378,35 @@ class SombraApp:
             width=20,
         ).grid(row=3, column=0, pady=(0, 16))
 
+        units_frame = tk.Frame(self.startup_frame, bg=self.palette["panel"])
+        units_frame.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 16))
+        units_frame.grid_columnconfigure(0, weight=1)
+
+        tk.Label(units_frame, text="Primeras configuraciones", bg=self.palette["panel"], font=("Arial", 10, "bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 6)
+        )
+        tk.Label(units_frame, text="Temperatura", bg=self.palette["panel"]).grid(row=1, column=0, sticky="w")
+        temp_combo = ttk.Combobox(
+            units_frame,
+            textvariable=self.temp_unit,
+            values=["C", "F", "K"],
+            state="readonly",
+            width=10,
+        )
+        temp_combo.grid(row=2, column=0, sticky="w", pady=(2, 8))
+        temp_combo.bind("<<ComboboxSelected>>", lambda _e: self._save_unit_settings())
+
+        tk.Label(units_frame, text="Distancia", bg=self.palette["panel"]).grid(row=3, column=0, sticky="w")
+        distance_combo = ttk.Combobox(
+            units_frame,
+            textvariable=self.distance_unit,
+            values=["cm", "m", "km", "in", "ft", "yd", "mi"],
+            state="readonly",
+            width=10,
+        )
+        distance_combo.grid(row=4, column=0, sticky="w", pady=(2, 0))
+        distance_combo.bind("<<ComboboxSelected>>", lambda _e: self._save_unit_settings())
+
     def show_startup_screen(self):
         self.hide_all_frames()
         self.set_project_ui_enabled(False)
@@ -511,6 +541,9 @@ class SombraApp:
             return        
         self.original_rgb = self.img_rgb
         self.last_image_path = file_path
+        self.current_image_path = file_path
+        self.current_image_basename = os.path.basename(file_path)
+        self.current_image_stem = os.path.splitext(self.current_image_basename)[0]
         self._ensure_panel2_image_canvas()
         if hasattr(self, "ax1"):
             self.ax1.clear()
@@ -518,7 +551,58 @@ class SombraApp:
             self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
             self.canvas1.draw()
         self.shape_selector.enable_calculo_button()
+        self.cargar_imagen_button.config(text="Cargar nueva imagen")
 
+    def _copy_image_to_project(self, source_path: str) -> str:
+        project = self.project_manager.current_project
+        if project is None:
+            raise RuntimeError("No hay proyecto abierto")
+        project.ensure_structure()
+        basename = os.path.basename(source_path)
+        image_dir = os.path.join(project.root_path, "imagenes")
+        os.makedirs(image_dir, exist_ok=True)
+        destination_path = os.path.join(image_dir, basename)
+        if os.path.abspath(source_path) != os.path.abspath(destination_path):
+            shutil.copy2(source_path, destination_path)
+        self.current_image_path = destination_path
+        self.current_image_basename = basename
+        self.current_image_stem = os.path.splitext(basename)[0]
+        self.last_image_path = destination_path
+        return destination_path
+
+    def _reset_panel2_for_new_image(self):
+        self.shape_selector.clear_panel2_selection()
+        self.drawing_mode = None
+        self.selection_mode = None
+        self.area_calculo_done = False
+        self.area_referencia_done = False
+        self.porcentaje_sombra = None
+        self.ref_gray_mean = None
+        self.tmrt_map = None
+        self.curvas_nivel_creadas = False
+        self.lbl_porcentaje_sombra.config(text="Porcentaje de sombra: N/A")
+        self.lbl_dimensiones_calculo.config(text="Dimensiones del Área de Cálculo: N/A")
+        self.lbl_dimensiones_referencia.config(text="Dimensiones del Área de Referencia: N/A")
+        self.lbl_promedio_referencia.config(text="Promedio Gris Referencia: N/A")
+        self.confirm_button.config(state=tk.DISABLED)
+        self.curve_button.config(state=tk.DISABLED)
+        self.excel_button.config(state=tk.DISABLED)
+        self.pdf_button.config(state=tk.DISABLED)
+        self.area_ref_button.config(state=tk.DISABLED)
+        self.shape_selector.enable_calculo_button()
+        if self.curva_label is not None:
+            self.curva_label.destroy()
+            self.curva_label = None
+            self.curva_photo = None
+            self.curva_img_pil_original = None
+        if hasattr(self, "ax2") and self.ax2 is not None:
+            self.ax2.clear()
+        if self.canvas2 is not None:
+            widget = self.canvas2.get_tk_widget()
+            if widget.winfo_exists():
+                widget.pack(side=tk.RIGHT)
+                self.canvas2.draw_idle()
+                
     def _load_curve_from_path(self, file_path: str):
         if not self.curva_frame:
             return
@@ -551,8 +635,12 @@ class SombraApp:
         self.matriz_size = tk.IntVar(value=480)
         self.panel2_advanced_mode = tk.BooleanVar(value=False)        
         self.drawing_mode = None
+        self.selection_mode = None
         self.img = None
         self.img_rgb = None
+        self.current_image_path = None
+        self.current_image_basename = None
+        self.current_image_stem = None
         self.area_calculo_done = False
         self.area_referencia_done = False
         self.entries =[]
@@ -566,6 +654,8 @@ class SombraApp:
         self.simple_city = tk.StringVar()
         self.simple_cloudiness = tk.StringVar(value="Despejado")
         self.simple_temp_air_c = tk.DoubleVar(value=25.0)
+        self.temp_unit = tk.StringVar(value=self.settings.get("temp_unit", self.settings.get("units", "C")))
+        self.distance_unit = tk.StringVar(value=self.settings.get("distance_unit", "m"))
         self.locations_path = os.path.join(self.base_dir, "data", "locations_latam.csv")
         self.locations_data, self.locations_error = LocationService(self.locations_path).load()
         if self.locations_data and self.locations_data["countries"]:
@@ -576,6 +666,7 @@ class SombraApp:
 
     def apply_settings(self, settings):
         """Aplica preferencias usando el gestor de settings."""
+        self.settings = settings
         self.settings_manager.apply_to_app(self, settings)
 
     def mark_dirty(self):
@@ -657,13 +748,15 @@ class SombraApp:
             font=("Arial", 10, "bold"),
         )
         self.cargar_imagen_button.pack(anchor="w", padx=20, pady=10)
-        tk.Checkbutton(
+        self.panel2_advanced_check = tk.Checkbutton(
             panel,
-            text="Modo avanzado (tamaño de matriz)",
+            text="Modo avanzado\n(tamaño de matriz)",
+            justify="left",
             variable=self.panel2_advanced_mode,
             bg=panel.cget("bg"),
             command=self._toggle_panel2_advanced,
-        ).pack(anchor="w", padx=20, pady=4)
+        )
+        self.panel2_advanced_check.pack(anchor="w", padx=20, pady=4)
 
 
 
@@ -702,13 +795,13 @@ class SombraApp:
         process_label.pack(anchor="w", padx=20, pady=10)
 
         self.excel_button = tk.Button(panel, text="Exportar matriz a excel", command=self.exportar_a_excel, state=tk.DISABLED)
-        self.excel_button.pack(pady=10)
+        self.excel_button.pack(anchor="w", padx=20, pady=10)
 
         self.pdf_button = tk.Button(panel, text="Exportar a informe PDF", command=self.exportar_a_pdf, state=tk.DISABLED)
-        self.pdf_button.pack(pady=10)
+        self.pdf_button.pack(anchor="w", padx=20, pady=10)
         
         self.save_dataset_button = tk.Button(panel, text="Guardar Dataset", command=self.save_dataset, state=tk.DISABLED)
-        self.save_dataset_button.pack(pady=10)
+        self.save_dataset_button.pack(anchor="w", padx=20, pady=10)
         self._toggle_panel2_advanced()
         
     def setup_panel_3(self):
@@ -719,8 +812,8 @@ class SombraApp:
             widget.destroy()        
 
         panel.grid_columnconfigure(0, weight=1)
-        contenido = tk.Frame(panel, bg=panel.cget("bg"))
-        contenido.grid(row=0, column=0, sticky="nsew", padx=16, pady=10)
+        panel.grid_rowconfigure(0, weight=1)
+        contenido = self._build_scrollable_content(panel)
         contenido.grid_columnconfigure(0, weight=1)
 
         diseno_label = tk.Label(contenido, text="Modo de Edición:", bg=panel.cget("bg"), fg="black")
@@ -729,7 +822,7 @@ class SombraApp:
         acciones = tk.Frame(contenido, bg=panel.cget("bg"))
         acciones.grid(row=1, column=0, sticky="ew", pady=4)
         acciones.grid_columnconfigure(0, weight=1)
-        acciones.grid_columnconfigure(1, weight=1)
+        
 
         # Botones principales
         add_arbol = tk.Button(
@@ -740,7 +833,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        add_arbol.grid(row=0, column=0, sticky="w", padx=(0, 8), pady=3)
+        add_arbol.grid(row=0, column=0, sticky="w", padx=0, pady=3)
 
         add_estructura = tk.Button(
             acciones,
@@ -750,7 +843,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        add_estructura.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=3)
+        add_estructura.grid(row=1, column=0, sticky="w", padx=0, pady=3)
 
         seleccionar = tk.Button(
             acciones,
@@ -760,7 +853,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        seleccionar.grid(row=1, column=0, columnspan=2, sticky="w", pady=3)
+        seleccionar.grid(row=2, column=0, sticky="w", pady=3)
 
         guardar = tk.Button(
             acciones,
@@ -770,7 +863,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        guardar.grid(row=2, column=0, sticky="w", padx=(0, 8), pady=6)
+        guardar.grid(row=3, column=0, sticky="w", padx=0, pady=6)
 
         abrir = tk.Button(
             acciones,
@@ -780,7 +873,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        abrir.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=6)
+        abrir.grid(row=4, column=0, sticky="w", padx=0, pady=6)
 
         grafico = tk.Button(
             acciones,
@@ -790,7 +883,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        grafico.grid(row=3, column=0, sticky="w", padx=(0, 8), pady=4)
+        grafico.grid(row=5, column=0, sticky="w", padx=0, pady=4)
 
         vista_3d = tk.Button(
             acciones,
@@ -800,7 +893,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        vista_3d.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=4)
+        vista_3d.grid(row=6, column=0, sticky="w", padx=0, pady=4)
 
         modo_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         modo_frame.grid(row=2, column=0, sticky="w", pady=4)
@@ -819,7 +912,7 @@ class SombraApp:
             value="advanced",
             bg=panel.cget("bg"),
             command=self._toggle_edicion_mode,
-        ).grid(row=0, column=1, sticky="w", padx=10)
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
 
         self.simple_edit_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         self.simple_edit_frame.grid(row=3, column=0, sticky="nsew", pady=6)
@@ -858,8 +951,8 @@ class SombraApp:
             widget.destroy()        
 
         panel.grid_columnconfigure(0, weight=1)
-        contenido = tk.Frame(panel, bg=panel.cget("bg"))
-        contenido.grid(row=0, column=0, sticky="nsew", padx=16, pady=10)
+        panel.grid_rowconfigure(0, weight=1)
+        contenido = self._build_scrollable_content(panel)
         contenido.grid_columnconfigure(0, weight=1)
 
         diseno_label = tk.Label(contenido, text="Modelo", bg=panel.cget("bg"), fg="black")
@@ -884,10 +977,20 @@ class SombraApp:
             bg=panel.cget("bg"),
             command=self._toggle_modelo_mode,
         )
-        self.advanced_mode_radio.grid(row=0, column=1, sticky="w", padx=10)
+        self.advanced_mode_radio.grid(row=1, column=0, sticky="w", pady=(2, 0))
 
         acciones_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         acciones_frame.grid(row=4, column=0, sticky="w", pady=(6, 0))
+        self.apply_location_button = tk.Button(
+            acciones_frame,
+            text="Aplicar ubicación",
+            command=lambda: self._apply_location(True),
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+            state="normal" if self.locations_data else "disabled",
+        )
+        self.apply_location_button.grid(row=0, column=0, sticky="w", padx=0, pady=3)
         tk.Button(
             acciones_frame,
             text="Cargar Excel",
@@ -895,7 +998,7 @@ class SombraApp:
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
-        ).grid(row=0, column=0, sticky="w", padx=0, pady=3)
+        ).grid(row=1, column=0, sticky="w", padx=0, pady=3)
         tk.Button(
             acciones_frame,
             text="Generar Gráfico",
@@ -903,7 +1006,7 @@ class SombraApp:
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
-        ).grid(row=0, column=1, sticky="w", padx=10, pady=3)
+        ).grid(row=2, column=0, sticky="w", padx=0, pady=3)
         tk.Button(
             acciones_frame,
             text="Vista 3D",
@@ -911,11 +1014,11 @@ class SombraApp:
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
-        ).grid(row=0, column=2, sticky="w", padx=10, pady=3)
+        ).grid(row=3, column=0, sticky="w", padx=0, pady=3)
 
         self.simple_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         self.simple_frame.grid(row=2, column=0, sticky="nsew", pady=6)
-        self.simple_frame.grid_columnconfigure(1, weight=1)
+        self.simple_frame.grid_columnconfigure(0, weight=1)
 
         if self.locations_error:
             tk.Label(
@@ -927,7 +1030,7 @@ class SombraApp:
                 justify="left",
             ).grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
 
-        tk.Label(self.simple_frame, text="País", bg=panel.cget("bg")).grid(row=1, column=0, sticky="w", pady=2)
+        tk.Label(self.simple_frame, text="País", bg=panel.cget("bg")).grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.country_combo = ttk.Combobox(
             self.simple_frame,
             textvariable=self.simple_country,
@@ -935,10 +1038,10 @@ class SombraApp:
             state="readonly" if self.locations_data else "disabled",
             width=22,
         )
-        self.country_combo.grid(row=1, column=1, sticky="ew", pady=2, padx=(8, 0))
+        self.country_combo.grid(row=2, column=0, sticky="ew", pady=(2, 6), padx=0)
         self.country_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_city_options())
 
-        tk.Label(self.simple_frame, text="Ciudad", bg=panel.cget("bg")).grid(row=2, column=0, sticky="w", pady=2)
+        tk.Label(self.simple_frame, text="Ciudad", bg=panel.cget("bg")).grid(row=3, column=0, sticky="w", pady=(2, 0))
         self.city_combo = ttk.Combobox(
             self.simple_frame,
             textvariable=self.simple_city,
@@ -946,41 +1049,30 @@ class SombraApp:
             width=22,
             state="normal" if self.locations_data else "disabled",
         )
-        self.city_combo.grid(row=2, column=1, sticky="ew", pady=2, padx=(8, 0))
+        self.city_combo.grid(row=4, column=0, sticky="ew", pady=(2, 6), padx=0)
         self.city_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_location(False))
         self.city_combo.bind("<KeyRelease>", self._filter_city_options)
 
-        self.apply_location_button = tk.Button(
-            self.simple_frame,
-            text="Aplicar ubicación",
-            command=lambda: self._apply_location(True),
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-            state="normal" if self.locations_data else "disabled",
-        )
-        self.apply_location_button.grid(row=3, column=1, sticky="w", pady=4, padx=(8, 0))
-
-        tk.Label(self.simple_frame, text="Nubosidad", bg=panel.cget("bg")).grid(row=4, column=0, sticky="w", pady=2)
+        tk.Label(self.simple_frame, text="Nubosidad", bg=panel.cget("bg")).grid(row=5, column=0, sticky="w", pady=(2, 0))
         ttk.Combobox(
             self.simple_frame,
             textvariable=self.simple_cloudiness,
             values=["Despejado", "Parcial", "Nublado"],
             state="readonly",
             width=22,
-        ).grid(row=4, column=1, sticky="ew", pady=2, padx=(8, 0))
+        ).grid(row=6, column=0, sticky="ew", pady=(2,6), padx=0)
 
-        tk.Label(self.simple_frame, text="Temperatura aire (°C)", bg=panel.cget("bg")).grid(row=5, column=0, sticky="w", pady=2)
+        tk.Label(self.simple_frame, text="Temperatura aire (°C)", bg=panel.cget("bg")).grid(row=7, column=0, sticky="w", pady=(2, 0))
         tk.Entry(self.simple_frame, textvariable=self.simple_temp_air_c, width=10).grid(
-            row=5, column=1, sticky="w", pady=2, padx=(8, 0)
+            row=8, column=0, sticky="w", pady=(2,6), padx=0
         )
-        tk.Label(self.simple_frame, text="Viento", bg=panel.cget("bg")).grid(row=6, column=0, sticky="w", pady=2)
+        tk.Label(self.simple_frame, text="Viento", bg=panel.cget("bg")).grid(row=9, column=0, sticky="w", pady=(2, 0))
         ttk.Combobox(
             self.simple_frame,
             textvariable=self.vars_modelo["viento"],
             values=["nulo", "moderado", "fuerte"],
             width=22,
-        ).grid(row=6, column=1, sticky="ew", pady=2, padx=(8, 0))
+        ).grid(row=10, column=0, sticky="ew", pady=(2,6), padx=0)
 
         self.advanced_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         self.advanced_frame.grid(row=2, column=0, sticky="nsew", pady=6)
@@ -1072,7 +1164,42 @@ class SombraApp:
         else:
             self.matriz_size.set(480)
             self.matrix_size_combo.config(state="disabled")
+            
+    def _build_scrollable_content(self, parent):
+        canvas = tk.Canvas(parent, bg=parent.cget("bg"), highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
 
+        content = tk.Frame(canvas, bg=parent.cget("bg"))
+        window_id = canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window_id, width=event.width))
+        return content
+
+    def _save_unit_settings(self):
+        self.settings["units"] = self.temp_unit.get()
+        self.settings["temp_unit"] = self.temp_unit.get()
+        self.settings["distance_unit"] = self.distance_unit.get()
+        self.settings_manager.write(self.settings)
+
+    def convert_temperature_for_display(self, value):
+        unit = self.settings.get("temp_unit", self.settings.get("units", "C"))
+        if unit == "C":
+            return value - 273.15
+        if unit == "F":
+            return (value - 273.15) * (9 / 5) + 32
+        return value
+
+    def get_temperature_unit_symbol(self):
+        return {"C": "°C", "F": "°F", "K": "K"}.get(
+            self.settings.get("temp_unit", self.settings.get("units", "C")),
+            "°C",
+        )
+
+    def get_distance_unit(self):
+        return self.settings.get("distance_unit", "m")
 
     def _update_city_options(self):
         if not self.locations_data:
@@ -1298,7 +1425,8 @@ class SombraApp:
         preferences.configure(bg=self.palette["background"])
 
         ui_mode_var = tk.StringVar(value=self.settings.get("ui_mode", "simple"))
-        units_var = tk.StringVar(value=self.settings.get("units", "C"))
+        temp_unit_var = tk.StringVar(value=self.settings.get("temp_unit", self.settings.get("units", "C")))
+        distance_unit_var = tk.StringVar(value=self.settings.get("distance_unit", "m"))
         country_var = tk.StringVar(value=self.settings.get("default_country", "Argentina"))
         city_var = tk.StringVar(value=self.settings.get("default_city", "Paraná"))
         cloudiness_var = tk.StringVar(value=self.settings.get("default_cloudiness", "Despejado"))
@@ -1308,8 +1436,16 @@ class SombraApp:
         card.grid(row=0, column=0, padx=14, pady=14)
 
         tk.Label(card, text="Unidades", bg="white", font=("Arial", 9, "bold")).grid(row=0, column=0, sticky="w")
-        tk.Radiobutton(card, text="Celsius", variable=units_var, value="C", bg="white").grid(row=1, column=0, sticky="w")
-        tk.Radiobutton(card, text="Kelvin", variable=units_var, value="K", bg="white").grid(row=1, column=1, sticky="w")
+        ttk.Combobox(card, textvariable=temp_unit_var, values=["C", "F", "K"], state="readonly", width=10).grid(
+            row=1, column=0, sticky="w"
+        )
+        ttk.Combobox(
+            card,
+            textvariable=distance_unit_var,
+            values=["cm", "m", "km", "in", "ft", "yd", "mi"],
+            state="readonly",
+            width=10,
+        ).grid(row=1, column=1, sticky="w")
 
         tk.Label(card, text="Modo UI", bg="white", font=("Arial", 9, "bold")).grid(row=2, column=0, sticky="w", pady=(10, 0))
         tk.Radiobutton(card, text="Simple", variable=ui_mode_var, value="simple", bg="white").grid(row=3, column=0, sticky="w")
@@ -1353,7 +1489,9 @@ class SombraApp:
             self.settings.update(
                 {
                     "ui_mode": ui_mode_var.get(),
-                    "units": units_var.get(),
+                    "units": temp_unit_var.get(),
+                    "temp_unit": temp_unit_var.get(),
+                    "distance_unit": distance_unit_var.get(),
                     "default_country": country_var.get(),
                     "default_city": city_var.get(),
                     "default_cloudiness": cloudiness_var.get(),
@@ -1474,17 +1612,16 @@ class SombraApp:
                 "Ejecutá el modelo primero (F5) para ver estadísticas.",
             )
             return
-        unit = self.settings.get("units", "C")
+        unit = self.get_temperature_unit_symbol()
         data = np.array(self.last_T, dtype=float)
-        if unit == "C":
-            data = data - 273.15
+        data = self.convert_temperature_for_display(data)
         min_val = float(np.nanmin(data))
         max_val = float(np.nanmax(data))
         mean_val = float(np.nanmean(data))
         lines = [
-            f"T mínimo: {min_val:.2f} °{unit}",
-            f"T máximo: {max_val:.2f} °{unit}",
-            f"T promedio: {mean_val:.2f} °{unit}",
+            f"T mínimo: {min_val:.2f} {unit}",
+            f"T máximo: {max_val:.2f} {unit}",
+            f"T promedio: {mean_val:.2f} {unit}",
         ]
         if self.last_shadow is not None:
             shadow = np.array(self.last_shadow, dtype=float)
@@ -1657,29 +1794,22 @@ class SombraApp:
         )
         if file_path:
             try:
-                self.img, self.img_rgb = self.image_processor.load_image(file_path)
+                saved_image_path = self._copy_image_to_project(file_path)
+                self._reset_panel2_for_new_image()
+                self.img, self.img_rgb = self.image_processor.load_image(saved_image_path)
             except ValueError as exc:
                 messagebox.showerror("Error", str(exc))
                 return
             self.original_rgb = self.img_rgb
-            self.last_image_path = file_path
             self._ensure_panel2_image_canvas()
             self.ax1.clear()
             self.ax1.imshow(self.img_rgb)
             self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
             self.canvas1.draw()
             self.shape_selector.enable_calculo_button()
+            self.cargar_imagen_button.config(text="Cargar nueva imagen")
             self.mark_dirty()
-            if self.mouse_hover_pixel_value is None:
-                self.mouse_hover_pixel_value = MouseHoverPixelValueWithTooltip(
-                    self,
-                    self.canvas1,
-                    self.canvas2,
-                    self.img_rgb,
-                    self.shape_selector.area_seleccionada,
-                )
-            else:
-                self.mouse_hover_pixel_value.img_rgb = self.img_rgb
+            
                 
     def _ensure_panel2_image_canvas(self):
         canvas = getattr(self, "canvas1", None)
@@ -1747,6 +1877,19 @@ class SombraApp:
             self.curve_button.config(state=tk.NORMAL)  # Habilitar el botón de curvas de nivel
             self.excel_button.config(state=tk.NORMAL)  # Habilitar el botón para exportar a Excel
             self.pdf_button.config(state=tk.NORMAL) # Habilita el botón para guardan el pdf
+            self.dataset_saver.save_dataset(
+                img_filename=self.current_image_basename,
+                mask_filename=f"{self.current_image_stem}_mask.png",
+                save_image=False,
+            )
+            self.last_mask_path = os.path.join(
+                self.project_manager.current_project.root_path,
+                "mascaras",
+                f"{self.current_image_stem}_mask.png",
+            )
+            self.shape_selector.disable_selection()
+            self.area_calc_button.config(state=tk.DISABLED)
+            self.area_ref_button.config(state=tk.DISABLED)
         else:
             print("Error: No se ha seleccionado un área válida.")
     def exportar_a_excel(self):
@@ -1793,6 +1936,26 @@ class SombraApp:
 
             self.tmrt_map = area_volteada
             self.curvas_nivel_creadas = True
+
+            project_root = self.project_manager.current_project.root_path
+            hist_dir = os.path.join(project_root, "resultados", "histograma")
+            excel_dir = os.path.join(project_root, "resultados", "excels")
+            os.makedirs(hist_dir, exist_ok=True)
+            os.makedirs(excel_dir, exist_ok=True)
+
+            hist_path = os.path.join(hist_dir, f"{self.current_image_stem}_histo.png")
+            hist_fig, hist_ax = plt.subplots()
+            hist_ax.hist(self.shape_selector.area_seleccionada.flatten(), bins=50, color="gray", alpha=0.9)
+            hist_ax.set_title("Histograma")
+            hist_fig.tight_layout()
+            hist_fig.savefig(hist_path, dpi=150)
+            plt.close(hist_fig)
+            self.last_histogram_path = hist_path
+
+            excel_path = os.path.join(excel_dir, f"{self.current_image_stem}.xlsx")
+            pd.DataFrame(self.shape_selector.area_seleccionada).to_excel(excel_path, index=False)
+            self.last_matrix_path = excel_path
+            
     def _fit_image_to_frame(self, pil_img, frame, padding=8):
         if frame is None:
             return pil_img
@@ -1917,6 +2080,12 @@ class SombraApp:
         if self._shadow_hover_canvas is not None and self._shadow_hover_cid is not None:
             self._shadow_hover_canvas.mpl_disconnect(self._shadow_hover_cid)
         self._shadow_hover_canvas = canvas
+        if self._shadow_hover_annotation is not None and self._shadow_hover_annotation.axes != ax:
+            try:
+                self._shadow_hover_annotation.remove()
+            except ValueError:
+                pass
+            self._shadow_hover_annotation = None        
         if self._shadow_hover_annotation is None or self._shadow_hover_annotation.axes != ax:
             self._shadow_hover_annotation = ax.annotate(
                 "",
