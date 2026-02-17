@@ -242,6 +242,127 @@
         }
       ],
       "file_attributes": {}
+    },
+    "01_mesquite_g1t068_v2.jpg576918": {
+      "filename": "01_mesquite_g1t068_v2.jpg",
+      "size": 576918,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              824,
+              200,
+              1861,
+              1852,
+              820,
+              811,
+              802
+            ],
+            "all_points_y": [
+              1042,
+              1239,
+              1239,
+              1123,
+              1033,
+              1051,
+              1046
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
+    },
+    "Eiche_bei_Graditz_v2.jpg306902": {
+      "filename": "Eiche_bei_Graditz_v2.jpg",
+      "size": 306902,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              472,
+              208,
+              157,
+              157,
+              208,
+              313,
+              463,
+              631,
+              772,
+              458,
+              452,
+              452,
+              452,
+              452
+            ],
+            "all_points_y": [
+              629,
+              629,
+              649,
+              683,
+              671,
+              711,
+              700,
+              691,
+              649,
+              626,
+              629,
+              629,
+              629,
+              632
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
+    },
+    "shutterstock_577672450_v2.jpg2813413": {
+      "filename": "shutterstock_577672450_v2.jpg",
+      "size": 2813413,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              11,
+              801,
+              1187,
+              1908,
+              1904,
+              16,
+              21,
+              25,
+              21,
+              48,
+              70,
+              70,
+              70,
+              70
+            ],
+            "all_points_y": [
+              1030,
+              953,
+              981,
+              926,
+              1067,
+              1076,
+              1017,
+              1021,
+              1017,
+              1012,
+              1021,
+              1021,
+              1012,
+              1012
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
     }
   },
   "_via_attributes": {
@@ -256,6 +377,9 @@
     "20260113_214031.jpg1036634",
     "elemento1.jpg1036634",
     "01_mesquite_g1t068.jpg576918",
-    "shutterstock_577672450.jpg2813413"
+    "shutterstock_577672450.jpg2813413",
+    "01_mesquite_g1t068_v2.jpg576918",
+    "Eiche_bei_Graditz_v2.jpg306902",
+    "shutterstock_577672450_v2.jpg2813413"
   ]
 }

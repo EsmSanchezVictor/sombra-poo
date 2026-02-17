@@ -18,6 +18,34 @@ class ShapeSelector:
         self.polygon_closed = False  # Indica si el polígono está cerrado
         self.current_polygon_patch = None  # Para el polígono actual en dibujo
         self.selection_enabled = False
+
+
+    def _safe_hide_artist(self, artist):
+        if artist is None:
+            return None
+        try:
+            artist.set_visible(False)
+        except Exception:
+            pass
+        axes = getattr(artist, "axes", None)
+        if axes is not None:
+            try:
+                if artist in axes.patches:
+                    axes.patches.remove(artist)
+            except Exception:
+                pass
+            try:
+                if artist in axes.lines:
+                    axes.lines.remove(artist)
+            except Exception:
+                pass
+        try:
+            artist.remove()
+        except (NotImplementedError, ValueError):
+            pass
+        except Exception:
+            pass
+        return None
         
     def on_mouse_press(self, event):
         """Maneja el evento de clic del ratón para iniciar la selección del área."""
@@ -54,8 +82,7 @@ class ShapeSelector:
                 self.start_point = (event.xdata, event.ydata)
                 self.polygon_points = []  # Resetear puntos de polígono si existían
                 if self.current_polygon_patch:
-                    self.current_polygon_patch.remove()
-                    self.current_polygon_patch = None
+                    self.current_polygon_patch = self._safe_hide_artist(self.current_polygon_patch)
 
     def on_mouse_move(self, event):
         """Actualiza el área seleccionada mientras el ratón se mueve."""
@@ -147,15 +174,14 @@ class ShapeSelector:
         
         # Eliminar el polígono temporal
         if self.current_polygon_patch:
-            self.current_polygon_patch.remove()
+            self.current_polygon_patch = self._safe_hide_artist(self.current_polygon_patch)
         if self.temp_line:
-            self.temp_line.remove()
-            self.temp_line = None
+            self.temp_line = self._safe_hide_artist(self.temp_line)
         
         # Almacenar el patch según el modo
         if self.app.drawing_mode == "calculo":
             if self.shape_patch_calculo:
-                self.shape_patch_calculo.remove()
+                self.shape_patch_calculo = self._safe_hide_artist(self.shape_patch_calculo)
             self.shape_patch_calculo = polygon_patch
             self.area_seleccionada = self.select_polygonal_area()
             if self.area_seleccionada is None:
@@ -176,7 +202,7 @@ class ShapeSelector:
             self.app.area_ref_button.config(state='normal')
         else:
             if self.shape_patch_referencia:
-                self.shape_patch_referencia.remove()
+                self.shape_patch_referencia = self._safe_hide_artist(self.shape_patch_referencia)
             self.shape_patch_referencia = polygon_patch
             self.area_referencia = self.select_polygonal_area()
             if self.area_referencia is None:
@@ -320,11 +346,9 @@ class ShapeSelector:
         color = 'blue' if self.app.drawing_mode == "calculo" else 'red'
 
         if self.app.drawing_mode == "calculo" and self.shape_patch_calculo:
-            self.shape_patch_calculo.remove()
-            self.shape_patch_calculo = None
+            self.shape_patch_calculo = self._safe_hide_artist(self.shape_patch_calculo)
         elif self.app.drawing_mode == "referencia" and self.shape_patch_referencia:
-            self.shape_patch_referencia.remove()
-            self.shape_patch_referencia = None
+            self.shape_patch_referencia = self._safe_hide_artist(self.shape_patch_referencia)
 
         if self.app.selection_type.get() == "Rectángulo":
             width = self.end_point[0] - self.start_point[0]
@@ -361,11 +385,9 @@ class ShapeSelector:
         self.polygon_points = []
         self.polygon_closed = False
         if self.temp_line:
-            self.temp_line.remove()
-            self.temp_line = None
+            self.temp_line = self._safe_hide_artist(self.temp_line)
         if self.current_polygon_patch:
-            self.current_polygon_patch.remove()
-            self.current_polygon_patch = None
+            self.current_polygon_patch = self._safe_hide_artist(self.current_polygon_patch)
         self.redraw_selection()
 
     def enable_calculo_button(self):
@@ -392,11 +414,9 @@ class ShapeSelector:
         self.start_point = None
         self.end_point = None
         if self.temp_line:
-            self.temp_line.remove()
-            self.temp_line = None
+            self.temp_line = self._safe_hide_artist(self.temp_line)
         if self.current_polygon_patch:
-            self.current_polygon_patch.remove()
-            self.current_polygon_patch = None
+            self.current_polygon_patch = self._safe_hide_artist(self.current_polygon_patch)
         if hasattr(self.app, "canvas1") and self.app.canvas1 is not None:
             self.app.canvas1.draw_idle()
 
@@ -408,11 +428,9 @@ class ShapeSelector:
         self.polygon_points_aux = []
         self.polygon_closed = False
         if self.shape_patch_calculo:
-            self.shape_patch_calculo.remove()
-            self.shape_patch_calculo = None
+            self.shape_patch_calculo = self._safe_hide_artist(self.shape_patch_calculo)
         if self.shape_patch_referencia:
-            self.shape_patch_referencia.remove()
-            self.shape_patch_referencia = None
+            self.shape_patch_referencia = self._safe_hide_artist(self.shape_patch_referencia)
         
     def mostrar_puntos_poligono(self):
         """Muestra en consola los puntos actuales del polígono con su índice"""
