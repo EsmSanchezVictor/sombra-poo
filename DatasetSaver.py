@@ -3,6 +3,7 @@ import json
 import numpy as np
 import cv2
 from datetime import datetime
+from core.file_versioning import safe_path
 #from PIL import Image
 
 class DatasetSaver:
@@ -80,16 +81,19 @@ class DatasetSaver:
             mask_filename = mask_filename or f"Melemento{n}.png"
             
             # Guardar imagen original
-            img_path = os.path.join(current_project.root_path, "imagenes", img_filename)
+            img_path = safe_path(os.path.join(current_project.root_path, "imagenes"), img_filename)
+            img_filename = os.path.basename(str(img_path))
             if save_image:
-                cv2.imwrite(img_path, cv2.cvtColor(self.app.img_rgb, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(str(img_path), cv2.cvtColor(self.app.img_rgb, cv2.COLOR_RGB2BGR))
+
 
             # Registrar último recurso guardado para snapshots
-            self.app.last_image_path = img_path
+            self.app.last_image_path = str(img_path)
                         
             # Crear y guardar máscara
-            self.save_mask(img_filename, mask_filename)
-            self.app.last_mask_path = os.path.join(current_project.root_path, "mascaras", mask_filename)
+            saved_mask = self.save_mask(img_filename, mask_filename)
+            mask_filename = os.path.basename(str(saved_mask))
+            self.app.last_mask_path = str(saved_mask)
             
             # Actualizar archivo JSON
             self.update_mask_json(img_filename, mask_filename)
@@ -252,8 +256,8 @@ class DatasetSaver:
             os.makedirs(os.path.join(current_project.root_path, "mascaras"), exist_ok=True)
             
             # Guardar máscara como imagen PNG binaria (blanco=selección, negro=fondo)
-            mask_path = os.path.join(current_project.root_path, "mascaras", mask_filename)
-            if not cv2.imwrite(mask_path, mask):
+            mask_path = safe_path(os.path.join(current_project.root_path, "mascaras"), mask_filename)
+            if not cv2.imwrite(str(mask_path), mask):
                 raise RuntimeError(f"No se pudo guardar la máscara en {mask_path}")
 
             return mask_path

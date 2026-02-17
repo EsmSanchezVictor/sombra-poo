@@ -8,6 +8,7 @@ import shutil
 import zipfile
 from tkinter import filedialog, messagebox
 
+from core.file_versioning import safe_path
 from core.project import Project
 from ui import dialogs
 
@@ -40,13 +41,13 @@ class ProjectManager:
         project = Project(project_dir)
         project.ensure_structure()
         self.current_project = project
-        self.app.current_project_path = project.config_path
+        self.app.current_project_path = project.state_path
         self.app._reset_scene()
         self.app._reset_vars_to_defaults()
         self.app.apply_project_location(location)
         self.app.is_dirty = False
-        self._save_project_file(project.config_path)
-        self._update_last_project_path(project.config_path)
+        self._save_project_file(project.state_path)
+        self._update_last_project_path(project.state_path)
         self.app.on_project_loaded()
 
     def open_project(self) -> None:
@@ -62,33 +63,25 @@ class ProjectManager:
         project.next_n = int(payload.get("next_n", 1))
         self.current_project = project
         self.app_state.apply_payload(payload)        
-        self.app.current_project_path = project.config_path
+        self.app.current_project_path = file_path
         self.app.is_dirty = False
-        self._update_last_project_path(project.config_path)
+        self._update_last_project_path(file_path)
         self.app.on_project_loaded()
 
     def save_project(self) -> None:
         """Guarda el proyecto actual o solicita un destino."""
         if self.current_project:
-            self._save_project_file(self.current_project.config_path)
+            self._save_project_file(self.current_project.state_path)
             return
         self.save_project_as()
 
     def save_project_as(self) -> None:
-        """Solicita destino y guarda el proyecto."""
-        file_path = filedialog.asksaveasfilename(
-            title="Guardar proyecto",
-            defaultextension=".json",
-            filetypes=[("Proyecto JSON", "*.json")],
+        """NO-OP temporal para guardar como."""
+        messagebox.showinfo(
+            "Guardar como",
+            "Guardar como se implementará luego; use Exportar .3es",
         )
-        if not file_path:
-            return
-        project = self._project_from_user_path(file_path)
-        project.ensure_structure()
-        self.current_project = project
-        self.app.current_project_path = project.config_path
-        self._update_last_project_path(project.config_path)
-        self._save_project_file(project.config_path)
+
 
     def export_project(self) -> None:
         """Exporta el proyecto a un archivo .3es."""
@@ -126,21 +119,23 @@ class ProjectManager:
             return
         with zipfile.ZipFile(file_path, "r") as archive:
             archive.extractall(target_dir)
+        state_path = os.path.join(target_dir, "config", "estado.json")            
         config_path = os.path.join(target_dir, "config", "project.json")
-        if not os.path.exists(config_path):
-            messagebox.showerror("Importación", "El paquete no contiene config/project.json.")
+        source_path = state_path if os.path.exists(state_path) else config_path
+        if not os.path.exists(source_path):
+            messagebox.showerror("Importación", "El paquete no contiene config/estado.json ni config/project.json.")
             return
-        payload = self._load_project_file(config_path)
+        payload = self._load_project_file(source_path)
         if not payload:
             return
-        project = Project.from_config_path(config_path)
+        project = Project.from_config_path(source_path)
         project.ensure_structure()
         project.next_n = int(payload.get("next_n", 1))
         self.current_project = project
         self.app_state.apply_payload(payload)        
-        self.app.current_project_path = project.config_path
+        self.app.current_project_path = source_path
         self.app.is_dirty = False
-        self._update_last_project_path(project.config_path)
+        self._update_last_project_path(source_path)
 
     def _save_project_file(self, path: str) -> None:
         """Escribe el JSON de proyecto."""
@@ -149,11 +144,16 @@ class ProjectManager:
         payload = self.app_state.build_payload(self.current_project)
         self.current_project.next_n = int(payload.get("next_n", self.current_project.next_n))
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as handle:
+        state_path = safe_path(os.path.dirname(path), os.path.basename(path))
+        with open(state_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+        with open(self.current_project.config_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, ensure_ascii=False)
         self._sync_excel_copies()    
         self.app.is_dirty = False
-        self._update_last_project_path(path)
+        self.app.current_project_path = str(state_path)
+        self._update_last_project_path(str(state_path))
+        self.app.update_status_saved_time(payload.get("meta", {}).get("saved_at"))
 
     def _load_project_file(self, path: str) -> dict | None:
         """Lee un JSON de proyecto con control de errores."""
@@ -187,18 +187,40 @@ class ProjectManager:
         folder = filedialog.askdirectory(title="Abrir carpeta de proyecto")
         if not folder:
             return None
-        candidate = os.path.join(folder, "config", "project.json")
+        config_dir = os.path.join(folder, "config")
+        state_files = sorted(
+            [f for f in os.listdir(config_dir)] if os.path.isdir(config_dir) else []
+        )
+        state_candidates = [f for f in state_files if f.startswith("estado") and f.endswith(".json")]
+        if state_candidates:
+            def _ver(name: str) -> int:
+                stem = os.path.splitext(name)[0]
+                if "_v" not in stem:
+                    return 1
+                try:
+                    return int(stem.rsplit("_v", 1)[1])
+                except ValueError:
+                    return 1
+            selected = max(state_candidates, key=_ver)
+            return os.path.join(config_dir, selected)
+        candidate = os.path.join(config_dir, "project.json")
         if os.path.exists(candidate):
             return candidate
-        messagebox.showerror("Abrir proyecto", "No se encontró config/project.json en la carpeta seleccionada.")
+        messagebox.showerror("Abrir proyecto", "No se encontró config/estado.json o config/project.json.")
         return None
 
     def _sync_excel_copies(self) -> None:
         if not self.current_project:
             return
-        target_dir = os.path.join(self.current_project.root_path, "excels")
-        os.makedirs(target_dir, exist_ok=True)
+        planos_dir = os.path.join(self.current_project.root_path, "Planos")
+        modelos_dir = os.path.join(self.current_project.root_path, "modelos")
+        os.makedirs(planos_dir, exist_ok=True)
+        os.makedirs(modelos_dir, exist_ok=True)
         if self.app.last_edit_excel_path and os.path.exists(self.app.last_edit_excel_path):
-            shutil.copy(self.app.last_edit_excel_path, os.path.join(target_dir, "edicion.xlsx"))
+            target = safe_path(planos_dir, os.path.basename(self.app.last_edit_excel_path))
+            shutil.copy2(self.app.last_edit_excel_path, target)
+            self.app.last_edit_excel_path = str(target)
         if self.app.last_model_excel_path and os.path.exists(self.app.last_model_excel_path):
-            shutil.copy(self.app.last_model_excel_path, os.path.join(target_dir, "modelo.xlsx"))
+            target = safe_path(modelos_dir, os.path.basename(self.app.last_model_excel_path))
+            shutil.copy2(self.app.last_model_excel_path, target)
+            self.app.last_model_excel_path = str(target)

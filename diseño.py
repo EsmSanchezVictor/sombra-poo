@@ -6,6 +6,7 @@ from datetime import datetime
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import pandas as pd
 import math
+from core.scene_objects import adaptar_objetos_escena
 
 # Constantes físicas
 sigma = 5.67e-8  # Constante de Stefan-Boltzmann
@@ -324,6 +325,7 @@ def actualizar_grafico(vars, frame):
     I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
     
     # Cálculo de sombras
+    vars["_scene_objects"] = adaptar_objetos_escena(vars.get("arboles", []), vars.get("estructuras", []))    
     sombra_arboles = calcular_sombra_arboles(vars, X, Y, theta_sol, azimut_sol)
     sombra_estruct = calcular_sombra_estructuras(vars, X, Y, theta_sol, azimut_sol)
     sombra_total = np.clip(sombra_arboles * (1 - sombra_estruct), 0, 1)
@@ -515,6 +517,7 @@ def generar_3d(vars):
     ax.set_ylabel('Y (m)')
     ax.set_zlabel('Temperatura (K)')
     ax.set_title('Distribución Térmica 3D')
+    ax.invert_zaxis()
     
     canvas = FigureCanvasTkAgg(fig, master=ventana_3d)
     canvas.draw()
