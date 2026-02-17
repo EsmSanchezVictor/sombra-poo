@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import json
 import os
 import tkinter as tk
 from tkinter import messagebox
+import numpy as np
+
 
 import diseño as design
-
+from core.scene_objects import ArbolEscena, EstructuraEscena
 
 @dataclass
 class ProjectMeta:
@@ -61,8 +64,7 @@ class AppState:
                 "temp_graph_image": self._rel(project.root_path, getattr(self.app, "last_temp_graph_path", None)),
             },
             "scene": {
-                "arboles": [self._serialize_arbol(a) for a in self.app.vars.get("arboles", [])],
-                "estructuras": [self._serialize_estructura(e) for e in self.app.vars.get("estructuras", [])],
+                "objects": [self.scene_object_to_dict(obj) for obj in scene_objects],
             },
         }
 
@@ -83,8 +85,25 @@ class AppState:
         self._apply_vars_data(self.app.vars_modelo, vars_data)
 
         scene = payload.get("scene", {})
-        self.app.vars["arboles"] = self._deserialize_arboles(scene.get("arboles", []))
-        self.app.vars["estructuras"] = self._deserialize_estructuras(scene.get("estructuras", []))
+        scene = payload.get("scene", {}) if isinstance(payload.get("scene"), dict) else {}
+        scene_objects = []
+        if isinstance(scene.get("objects"), list):
+            scene_objects = [
+                obj for obj in (self.scene_object_from_dict(item) for item in scene.get("objects", [])) if obj
+            ]
+        else:
+            legacy_arboles = self._deserialize_arboles(scene.get("arboles", []))
+            legacy_estructuras = self._deserialize_estructuras(scene.get("estructuras", []))
+            scene_objects = [
+                *[self._arbol_to_scene_obj(arbol) for arbol in legacy_arboles],
+                *[self._estructura_to_scene_obj(estructura) for estructura in legacy_estructuras],
+            ]
+
+        self.app.vars["_scene_objects"] = scene_objects
+        self.app.vars["arboles"] = [self._scene_obj_to_arbol(o) for o in scene_objects if isinstance(o, ArbolEscena)]
+        self.app.vars["estructuras"] = [
+            self._scene_obj_to_estructura(o) for o in scene_objects if isinstance(o, EstructuraEscena)
+        ]
 
         ui = payload.get("ui", payload.get("ui_state", {}))
         self.app.modo_modelo.set(ui.get("model_mode", ui.get("mode", self.app.modo_modelo.get())))
@@ -134,11 +153,177 @@ class AppState:
 
     def _serialize_vars(self, vars_dict: dict) -> dict:
         data = {}
+        excluded_keys = {
+            "arboles",
+            "estructuras",
+            "_app_instance",
+            "_scene_objects",
+            "ax",
+            "canvas",
+            "figure",
+            "fig",
+            "toolbar",
+        }
         for key, value in vars_dict.items():
-            if key in ("arboles", "estructuras", "_app_instance"):
+            if key in excluded_keys:
                 continue
-            data[key] = value.get() if hasattr(value, "get") else value
+            safe_value = self.make_json_safe(value)
+            if safe_value is not None:
+                data[key] = safe_value
         return data
+    
+    def make_json_safe(self, value):
+        if isinstance(value, tk.Variable):
+            return self.make_json_safe(value.get())
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        if isinstance(value, (list, tuple)):
+            converted = [self.make_json_safe(item) for item in value]
+            return [item for item in converted if item is not None]
+        if isinstance(value, dict):
+            converted = {}
+            for key, item in value.items():
+                safe_item = self.make_json_safe(item)
+                if safe_item is not None:
+                    converted[str(key)] = safe_item
+            return converted
+        try:
+            json.dumps(value)
+            return value
+        except TypeError:
+            return None
+
+    def _extract_scene_objects(self) -> list:
+        raw_objects = self.app.vars.get("_scene_objects", [])
+        scene_objects = [obj for obj in raw_objects if isinstance(obj, (ArbolEscena, EstructuraEscena))]
+        if scene_objects:
+            return scene_objects
+        return [
+            *[self._arbol_to_scene_obj(arbol) for arbol in self.app.vars.get("arboles", [])],
+            *[self._estructura_to_scene_obj(estructura) for estructura in self.app.vars.get("estructuras", [])],
+        ]
+
+    def scene_object_to_dict(self, obj) -> dict:
+        if isinstance(obj, ArbolEscena):
+            payload = {
+                "type": "ArbolEscena",
+                "x": float(getattr(obj, "x", 0.0)),
+                "y": float(getattr(obj, "y", 0.0)),
+                "altura": float(getattr(obj, "altura", 0.0)),
+                "radio_copa": float(getattr(obj, "radio_copa", 0.0)),
+            }
+            for attr in ("rho_copa", "opacidad", "id", "nombre"):
+                if hasattr(obj, attr):
+                    payload[attr] = self.make_json_safe(getattr(obj, attr))
+            return payload
+        if isinstance(obj, EstructuraEscena):
+            payload = {
+                "type": "EstructuraEscena",
+                "tipo": str(getattr(obj, "tipo", "estructura")),
+                "x1": float(getattr(obj, "x1", 0.0)),
+                "y1": float(getattr(obj, "y1", 0.0)),
+                "x2": float(getattr(obj, "x2", 0.0)),
+                "y2": float(getattr(obj, "y2", 0.0)),
+                "altura": float(getattr(obj, "altura", 0.0)),
+            }
+            for attr in ("material", "opacidad", "id", "nombre"):
+                if hasattr(obj, attr):
+                    payload[attr] = self.make_json_safe(getattr(obj, attr))
+            return payload
+        return {}
+
+    def scene_object_from_dict(self, data: dict):
+        if not isinstance(data, dict):
+            return None
+        obj_type = data.get("type")
+        if obj_type == "ArbolEscena":
+            obj = ArbolEscena(
+                x=float(data.get("x", 0.0)),
+                y=float(data.get("y", 0.0)),
+                altura=float(data.get("altura", 0.0)),
+                radio_copa=float(data.get("radio_copa", 0.0)),
+            )
+            if "rho_copa" in data:
+                setattr(obj, "rho_copa", float(data.get("rho_copa", 0.0)))
+            if "opacidad" in data:
+                setattr(obj, "opacidad", float(data.get("opacidad", 1.0)))
+            for attr in ("id", "nombre"):
+                if attr in data:
+                    setattr(obj, attr, data.get(attr))
+            return obj
+        if obj_type == "EstructuraEscena":
+            obj = EstructuraEscena(
+                x=float(data.get("x1", data.get("x", 0.0))),
+                y=float(data.get("y1", data.get("y", 0.0))),
+                altura=float(data.get("altura", 0.0)),
+                tipo=str(data.get("tipo", "estructura")),
+                x1=float(data.get("x1", 0.0)),
+                y1=float(data.get("y1", 0.0)),
+                x2=float(data.get("x2", 0.0)),
+                y2=float(data.get("y2", 0.0)),
+            )
+            if "material" in data:
+                setattr(obj, "material", data.get("material"))
+            if "opacidad" in data:
+                setattr(obj, "opacidad", float(data.get("opacidad", 1.0)))
+            for attr in ("id", "nombre"):
+                if attr in data:
+                    setattr(obj, attr, data.get(attr))
+            return obj
+        return None
+
+    def _arbol_to_scene_obj(self, arbol) -> ArbolEscena:
+        obj = ArbolEscena(
+            x=float(getattr(arbol, "x", 0.0)),
+            y=float(getattr(arbol, "y", 0.0)),
+            altura=float(getattr(arbol, "h", getattr(arbol, "altura", 0.0))),
+            radio_copa=float(getattr(arbol, "radio_copa", 0.0)),
+        )
+        if hasattr(arbol, "rho_copa"):
+            setattr(obj, "rho_copa", float(getattr(arbol, "rho_copa", 0.0)))
+        return obj
+
+    def _estructura_to_scene_obj(self, estructura) -> EstructuraEscena:
+        obj = EstructuraEscena(
+            x=float(getattr(estructura, "x1", 0.0)),
+            y=float(getattr(estructura, "y1", 0.0)),
+            altura=float(getattr(estructura, "altura", 0.0)),
+            tipo=str(getattr(estructura, "tipo", "estructura")),
+            x1=float(getattr(estructura, "x1", 0.0)),
+            y1=float(getattr(estructura, "y1", 0.0)),
+            x2=float(getattr(estructura, "x2", 0.0)),
+            y2=float(getattr(estructura, "y2", 0.0)),
+        )
+        if hasattr(estructura, "material"):
+            setattr(obj, "material", getattr(estructura, "material"))
+        if hasattr(estructura, "opacidad"):
+            setattr(obj, "opacidad", float(getattr(estructura, "opacidad", 1.0)))
+        return obj
+
+    def _scene_obj_to_arbol(self, obj: ArbolEscena):
+        return design.Arbol(
+            float(getattr(obj, "x", 0.0)),
+            float(getattr(obj, "y", 0.0)),
+            float(getattr(obj, "altura", 0.0)),
+            float(getattr(obj, "rho_copa", 0.0)),
+            float(getattr(obj, "radio_copa", 0.0)),
+        )
+
+    def _scene_obj_to_estructura(self, obj: EstructuraEscena):
+        return design.Estructura(
+            str(getattr(obj, "tipo", "Sendero")),
+            float(getattr(obj, "x1", 0.0)),
+            float(getattr(obj, "y1", 0.0)),
+            float(getattr(obj, "x2", 0.0)),
+            float(getattr(obj, "y2", 0.0)),
+            altura=float(getattr(obj, "altura", 0.0)),
+            opacidad=float(getattr(obj, "opacidad", 1.0)),
+            material=getattr(obj, "material", None),
+        )
 
     def _serialize_arbol(self, arbol) -> dict:
         if isinstance(arbol, dict):
@@ -217,6 +402,7 @@ class AppState:
             return float(value)
         except (TypeError, ValueError):
             return None
+
 
 
 from core.settings_manager import SettingsManager
