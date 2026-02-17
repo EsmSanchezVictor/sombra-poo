@@ -11,19 +11,22 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 from PIL import Image, ImageTk
 from tkinter import filedialog, messagebox
-
+from typing import Optional
 from DatasetSaver import DatasetSaver
 from core.app_state import AppState
 from core.settings_manager import SettingsManager
 from core.project_manager import ProjectManager
+from core.file_versioning import safe_path
 from image_processor import ImageProcessor
 #from mouse_pixel_value import MouseHoverPixelValueWithTooltip
 from save_pdf import PDFReportGenerator
 from services.location_service import LocationService
 from services.snapshot_service import SnapshotService
+from services.shadow_detector import ShadowDetector
 from shape_selection import ShapeSelector
 from shadow_temp import Temperatura
 from temp_graph import TemperatureGraph
+from services.solar_engine import SolarEngine
 from ui.menu_bar import MenuBar
 from utils import export_to_excel
 import diseño as design
@@ -73,6 +76,8 @@ class SombraApp:
         self.last_matrix_path = None
         self.last_mask_path = None
         self.last_histogram_path = None
+        self.last_temp_graph_path = None
+        self.shadow_quality = None
 
         # Crear frames principales con una estética consistente
         self.frame0 = tk.Frame(
@@ -244,6 +249,10 @@ class SombraApp:
         self.app_state = AppState(self)
         self.project_manager = ProjectManager(self, self.app_state, self.settings_manager)
         self.snapshot_service = SnapshotService(self, self.project_manager)
+        self.shadow_detector = ShadowDetector()
+        self.shadow_detector_enabled = tk.BooleanVar(value=False)
+        self.use_pvlib_engine = tk.BooleanVar(value=False)
+        self.solar_engine = SolarEngine(use_pvlib=False)
         self.menu_bar = MenuBar(self)
         self.porcentaje_sombra = None
         self.tmrt_result = None
@@ -422,6 +431,7 @@ class SombraApp:
     def on_project_loaded(self):
         self.hide_startup_screen()
         self.set_project_ui_enabled(True)
+        self.update_status_saved_time()
         if self.current_location:
             self._update_location_labels()
 
@@ -496,7 +506,7 @@ class SombraApp:
 
     def restore_project_artifacts(self):
         self.last_image_path = self._resolve_artifact_path(self.last_image_path, "imagenes")
-        self.last_curve_path = self._resolve_artifact_path(self.last_curve_path, "curvas")
+        self.last_curve_path = self._resolve_artifact_path(self.last_curve_path, os.path.join("resultados", "curvas_nivel"))
         self.last_mask_path = self._resolve_artifact_path(self.last_mask_path, "mascaras")
         if self.last_image_path and os.path.exists(self.last_image_path):
             self._load_image_from_path(self.last_image_path)
@@ -507,8 +517,8 @@ class SombraApp:
         self._restore_excel_files()
 
     def _restore_excel_files(self):
-        self.last_edit_excel_path = self._resolve_artifact_path(self.last_edit_excel_path, "excels", "edicion.xlsx")
-        self.last_model_excel_path = self._resolve_artifact_path(self.last_model_excel_path, "excels", "modelo.xlsx")
+        self.last_edit_excel_path = self._resolve_artifact_path(self.last_edit_excel_path, "Planos")
+        self.last_model_excel_path = self._resolve_artifact_path(self.last_model_excel_path, "modelos")
         if self.last_edit_excel_path and os.path.exists(self.last_edit_excel_path):
             loaded = design.abrir_archivo(self.vars, self, filepath=self.last_edit_excel_path)
             if loaded:
@@ -561,14 +571,23 @@ class SombraApp:
         basename = os.path.basename(source_path)
         image_dir = os.path.join(project.root_path, "imagenes")
         os.makedirs(image_dir, exist_ok=True)
-        destination_path = os.path.join(image_dir, basename)
-        if os.path.abspath(source_path) != os.path.abspath(destination_path):
+        destination_path = safe_path(image_dir, basename)
+        if os.path.abspath(source_path) != os.path.abspath(str(destination_path)):
             shutil.copy2(source_path, destination_path)
-        self.current_image_path = destination_path
+        self.current_image_path = str(destination_path)
         self.current_image_basename = basename
         self.current_image_stem = os.path.splitext(basename)[0]
-        self.last_image_path = destination_path
-        return destination_path
+        self.last_image_path = str(destination_path)
+        return str(destination_path)
+
+    def _copy_excel_to_project(self, source_path: str, folder: str) -> str:
+        project = self.project_manager.current_project
+        if project is None:
+            raise RuntimeError("No hay proyecto abierto")
+        target_dir = os.path.join(project.root_path, folder)
+        destination = safe_path(target_dir, os.path.basename(source_path))
+        shutil.copy2(source_path, destination)
+        return str(destination)
 
     def _reset_panel2_for_new_image(self):
         self.shape_selector.clear_panel2_selection()
@@ -757,10 +776,14 @@ class SombraApp:
             command=self._toggle_panel2_advanced,
         )
         self.panel2_advanced_check.pack(anchor="w", padx=20, pady=4)
+        self.shadow_detector_check = tk.Checkbutton(
+            panel,
+            text="Detector sombras reales (experimental)",
+            variable=self.shadow_detector_enabled,
+            bg=panel.cget("bg"),
+        )
+        self.shadow_detector_check.pack(anchor="w", padx=20, pady=2)
 
-
-
-        
         # Selección del tamaño de la matriz
         matrix_label = tk.Label(panel, text="Seleccione el tamaño de la matriz:", bg=panel.cget("bg"), fg="black")
         matrix_label.pack(anchor="w", padx=20, pady=10)
@@ -1001,12 +1024,20 @@ class SombraApp:
         ).grid(row=1, column=0, sticky="w", padx=0, pady=3)
         tk.Button(
             acciones_frame,
+            text="Guardar Excel",
+            command=self.guardar_excel_modelo,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 8, "bold"),
+        ).grid(row=2, column=0, sticky="w", padx=0, pady=3)        
+        tk.Button(
+            acciones_frame,
             text="Generar Gráfico",
             command=self.generar_grafico_modelo,
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
-        ).grid(row=2, column=0, sticky="w", padx=0, pady=3)
+        ).grid(row=3, column=0, sticky="w", padx=0, pady=3)
         tk.Button(
             acciones_frame,
             text="Vista 3D",
@@ -1014,7 +1045,7 @@ class SombraApp:
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
-        ).grid(row=3, column=0, sticky="w", padx=0, pady=3)
+        ).grid(row=4, column=0, sticky="w", padx=0, pady=3)
 
         self.simple_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         self.simple_frame.grid(row=2, column=0, sticky="nsew", pady=6)
@@ -1569,7 +1600,8 @@ class SombraApp:
             return
         filepath = design.abrir_archivo(self.vars, self)
         if filepath:
-            self.last_edit_excel_path = filepath
+            self.last_edit_excel_path = self._copy_excel_to_project(filepath, "Planos")
+            self.mark_dirty()
 
     def cargar_excel_modelo(self):
         if not self.require_project("abrir un Excel de modelo"):
@@ -1577,6 +1609,17 @@ class SombraApp:
         filepath = modelo.cargar_excel(self.vars_modelo)
         if filepath:
             self.last_model_excel_path = filepath
+            self.mark_dirty()
+
+    def guardar_excel_modelo(self):
+        if not self.require_project("guardar Excel de modelo"):
+            return
+        if not self.last_model_excel_path or not os.path.exists(self.last_model_excel_path):
+            messagebox.showwarning("Modelo", "Primero cargue un Excel de modelo.")
+            return
+        self.last_model_excel_path = self._copy_excel_to_project(self.last_model_excel_path, "modelos")
+        messagebox.showinfo("Modelo", "Excel de modelo guardado en la carpeta del proyecto.")
+        self.mark_dirty()
 
     def run_model_for_active_panel(self, force=False):
         if not self.require_project("ejecutar el modelo"):
@@ -1640,35 +1683,57 @@ class SombraApp:
         """Muestra un mensaje informativo para enlaces externos."""
         messagebox.showinfo("Enlace", f"Abrir {label}: {url}")
     def setup_status_bar(self):
-      
         self.frame6.configure(bg=self.palette["accent"])
-        connection_start = getattr(self, "connection_start", datetime.now())
         username = getattr(self, "username", "Usuario")
-        date_time_label = tk.Label(
+        self.status_project_var = tk.StringVar(value="Proyecto: Sin proyecto")
+        self.status_saved_var = tk.StringVar(value="Último guardado: N/A")
+
+        self.project_status_label = tk.Label(
             self.frame6,
-            text=f"Conexión: {connection_start.strftime('%Y-%m-%d %H:%M:%S')}",
+            textvariable=self.status_project_var, #text=f"Conexión: {connection_start.strftime('%Y-%m-%d %H:%M:%S')}",
             bg=self.palette["accent"],
             fg="#2c3e50",
             font=("Arial", 9, "bold"),
         )
-        date_time_label.pack(side="right", padx=10)
-        user_label = tk.Label(
-            self.frame6,
-            text=f"Usuario: {username}",
-            bg=self.palette["accent"],
-            fg="#4a4f63",
-            font=("Arial", 9),
-        )
-        user_label.pack(side="right", padx=10)
+        self.project_status_label.pack(side="left", padx=10)
 
-        brand_label = tk.Label(
+        self.saved_status_label = tk.Label(
             self.frame6,
-            text="3Esfera",
+            textvariable=self.status_saved_var,            #text=f"Usuario: {username}",
+            bg=self.palette["accent"],
+            fg="#2c3e50",
+            font=("Arial", 9),
+        )
+        self.saved_status_label.pack(side="left", padx=10)
+
+        tk.Label(
+            self.frame6,
+            text=f"Usuario: {username}", #text="3Esfera",
             bg=self.palette["accent"],
             fg="#4a4f63",
             font=("Arial", 9),
-        )
-        brand_label.pack(side="right", padx=10)
+ ).pack(side="right", padx=10)
+        tk.Label(
+            self.frame6,
+            text="3esfera",
+            bg=self.palette["accent"],
+            fg="#4a4f63",
+            font=("Arial", 9),
+        ).pack(side="right", padx=10)
+
+    def update_status_saved_time(self, iso_time: str | None = None):
+        project = self.project_manager.current_project
+        pname = project.name if project else "Sin proyecto"
+        self.status_project_var.set(f"Proyecto: {pname}")
+        if not iso_time:
+            self.status_saved_var.set("Último guardado: N/A")
+            return
+        try:
+            dt = datetime.fromisoformat(iso_time)
+            self.status_saved_var.set(f"Último guardado: {dt.isoformat(sep=' ', timespec='seconds')}")
+        except ValueError:
+            self.status_saved_var.set(f"Último guardado: {iso_time}")
+
     def create_card(self, parent):
         return tk.Frame(
             parent,
@@ -1837,6 +1902,8 @@ class SombraApp:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
             
             self.temp_calculator = Temperatura(latitude, longitude)
+            self.solar_engine.use_pvlib = bool(self.use_pvlib_engine.get())
+            _ = self.solar_engine.get_solar_position(latitude, longitude, datetime.combine(fecha, datetime.min.time()))
             result = self.temp_calculator.calculate_tmrt(
                 temp_ambient,
                 self.porcentaje_sombra,
@@ -1857,7 +1924,12 @@ class SombraApp:
             # Crear un objeto de la clase TemperatureGraph y mostrar la gráfica dentro del frame
             graph = TemperatureGraph(temp_ambient, result["Tmrt_sombra"], self.graph_frame)
             graph.plot_temperature_scale()  # Dibujar la gráfica en el frame
-
+            if self.project_manager.current_project:
+                temp_img_dir = os.path.join(self.project_manager.current_project.root_path, "resultados")
+                temp_img_path = safe_path(temp_img_dir, "temp_ambiente_last.png")
+                plt.gcf().savefig(temp_img_path, dpi=120, bbox_inches="tight")
+                self.last_temp_graph_path = str(temp_img_path)
+                
         except ValueError as e:
             messagebox.showerror("Error", f"Error al ingresar los datos: {e}")
     def confirmar_seleccion(self):
@@ -1872,7 +1944,15 @@ class SombraApp:
             )
             self.porcentaje_sombra = porcentaje_sombra
             self.lbl_porcentaje_sombra.config(text=f"Porcentaje de sombra: {porcentaje_sombra:.2f}%")
-
+            if self.shadow_detector_enabled.get() and self.img_rgb is not None:
+                detected = self.shadow_detector.detect_shadow_mask(self.img_rgb, method="adaptive")
+                roi = np.zeros_like(detected, dtype=bool)
+                if self.shape_selector.area_seleccionada is not None:
+                    h, w = self.shape_selector.area_seleccionada.shape[:2]
+                    roi[:h, :w] = True
+                quality_meta = self.shadow_detector.compute_shadow_quality(detected, roi_mask=roi)
+                self.shadow_quality = quality_meta.get("shadow_quality")
+                
             # Habilitar los botones para curvas de nivel y exportar
             self.curve_button.config(state=tk.NORMAL)  # Habilitar el botón de curvas de nivel
             self.excel_button.config(state=tk.NORMAL)  # Habilitar el botón para exportar a Excel
@@ -1881,11 +1961,6 @@ class SombraApp:
                 img_filename=self.current_image_basename,
                 mask_filename=f"{self.current_image_stem}_mask.png",
                 save_image=False,
-            )
-            self.last_mask_path = os.path.join(
-                self.project_manager.current_project.root_path,
-                "mascaras",
-                f"{self.current_image_stem}_mask.png",
             )
             self.shape_selector.disable_selection()
             self.area_calc_button.config(state=tk.DISABLED)
@@ -1939,22 +2014,35 @@ class SombraApp:
 
             project_root = self.project_manager.current_project.root_path
             hist_dir = os.path.join(project_root, "resultados", "histograma")
+            curve_dir = os.path.join(project_root, "resultados", "curvas_nivel")
             excel_dir = os.path.join(project_root, "resultados", "excels")
             os.makedirs(hist_dir, exist_ok=True)
+            os.makedirs(curve_dir, exist_ok=True)
             os.makedirs(excel_dir, exist_ok=True)
 
-            hist_path = os.path.join(hist_dir, f"{self.current_image_stem}_histo.png")
+            curve_path = safe_path(curve_dir, f"{self.current_image_stem}_curva.png")
+            self.curva_img_pil_original.save(curve_path)
+            self.last_curve_path = str(curve_path)
+
+            hist_path = safe_path(hist_dir, f"{self.current_image_stem}_histo.png")
             hist_fig, hist_ax = plt.subplots()
-            hist_ax.hist(self.shape_selector.area_seleccionada.flatten(), bins=50, color="gray", alpha=0.9)
+            values = self.shape_selector.area_seleccionada.flatten()
+            counts, bins, patches = hist_ax.hist(values, bins=50, alpha=0.95)
+            cmap = plt.get_cmap("viridis")
+            max_count = max(counts) if len(counts) else 1
+            for c, patch in zip(counts, patches):
+                patch.set_facecolor(cmap(c / max_count if max_count else 0))
             hist_ax.set_title("Histograma")
             hist_fig.tight_layout()
             hist_fig.savefig(hist_path, dpi=150)
             plt.close(hist_fig)
-            self.last_histogram_path = hist_path
+            
+            self.last_histogram_path = str(hist_path)
 
-            excel_path = os.path.join(excel_dir, f"{self.current_image_stem}.xlsx")
+            excel_path = safe_path(excel_dir, f"{self.current_image_stem}.xlsx")
             pd.DataFrame(self.shape_selector.area_seleccionada).to_excel(excel_path, index=False)
-            self.last_matrix_path = excel_path
+            self.last_matrix_path = str(excel_path)
+            self.mark_dirty()            
             
     def _fit_image_to_frame(self, pil_img, frame, padding=8):
         if frame is None:

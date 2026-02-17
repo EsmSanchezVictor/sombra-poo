@@ -11,6 +11,7 @@ class Project:
     def __init__(self, root_path: str, config_path: str | None = None):
         self.root_path = root_path
         self.config_path = config_path or os.path.join(root_path, "config", "project.json")
+        self.state_path = os.path.join(root_path, "config", "estado.json")        
         self.next_n = 1
 
     @classmethod
@@ -33,10 +34,12 @@ class Project:
         folders = (
             "imagenes",
             "curvas",
-            "matrices",
             "mascaras",
-            "excels",
-            os.path.join("resultados", "histogramas"),
+            "Planos",
+            "modelos",
+            os.path.join("resultados", "histograma"),
+            os.path.join("resultados", "curvas_nivel"),
+            os.path.join("resultados", "excels"),            
             "config",
         )
         for folder in folders:
