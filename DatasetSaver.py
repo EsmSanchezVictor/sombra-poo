@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 import cv2
+import shutil
 from datetime import datetime
 from core.file_versioning import safe_path
 #from PIL import Image
@@ -73,6 +74,8 @@ class DatasetSaver:
             
         try:
             current_project.ensure_structure()
+            image_root = os.path.join(current_project.root_path, "imagenes")
+            os.makedirs(image_root, exist_ok=True)
             if img_filename is None or mask_filename is None:
                 n = current_project.allocate_n()
             
@@ -80,15 +83,29 @@ class DatasetSaver:
             img_filename = img_filename or f"elemento{n}.jpg"
             mask_filename = mask_filename or f"Melemento{n}.png"
             
-            # Guardar imagen original
-            img_path = safe_path(os.path.join(current_project.root_path, "imagenes"), img_filename)
-            img_filename = os.path.basename(str(img_path))
+            # Guardar imagen original o reutilizar imagen actual validada
+            img_path = safe_path(image_root, img_filename)
+            img_path = str(img_path)
             if save_image:
-                cv2.imwrite(str(img_path), cv2.cvtColor(self.app.img_rgb, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(img_path, cv2.cvtColor(self.app.img_rgb, cv2.COLOR_RGB2BGR))
+            else:
+                src_path = getattr(self.app, "current_image_path", None)
+                if not src_path or not os.path.exists(src_path):
+                    raise FileNotFoundError(f"Imagen actual inexistente: {src_path}")
+                if os.path.abspath(src_path) != os.path.abspath(img_path):
+                    shutil.copy2(src_path, img_path)
+            if not os.path.exists(img_path):
+                raise FileNotFoundError(f"No existe imagen para dataset: {img_path}")
+
+            img_filename = os.path.basename(img_path)
+            self.app.current_image_path = img_path
+            self.app.current_image_basename = img_filename
+            self.app.current_image_stem = os.path.splitext(img_filename)[0]
+            print(f"[dataset] Imagen registrada: {img_path}")
 
 
             # Registrar último recurso guardado para snapshots
-            self.app.last_image_path = str(img_path)
+            self.app.last_image_path = img_path
                         
             # Crear y guardar máscara
             saved_mask = self.save_mask(img_filename, mask_filename)
@@ -107,8 +124,12 @@ class DatasetSaver:
         """Actualiza el archivo JSON con los nuevos datos de la máscara"""
         try:
             current_project = self.app.project_manager.current_project
+            image_path = getattr(self.app, "current_image_path", None) or os.path.join(current_project.root_path, "imagenes", img_filename)
+            if not os.path.exists(image_path):
+                raise FileNotFoundError(f"No se puede actualizar JSON sin imagen existente: {image_path}")
+            img_filename = os.path.basename(image_path)            
             # Obtener tamaño de la imagen
-            img_size = os.path.getsize(os.path.join(current_project.root_path, "imagenes", img_filename))
+            img_size = os.path.getsize(image_path)
             
             
             # Generar estructura de datos para la máscara

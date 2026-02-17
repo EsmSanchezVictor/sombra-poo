@@ -563,7 +563,7 @@ class SombraApp:
         self.shape_selector.enable_calculo_button()
         self.cargar_imagen_button.config(text="Cargar nueva imagen")
 
-    def _copy_image_to_project(self, source_path: str) -> str:
+    def save_loaded_image_to_project(self, source_path: str) -> str:
         project = self.project_manager.current_project
         if project is None:
             raise RuntimeError("No hay proyecto abierto")
@@ -572,13 +572,22 @@ class SombraApp:
         image_dir = os.path.join(project.root_path, "imagenes")
         os.makedirs(image_dir, exist_ok=True)
         destination_path = safe_path(image_dir, basename)
+        print(f"[panel2] Copiando imagen a proyecto: {source_path} -> {destination_path}")
         if os.path.abspath(source_path) != os.path.abspath(str(destination_path)):
             shutil.copy2(source_path, destination_path)
-        self.current_image_path = str(destination_path)
-        self.current_image_basename = basename
-        self.current_image_stem = os.path.splitext(basename)[0]
-        self.last_image_path = str(destination_path)
-        return str(destination_path)
+        if not os.path.exists(destination_path):
+            raise FileNotFoundError(f"No se pudo copiar la imagen a {destination_path}")
+
+        destination_str = str(destination_path)
+        destination_basename = os.path.basename(destination_str)
+        self.current_image_path = destination_str
+        self.current_image_basename = destination_basename
+        self.current_image_stem = os.path.splitext(destination_basename)[0]
+        self.last_image_path = destination_str
+        return destination_str
+
+    def _copy_image_to_project(self, source_path: str) -> str:
+        return self.save_loaded_image_to_project(source_path)
 
     def _copy_excel_to_project(self, source_path: str, folder: str) -> str:
         project = self.project_manager.current_project
@@ -1859,7 +1868,7 @@ class SombraApp:
         )
         if file_path:
             try:
-                saved_image_path = self._copy_image_to_project(file_path)
+                saved_image_path = self.save_loaded_image_to_project(file_path)
                 self._reset_panel2_for_new_image()
                 self.img, self.img_rgb = self.image_processor.load_image(saved_image_path)
             except ValueError as exc:
@@ -1957,6 +1966,10 @@ class SombraApp:
             self.curve_button.config(state=tk.NORMAL)  # Habilitar el botón de curvas de nivel
             self.excel_button.config(state=tk.NORMAL)  # Habilitar el botón para exportar a Excel
             self.pdf_button.config(state=tk.NORMAL) # Habilita el botón para guardan el pdf
+            if not self.current_image_path or not os.path.exists(self.current_image_path):
+                print(f"[confirmar] Ruta de imagen inexistente: {self.current_image_path}")
+                messagebox.showerror("Error", "La imagen del proyecto no existe. Cargá la imagen nuevamente.")
+                return            
             self.dataset_saver.save_dataset(
                 img_filename=self.current_image_basename,
                 mask_filename=f"{self.current_image_stem}_mask.png",
@@ -2108,7 +2121,11 @@ class SombraApp:
             messagebox.showerror("Error", "No hay imagen cargada")
             return
         if not self.require_project("guardar el dataset"):
-            return            
+            return  
+        if not self.current_image_path or not os.path.exists(self.current_image_path):
+            print(f"[dataset] Ruta de imagen inválida: {self.current_image_path}")
+            messagebox.showerror("Error", "La imagen actual no existe en disco. Recargá la imagen antes de guardar.")
+            return          
         if not hasattr(self.shape_selector, 'area_seleccionada') or self.shape_selector.area_seleccionada is None:
             messagebox.showerror("Error", "No hay área de cálculo seleccionada")
             return
@@ -2169,9 +2186,10 @@ class SombraApp:
             self._shadow_hover_canvas.mpl_disconnect(self._shadow_hover_cid)
         self._shadow_hover_canvas = canvas
         if self._shadow_hover_annotation is not None and self._shadow_hover_annotation.axes != ax:
+            self._shadow_hover_annotation.set_visible(False)
             try:
                 self._shadow_hover_annotation.remove()
-            except ValueError:
+            except (NotImplementedError, ValueError):
                 pass
             self._shadow_hover_annotation = None        
         if self._shadow_hover_annotation is None or self._shadow_hover_annotation.axes != ax:
