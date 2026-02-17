@@ -29,6 +29,7 @@ class AppState:
     def build_payload(self, project) -> dict:
         saved_at = datetime.now().isoformat(timespec="seconds")
         meta = ProjectMeta(name=project.name, saved_at=saved_at)
+        scene_objects = self._extract_scene_objects()
         vars_data = self._serialize_vars(self.app.vars)
         return {
             "version": 1,
@@ -84,7 +85,6 @@ class AppState:
         self._apply_vars_data(self.app.vars, vars_data)
         self._apply_vars_data(self.app.vars_modelo, vars_data)
 
-        scene = payload.get("scene", {})
         scene = payload.get("scene", {}) if isinstance(payload.get("scene"), dict) else {}
         scene_objects = []
         if isinstance(scene.get("objects"), list):

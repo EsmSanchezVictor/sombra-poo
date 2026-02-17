@@ -1416,23 +1416,39 @@ class SombraApp:
             return
         self.project_manager.open_project()
 
+    def open_project_from_path(self, file_path: str):
+        """Abre un proyecto a partir de una ruta absoluta."""
+        return self.project_manager.open_project_from_path(file_path)
+
     def save_project(self):
         """Guarda el proyecto actual."""
-        self.project_manager.save_project()
+        return self.project_manager.save_project()
 
     def save_project_as(self):
         """Guarda el proyecto en un nuevo destino."""
         self.project_manager.save_project_as()
+        
+    def duplicate_project(self):
+        """Duplica el proyecto actual."""
+        return self.project_manager.duplicate_project()
+
+    def export_project_3es(self):
+        """Exporta el proyecto actual a .3es."""
+        return self.project_manager.export_project()
+
+    def import_project_3es(self):
+        """Importa un proyecto .3es."""
+        if not self._confirm_discard_changes("Importar .3es"):
+            return False
+        return self.project_manager.import_project()
+
+    # Compatibilidad con llamadas antiguas        
 
     def export_project(self):
-        """Exporta el proyecto a .3es."""
-        self.project_manager.export_project()
+        return self.export_project_3es()
 
     def import_project(self):
-        """Importa un .3es y lo abre."""
-        if not self._confirm_discard_changes("Importar proyecto"):
-            return
-        self.project_manager.import_project()
+        return self.import_project_3es()
 
     def save_snapshot(self):
         """Guarda un snapshot del proyecto actual."""

@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "meta": {
+    "name": "123",
+    "saved_at": "2026-02-17T18:52:31",
+    "app": "sombra-poo"
+  },
+  "name": "123",
+  "location": {
+    "country": "Argentina",
+    "city": "Buenos Aires",
+    "province": "Buenos Aires",
+    "lat": -34.6037,
+    "lon": -58.3816,
+    "tz": "America/Argentina/Buenos_Aires",
+    "kind": "capital"
+  },
+  "next_n": 1,
+  "vars": {
+    "T_amb_base": 295.0,
+    "I_sol_base": 1000.0,
+    "T_min": 290.0,
+    "T_max": 310.0,
+    "dia": 180,
+    "lat": -34.6037,
+    "lon": -58.3816,
+    "hora": 12.0,
+    "humedad": 0.5,
+    "viento": "moderado",
+    "_update_required": true
+  },
+  "ui": {
+    "active_panel": 0,
+    "model_mode": "simple",
+    "edit_mode": "simple",
+    "panel2_advanced": false,
+    "shadow_detector_enabled": false,
+    "selected_city": "Buenos Aires (Buenos Aires)",
+    "selected_country": "Argentina",
+    "curve_button_state": "normal"
+  },
+  "paths": {
+    "current_image": "..\\test 2\\config\\config\\imagenes\\Eiche_bei_Graditz_v2.jpg",
+    "current_mask": "..\\test 2\\config\\config\\mascaras\\Eiche_bei_Graditz_mask.png",
+    "last_histogram": "..\\test 2\\config\\config\\resultados\\histograma\\Eiche_bei_Graditz_v2_histo.png",
+    "last_curve": "..\\test 2\\config\\config\\resultados\\curvas_nivel\\Eiche_bei_Graditz_v2_curva.png",
+    "last_matrix_excel": "..\\test 2\\config\\config\\resultados\\excels\\Eiche_bei_Graditz_v2.xlsx",
+    "edit_excel": null,
+    "model_excel": null
+  },
+  "last_results_meta": {
+    "tmrt_sun": 51.27,
+    "tmrt_shade": 32.94,
+    "delta_tmrt": 18.33,
+    "shadow_quality": null,
+    "temp_graph_image": "..\\test 2\\config\\config\\resultados\\temp_ambiente_last.png"
+  },
+  "scene": {
+    "objects": []
+  }
+}
