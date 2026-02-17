@@ -141,19 +141,22 @@ class ProjectManager:
         """Escribe el JSON de proyecto."""
         if not self.current_project:
             return
-        payload = self.app_state.build_payload(self.current_project)
-        self.current_project.next_n = int(payload.get("next_n", self.current_project.next_n))
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        state_path = safe_path(os.path.dirname(path), os.path.basename(path))
-        with open(state_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, ensure_ascii=False)
-        with open(self.current_project.config_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, ensure_ascii=False)
-        self._sync_excel_copies()    
-        self.app.is_dirty = False
-        self.app.current_project_path = str(state_path)
-        self._update_last_project_path(str(state_path))
-        self.app.update_status_saved_time(payload.get("meta", {}).get("saved_at"))
+        try:
+            payload = self.app_state.build_payload(self.current_project)
+            self.current_project.next_n = int(payload.get("next_n", self.current_project.next_n))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            state_path = safe_path(os.path.dirname(path), os.path.basename(path))
+            with open(state_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, ensure_ascii=False)
+            with open(self.current_project.config_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, ensure_ascii=False)
+            self._sync_excel_copies()
+            self.app.is_dirty = False
+            self.app.current_project_path = str(state_path)
+            self._update_last_project_path(str(state_path))
+            self.app.update_status_saved_time(payload.get("meta", {}).get("saved_at"))
+        except Exception as exc:
+            messagebox.showerror("Guardar proyecto", f"No se pudo guardar el proyecto: {exc}")
 
     def _load_project_file(self, path: str) -> dict | None:
         """Lee un JSON de proyecto con control de errores."""
