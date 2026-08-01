@@ -347,6 +347,37 @@
         }
       ],
       "file_attributes": {}
+    },
+    "ChatGPT Image 16 nov 2025, 20_59_24_v2.png757685": {
+      "filename": "ChatGPT Image 16 nov 2025, 20_59_24_v2.png",
+      "size": 757685,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              522,
+              295,
+              350,
+              481,
+              647,
+              722,
+              630
+            ],
+            "all_points_y": [
+              180,
+              438,
+              648,
+              698,
+              673,
+              479,
+              258
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
     }
   },
   "_via_attributes": {
@@ -364,6 +395,7 @@
     "shutterstock_577672450.jpg2813413",
     "01_mesquite_g1t068_v2.jpg576918",
     "Eiche_bei_Graditz_v2.jpg306902",
-    "shutterstock_577672450_v2.jpg2813413"
+    "shutterstock_577672450_v2.jpg2813413",
+    "ChatGPT Image 16 nov 2025, 20_59_24_v2.png757685"
   ]
 }

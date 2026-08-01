@@ -19,7 +19,13 @@ class ImageProcessor:
         return area_gris_resized
 
     def calcular_porcentaje_sombra(self, area_gris, area_referencia):
-        min_val = np.min(area_gris)
-        max_val = np.median(area_referencia) if area_referencia is not None else np.max(area_gris)
-        sombra_normalizada = (area_gris - min_val) / (max_val - min_val)
-        return 100-np.mean(sombra_normalizada) * 100
+        min_val = float(np.min(area_gris))
+        max_val = (float(np.median(area_referencia)) if area_referencia is not None
+                    else float(np.max(area_gris)))
+        rango = max_val - min_val
+        if rango <= 1e-6:
+            # Sin contraste suficiente no existe información para estimar sombra.
+            return 0.0
+        sombra_normalizada = (area_gris.astype(np.float64) - min_val) / rango
+        sombra_normalizada = np.clip(sombra_normalizada, 0.0, 1.0)
+        return float(100 - np.mean(sombra_normalizada) * 100)

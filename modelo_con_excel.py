@@ -1,13 +1,18 @@
+"""Simulación térmica; ``transmitancia`` 1 significa luz solar plena."""
+
+import logging
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import ttk, filedialog
-from datetime import datetime
+from datetime import datetime, timedelta
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import pandas as pd
 import math
 from core.scene_objects import adaptar_objetos_escena
 from tkinter import messagebox
+from motor_solar import MotorSolar
 
 # Constantes
 sigma = 5.67e-8  # Constante de Stefan-Boltzmann
@@ -34,72 +39,91 @@ class Estructura:
         self.material = material
 # Materiales predefinidos (valores promedio dentro de los rangos)
 materiales = {
-    "acero inoxidable": Material(alpha=0.3, epsilon=0.2),
-    "aluminio": Material(alpha=0.2, epsilon=0.125),
-    "madera tratada": Material(alpha=0.7, epsilon=0.85),
-    "policarbonato": Material(alpha=0.85, epsilon=0.9),
-    "Policarbonato (paneles)": Material(alpha=0.85, epsilon=0.9),
-    "Hormigón": Material(alpha=0.9, epsilon=0.9),
-    "PVC (estructuras ligeras)": Material(alpha=0.8, epsilon=0.925),
-    "Fibra de vidrio": Material(alpha=0.85, epsilon=0.89),
-    "Lámina de polietileno (HDPE)": Material(alpha=0.35, epsilon=0.925),
-    "Vidrio templado": Material(alpha=0.85, epsilon=0.9),
-    "Ladrillo cerámico": Material(alpha=0.88, epsilon=0.875),
-    "Corrugado de hierro": Material(alpha=0.8, epsilon=0.25),
-    "ETFE": Material(alpha=0.3, epsilon=0.9),
-    "CLT (Madera laminada natural)": Material(alpha=0.7, epsilon=0.85),
-    "Aerogel": Material(alpha=0.25, epsilon=0.925),
-    "Tierra apisonada": Material(alpha=0.4, epsilon=0.9),
-    "Paca de paja": Material(alpha=0.5, epsilon=0.9),
-    "Corcho": Material(alpha=0.3, epsilon=0.9),
-    "Fibra de carbono": Material(alpha=0.8, epsilon=0.75),
-    "Chapa de Zinc": Material(alpha=0.7, epsilon=0.25),
-    "Terracota": Material(alpha=0.7, epsilon=0.875),
-    "Micelio (hongos)": Material(alpha=0.5, epsilon=0.9),
-    "Plástico reciclado": Material(alpha=0.7, epsilon=0.925),
-    "Lana de vidrio": Material(alpha=0.3, epsilon=0.9),
-    "Caucho": Material(alpha=0.8, epsilon=0.925),
-    "Malla de acero": Material(alpha=0.7, epsilon=0.2),
-    "Geotextil": Material(alpha=0.4, epsilon=0.9),
-    "Tablero de óxido de magnesio": Material(alpha=0.5, epsilon=0.9),
-    "Ferrocemento": Material(alpha=0.7, epsilon=0.9),
-    "Hempcrete": Material(alpha=0.4, epsilon=0.9),
-    "Fotocerámica (Vidrio Fotovoltaico)": Material(alpha=0.3, epsilon=0.9),
-    "Concreto Translúcido": Material(alpha=0.5, epsilon=0.9),
-    "Materiales de Cambio de Fase (PCMs)": Material(alpha=0.45, epsilon=0.925),
-    "Acero Corten": Material(alpha=0.7 , epsilon=0.7),
-    "Composite Madera-Plástico": Material(alpha=1.0e-7, epsilon=0.9),
-    "Pinturas Intumescentes": Material(alpha=0.4, epsilon=0.925),
-    "Cobre (superficies antibacterianas)": Material(alpha=0.8, epsilon=0.315),
-    "Espuma de Poliuretano": Material(alpha=0.3, epsilon=0.9),
-    "Concreto Autocurativo": Material(alpha=0.6, epsilon=0.9),
-    "Ladrillos de PET reciclado": Material(alpha=0.95, epsilon=0.925),
-    "concreto translucido": Material(alpha=0.5, epsilon=0.9),
-    "asfalto": Material(alpha=0.95, epsilon=0.95),
-    "cemento": Material(alpha=0.6, epsilon=0.9),
-    "suelo":Material(alpha=0.4, epsilon=0.9)
+    "acero inoxidable": Material(alpha=0.3, epsilon=0.2),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "aluminio": Material(alpha=0.2, epsilon=0.125),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "madera tratada": Material(alpha=0.7, epsilon=0.85),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "policarbonato": Material(alpha=0.85, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Policarbonato (paneles)": Material(alpha=0.85, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Hormigón": Material(alpha=0.9, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "PVC (estructuras ligeras)": Material(alpha=0.8, epsilon=0.925),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Fibra de vidrio": Material(alpha=0.85, epsilon=0.89),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Lámina de polietileno (HDPE)": Material(alpha=0.35, epsilon=0.925),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Vidrio templado": Material(alpha=0.85, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Ladrillo cerámico": Material(alpha=0.88, epsilon=0.875),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Corrugado de hierro": Material(alpha=0.8, epsilon=0.25),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "ETFE": Material(alpha=0.3, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "CLT (Madera laminada natural)": Material(alpha=0.7, epsilon=0.85),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Aerogel": Material(alpha=0.25, epsilon=0.925),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Tierra apisonada": Material(alpha=0.4, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Paca de paja": Material(alpha=0.5, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Corcho": Material(alpha=0.3, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Fibra de carbono": Material(alpha=0.8, epsilon=0.75),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Chapa de Zinc": Material(alpha=0.7, epsilon=0.25),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Terracota": Material(alpha=0.7, epsilon=0.875),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Micelio (hongos)": Material(alpha=0.5, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Plástico reciclado": Material(alpha=0.7, epsilon=0.925),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Lana de vidrio": Material(alpha=0.3, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Caucho": Material(alpha=0.8, epsilon=0.925),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Malla de acero": Material(alpha=0.7, epsilon=0.2),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Geotextil": Material(alpha=0.4, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Tablero de óxido de magnesio": Material(alpha=0.5, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Ferrocemento": Material(alpha=0.7, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Hempcrete": Material(alpha=0.4, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Fotocerámica (Vidrio Fotovoltaico)": Material(alpha=0.3, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Concreto Translúcido": Material(alpha=0.5, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Materiales de Cambio de Fase (PCMs)": Material(alpha=0.45, epsilon=0.925),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Acero Corten": Material(alpha=0.7 , epsilon=0.7),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    # ASHRAE Fundamentals, propiedades radiativas típicas de madera/plásticos
+    # oscuros: absortividad solar media-alta; 0,7 es un valor representativo.
+    "Composite Madera-Plástico": Material(alpha=0.7, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Pinturas Intumescentes": Material(alpha=0.4, epsilon=0.925),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Cobre (superficies antibacterianas)": Material(alpha=0.8, epsilon=0.315),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Espuma de Poliuretano": Material(alpha=0.3, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Concreto Autocurativo": Material(alpha=0.6, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "Ladrillos de PET reciclado": Material(alpha=0.95, epsilon=0.925),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "concreto translucido": Material(alpha=0.5, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "asfalto": Material(alpha=0.95, epsilon=0.95),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "cemento": Material(alpha=0.6, epsilon=0.9),  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
+    "suelo":Material(alpha=0.4, epsilon=0.9)  # Fuente: rangos típicos de ASHRAE Fundamentals (acabado/color dependientes).
 }
+MATERIALES_LOWER = {nombre.lower(): material for nombre, material in materiales.items()}
+
+
+def _fecha_desde_dia_hora(dia_del_año, hora_local, año=2024):
+    return datetime(año, 1, 1) + timedelta(days=int(dia_del_año) - 1, hours=float(hora_local))
+
 def declinacion_solar(dia_del_año):
-    return 23.45 * np.sin(np.radians((360 / 365) * (dia_del_año - 81)))
+    """Compatibilidad: declinación aparente derivada de MotorSolar."""
+    fecha = _fecha_desde_dia_hora(dia_del_año, 12)
+    # La declinación se infiere en el ecuador al mediodía solar aproximado.
+    elevacion = MotorSolar(0, 0, "UTC").obtener_posicion_y_radiacion(fecha)["elevacion"]
+    return np.sign(172 - dia_del_año) * (90 - elevacion)
+
 def angulo_solar(latitud, longitud, dia_del_año, hora_local):
-    delta = np.radians(declinacion_solar(dia_del_año))
-    phi = np.radians(latitud)
-    h = np.radians(15 * (hora_local - 12) + (longitud / 15))
-    sin_theta = np.sin(phi) * np.sin(delta) + np.cos(phi) * np.cos(delta) * np.cos(h)
-    return np.arcsin(sin_theta)
+    """Altitud en radianes, delegada al motor solar común."""
+    datos = MotorSolar(latitud, longitud).obtener_posicion_y_radiacion(
+        _fecha_desde_dia_hora(dia_del_año, hora_local)
+    )
+    return np.radians(datos["elevacion"])
+
 def azimut_solar(latitud, longitud, dia_del_año, hora_local, theta_sol):
-    delta = np.radians(declinacion_solar(dia_del_año))
-    phi = np.radians(latitud)
-    h = np.radians(15 * (hora_local - 12) + (longitud / 15))
-    cos_theta = np.cos(theta_sol)
-    if cos_theta == 0:
-        return 0.0
-    sin_az = -np.sin(h) * np.cos(delta) / cos_theta
-    cos_az = (np.sin(delta) - np.sin(theta_sol) * np.sin(phi)) / (cos_theta * np.cos(phi))
-    return np.arctan2(sin_az, cos_az)
-def temperatura_ambiente(hora_local, T_min, T_max):
-    return T_min + (T_max - T_min) * np.sin(np.pi * hora_local / 24)
-def calcular_sombra_arboles(X, Y, arboles, theta_sol, azimut_sol):
+    """Acimut en radianes, delegada al motor solar común."""
+    datos = MotorSolar(latitud, longitud).obtener_posicion_y_radiacion(
+        _fecha_desde_dia_hora(dia_del_año, hora_local)
+    )
+    return np.radians(datos["azimut"])
+
+
+def temperatura_ambiente(hora_local, T_min, T_max, hora_min=6, hora_max=15):
+    """Sinusoide con mínimo al amanecer y máximo tras el mediodía."""
+    amplitud = (T_max - T_min) / 2
+    media = (T_max + T_min) / 2
+    fase = (hora_local - hora_min) / (2 * (hora_max - hora_min)) * 2 * np.pi - np.pi / 2
+    return media + amplitud * np.sin(fase)
+
+
+def calcular_sombra_arboles(X, Y, arboles, theta_sol, azimut_sol, elongacion_maxima=6.0):
+    """Proyecta cada copa como elipse, limitada cerca del horizonte."""
     sombra = np.ones_like(X)
     if theta_sol <= 0:
         return sombra
@@ -110,9 +134,26 @@ def calcular_sombra_arboles(X, Y, arboles, theta_sol, azimut_sol):
         dy = -longitud_sombra * np.cos(azimut_sol)
         cx = arbol.x + dx
         cy = arbol.y + dy
-        distancia = np.sqrt((X - cx)**2 + (Y - cy)**2)
-        sombra[distancia < arbol.radio_copa] *= (1 - arbol.rho_copa)
+        elongacion = min(1 / max(np.sin(theta_sol), 1e-3), elongacion_maxima)
+        mayor, menor = arbol.radio_copa * elongacion, arbol.radio_copa
+        x_rel = (X - cx) * np.cos(azimut_sol) - (Y - cy) * np.sin(azimut_sol)
+        y_rel = (X - cx) * np.sin(azimut_sol) + (Y - cy) * np.cos(azimut_sol)
+        dentro = (x_rel / mayor) ** 2 + (y_rel / menor) ** 2 <= 1
+        sombra[dentro] *= (1 - arbol.rho_copa)
     return sombra
+
+def _punto_en_poligono(X, Y, poligono):
+    """Ray casting vectorizado para la huella real de una pared."""
+    dentro = np.zeros(X.shape, dtype=bool)
+    x1p, y1p = poligono[-1]
+    for x2p, y2p in poligono:
+        cond = ((y1p > Y) != (y2p > Y)) & (X < (x2p - x1p) * (Y - y1p) / (y2p - y1p + 1e-12) + x1p)
+        dentro ^= cond
+        x1p, y1p = x2p, y2p
+    return dentro
+
+
+
 def sombra_estructuras(X, Y, estructuras, theta_sol, azimut_sol):
     
     sombra_total = np.zeros_like(X)
@@ -124,11 +165,10 @@ def sombra_estructuras(X, Y, estructuras, theta_sol, azimut_sol):
             longitud_sombra = estructura.altura / tan_theta
             dx = -longitud_sombra * np.sin(azimut_sol)
             dy = -longitud_sombra * np.cos(azimut_sol)
-            x_min = min(estructura.x1, estructura.x2, estructura.x1 + dx, estructura.x2 + dx)
-            x_max = max(estructura.x1, estructura.x2, estructura.x1 + dx, estructura.x2 + dx)
-            y_min = min(estructura.y1, estructura.y2, estructura.y1 + dy, estructura.y2 + dy)
-            y_max = max(estructura.y1, estructura.y2, estructura.y1 + dy, estructura.y2 + dy)
-            mask = (X >= x_min) & (X <= x_max) & (Y >= y_min) & (Y <= y_max)
+            poligono = np.array([[estructura.x1, estructura.y1], [estructura.x2, estructura.y2],
+                                 [estructura.x2 + dx, estructura.y2 + dy],
+                                 [estructura.x1 + dx, estructura.y1 + dy]])
+            mask = _punto_en_poligono(X, Y, poligono)
             sombra_total[mask] += float(estructura.opacidad)
         elif estructura.tipo == 'Galeria':
             mask = (X >= estructura.x1) & (X <= estructura.x2) & \
@@ -136,8 +176,29 @@ def sombra_estructuras(X, Y, estructuras, theta_sol, azimut_sol):
             
             sombra_total[mask] += float(estructura.opacidad)
     return np.clip(sombra_total, 0, 1)
-def calcular_coeficiente_conveccion(viento):
-    return {"nulo": 5, "moderado": 15, "fuerte": 25}.get(viento, 10)
+VELOCIDADES_VIENTO = {"nulo": 0.0, "moderado": 4.0, "fuerte": 10.0}
+
+
+def calcular_coeficiente_conveccion(velocidad_viento_ms):
+    """McAdams para superficie exterior: h = 5,7 + 3,8 v (W/m²K)."""
+    valor = VELOCIDADES_VIENTO.get(str(velocidad_viento_ms).lower(), velocidad_viento_ms)
+    return 5.7 + 3.8 * max(0.0, float(valor))
+
+
+def asignar_materiales_grilla(X, Y, estructuras):
+    """Asigna propiedades; ante material desconocido avisa y conserva suelo."""
+    alpha = np.full_like(X, materiales["suelo"].alpha, dtype=float)
+    epsilon = np.full_like(X, materiales["suelo"].epsilon, dtype=float)
+    for estructura in estructuras:
+        nombre = estructura.material or ""
+        mat = MATERIALES_LOWER.get(str(nombre).lower())
+        if mat is None:
+            logging.warning("Material no encontrado: %r; se usa 'suelo' como fallback", nombre)
+            continue
+        mask = ((X >= estructura.x1) & (X <= estructura.x2)
+                & (Y >= estructura.y1) & (Y <= estructura.y2))
+        alpha[mask], epsilon[mask] = mat.alpha, mat.epsilon
+    return alpha, epsilon
 def cargar_excel(vars, filepath=None):
     if filepath is None:
         filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
@@ -187,10 +248,14 @@ def generar_grafico(vars, frame):
     if '_update_required' not in vars or not vars['_update_required']:
         return
     
+    figura_anterior = vars.get('_current_fig')
+    if figura_anterior is not None:
+        plt.close(figura_anterior)
     for widget in frame.winfo_children():
         widget.destroy()
     
     fig, ax = plt.subplots(figsize=(8, 6))
+    vars['_current_fig'] = fig
     canvas = FigureCanvasTkAgg(fig, master=frame)
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     
@@ -199,34 +264,30 @@ def generar_grafico(vars, frame):
     X, Y = np.meshgrid(x, y)
     
     # Cálculos principales
-    theta_sol = angulo_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get())
-    azimut_sol = azimut_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), theta_sol)
-    I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
+    motor = MotorSolar(vars["lat"].get(), vars["lon"].get())
+    posicion = motor.obtener_posicion_y_radiacion(
+        _fecha_desde_dia_hora(vars["dia"].get(), vars["hora"].get())
+    )
+    theta_sol = np.radians(posicion["elevacion"])
+    azimut_sol = np.radians(posicion["azimut"])
+    I_sol = posicion["ghi"]
     
     # Cálculo de sombras
     vars["_scene_objects"] = adaptar_objetos_escena(vars.get("arboles", []), vars.get("estructuras", []))
     sombra_arboles = calcular_sombra_arboles(X, Y, vars.get('arboles', []), theta_sol, azimut_sol)
     sombra_estruct = sombra_estructuras(X, Y, vars.get('estructuras', []), theta_sol, azimut_sol)
-    sombra_total = np.clip(sombra_arboles * (1 - sombra_estruct), 0, 1)
+    transmitancia_total = np.clip(sombra_arboles * (1 - sombra_estruct), 0, 1)
     debug_flag = vars.get("debug", False)
     debug = bool(debug_flag.get()) if hasattr(debug_flag, "get") else bool(debug_flag)
     if debug:
         print("Sombra estructuras min/max:", np.min(sombra_estruct), np.max(sombra_estruct))
-    # Configuración de materiales
-    alpha = np.full_like(X, materiales["suelo"].alpha)
-    epsilon = np.full_like(X, materiales["suelo"].epsilon)
     
-    for estructura in vars.get('estructuras', []):
-        if estructura.material.lower() in materiales:
-            mat = materiales[estructura.material.lower()]
-            mask = (X >= estructura.x1) & (X <= estructura.x2) & \
-                   (Y >= estructura.y1) & (Y <= estructura.y2)
-            alpha[mask] = mat.alpha
-            epsilon[mask] = mat.epsilon
+    # Configuración de materiales
+    alpha, epsilon = asignar_materiales_grilla(X, Y, vars.get("estructuras", []))
     
     # Balance energético
     T_amb = temperatura_ambiente(vars["hora"].get(), vars["T_min"].get(), vars["T_max"].get())
-    q_solar = alpha * I_sol * sombra_total
+    q_solar = alpha * I_sol * transmitancia_total
     h_c = calcular_coeficiente_conveccion(vars["viento"].get())
     h_r = 4 * epsilon * sigma * (T_amb**3)
     
@@ -250,7 +311,7 @@ def generar_grafico(vars, frame):
     margin = 1.0  
     if debug:
         print("T min/max:", tmin, tmax)
-        print("Sombra total min/max:", np.min(sombra_total), np.max(sombra_total))
+        print("Sombra total min/max:", np.min(transmitancia_total), np.max(transmitancia_total))
         print("Radiación efectiva min/max:", np.min(q_solar), np.max(q_solar))
     if np.isclose(tmin, tmax):
         delta = max(margin, 0.01 * abs(tmin), 0.5)
@@ -332,13 +393,12 @@ def generar_grafico(vars, frame):
             bbox=dict(facecolor='white', alpha=0.8), verticalalignment='top')   
     canvas.mpl_connect('button_press_event', on_click)
     canvas.draw()
-    for widget in frame.winfo_children():
-        widget.destroy()
-    FigureCanvasTkAgg(fig, master=frame).get_tk_widget().pack(fill=tk.BOTH, expand=True)
     vars['_update_required'] = True
     return {
         "T": T,
-        "shadow": sombra_total,
+        # Compatibilidad: "shadow" históricamente contiene transmitancia, no sombra.
+        "shadow": transmitancia_total,
+        "transmitancia": transmitancia_total,
         "meta": {
             "hora": vars["hora"].get() if hasattr(vars.get("hora"), "get") else vars.get("hora"),
             "dia": vars["dia"].get() if hasattr(vars.get("dia"), "get") else vars.get("dia"),

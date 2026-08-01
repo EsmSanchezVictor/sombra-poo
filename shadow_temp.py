@@ -1,5 +1,10 @@
+"""Cálculo Tmrt; aquí porcentaje_sombra alto significa más área sombreada."""
+
+
 import datetime
 import math
+
+from motor_solar import MotorSolar
 
 DEBUG_TMRT = False
 
@@ -12,32 +17,32 @@ def _log_tmrt(message):
 class Temperatura:
     """Modelo simplificado de radiación y Tmrt basado en porcentaje de sombra."""
 
-    def __init__(self, latitude=0.0, longitude=0.0, k_factor=0.04):
+    def __init__(self, latitude=0.0, longitude=0.0, k_factor=0.04, motor_solar=None):
         self.latitude = latitude
         self.longitude = longitude
         self.k_factor = k_factor
+        self.motor_solar = motor_solar
+        self._fecha_hora_solar = None
 
     def solar_declination(self, day_of_year):
+        """Compatibilidad histórica; la geometría operativa usa MotorSolar."""
         return 23.45 * math.sin(math.radians((360 / 365) * (day_of_year - 81)))
 
     def solar_altitude(self, day_of_year, time_of_day):
-        declination = self.solar_declination(day_of_year)
-        hour_angle = 15 * (time_of_day - 12)
-        latitude_rad = math.radians(self.latitude)
-        declination_rad = math.radians(declination)
-        altitude = math.degrees(
-            math.asin(
-                math.sin(latitude_rad) * math.sin(declination_rad)
-                + math.cos(latitude_rad)
-                * math.cos(declination_rad)
-                * math.cos(math.radians(hour_angle))
-            )
+        fecha = datetime.datetime(2024, 1, 1) + datetime.timedelta(
+            days=int(day_of_year) - 1, hours=float(time_of_day)
         )
-        return altitude
+        self._fecha_hora_solar = fecha
+        motor = self.motor_solar or MotorSolar(self.latitude, self.longitude)
+        return motor.obtener_posicion_y_radiacion(fecha)["elevacion"]
 
     def clear_sky_radiation(self, solar_altitude):
         if solar_altitude <= 0:
             return 0
+        if self.motor_solar is not None and self._fecha_hora_solar is not None:
+            return self.motor_solar.obtener_posicion_y_radiacion(self._fecha_hora_solar)["ghi"]
+        # Fallback standalone: constante solar media y transmitancia fija. En
+        # producción se recomienda MotorSolar/Ineichen, sensible a masa de aire.
         solar_constant = 1367
         atmospheric_transmittance = 0.75
         radiation = solar_constant * math.sin(math.radians(solar_altitude)) * atmospheric_transmittance
