@@ -276,26 +276,26 @@
           "shape_attributes": {
             "name": "polygon",
             "all_points_x": [
-              219,
-              778,
-              622,
-              503,
-              446,
-              333,
-              225,
-              168,
-              191
+              480,
+              202,
+              157,
+              217,
+              339,
+              480,
+              514,
+              602,
+              798
             ],
             "all_points_y": [
-              632,
-              635,
-              692,
-              703,
-              689,
+              621,
+              624,
+              678,
+              678,
               712,
-              669,
-              664,
-              627
+              686,
+              698,
+              700,
+              644
             ]
           },
           "region_attributes": {}
@@ -378,6 +378,41 @@
         }
       ],
       "file_attributes": {}
+    },
+    "elemento1.jpg451472": {
+      "filename": "elemento1.jpg",
+      "size": 451472,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              480,
+              202,
+              157,
+              217,
+              339,
+              480,
+              514,
+              602,
+              798
+            ],
+            "all_points_y": [
+              621,
+              624,
+              678,
+              678,
+              712,
+              686,
+              698,
+              700,
+              644
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
     }
   },
   "_via_attributes": {
@@ -396,6 +431,7 @@
     "01_mesquite_g1t068_v2.jpg576918",
     "Eiche_bei_Graditz_v2.jpg306902",
     "shutterstock_577672450_v2.jpg2813413",
-    "ChatGPT Image 16 nov 2025, 20_59_24_v2.png757685"
+    "ChatGPT Image 16 nov 2025, 20_59_24_v2.png757685",
+    "elemento1.jpg451472"
   ]
 }
