@@ -454,6 +454,49 @@
         }
       ],
       "file_attributes": {}
+    },
+    "20250504_151800_v2.jpg66018": {
+      "filename": "20250504_151800_v2.jpg",
+      "size": 66018,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              138,
+              70,
+              3,
+              0,
+              4,
+              96,
+              106,
+              136,
+              178,
+              217,
+              223,
+              215,
+              194
+            ],
+            "all_points_y": [
+              307,
+              309,
+              315,
+              327,
+              348,
+              353,
+              346,
+              355,
+              354,
+              348,
+              339,
+              324,
+              311
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
     }
   },
   "_via_attributes": {
@@ -474,6 +517,7 @@
     "shutterstock_577672450_v2.jpg2813413",
     "ChatGPT Image 16 nov 2025, 20_59_24_v2.png757685",
     "elemento1.jpg451472",
-    "5499597_v2.jpg34347"
+    "5499597_v2.jpg34347",
+    "20250504_151800_v2.jpg66018"
   ]
 }

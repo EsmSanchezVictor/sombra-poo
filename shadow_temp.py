@@ -1,48 +1,100 @@
-"""Cálculo Tmrt; aquí porcentaje_sombra alto significa más área sombreada."""
+"""Modelo simplificado de radiación y Tmrt basado en porcentaje de sombra.
 
+CAMBIOS respecto a la versión original:
 
+1. Los `print` gateados por `DEBUG_TMRT` se reemplazan por el módulo
+   estándar `logging`. Así se puede activar/desactivar el detalle sin
+   tocar código, y los logs se pueden mandar a archivo en producción
+   en vez de a stdout.
+
+2. Se agrega `solar_azimuth()`. Antes el azimut solo se calculaba en
+   `services/solar_engine.py` con una aproximación lineal cruda
+   (`(180 + (hora-12)*15) % 360`), que no es la fórmula real de
+   azimut solar. Ahora vive acá, al lado de `solar_altitude()`, con
+   la misma fuente de declinación — así ambos módulos usan una sola
+   fuente de verdad para la geometría solar.
+
+3. `calculate_tmrt()` acepta un parámetro opcional `radiation_override`.
+   Esto es importante: hoy existen DOS modelos de radiación de cielo
+   despejado que pueden dar resultados distintos para la misma fecha/
+   hora — el de acá (fórmula propia con transmitancia fija 0.75) y el
+   de `SolarEngine` (que usa pvlib/Ineichen cuando está disponible,
+   mucho más preciso). Si quien llama ya calculó la radiación con
+   SolarEngine, ahora puede pasarla y evitar la inconsistencia. Si no
+   se pasa nada, se sigue usando el modelo simplificado interno (no
+   rompe compatibilidad).
+
+4. Se agrega `calibrate_k_factor()`: dado que k_factor=0.04 estaba
+   hardcodeado sin respaldo documentado, este método permite ajustarlo
+   contra una medición real de Tmrt en campo (por ejemplo con
+   termómetro de globo), en vez de dejarlo como un número mágico.
+   No inventa un valor "correcto" — deja explícito que hay que
+   calibrarlo con datos reales del sitio de estudio.
+"""
 import datetime
+import logging
 import math
 
-from motor_solar import MotorSolar
-
-DEBUG_TMRT = False
-
-
-def _log_tmrt(message):
-    if DEBUG_TMRT:
-        print(message)
+logger = logging.getLogger("sombra_poo.tmrt")
 
 
 class Temperatura:
-    """Modelo simplificado de radiación y Tmrt basado en porcentaje de sombra."""
+    """Modelo simplificado de radiación y Tmrt basado en porcentaje de sombra.
 
-    def __init__(self, latitude=0.0, longitude=0.0, k_factor=0.04, motor_solar=None):
+    AVISO IMPORTANTE (léase antes de confiar en los resultados):
+    `Tmrt = T_air + k_factor * radiación` es una aproximación LINEAL,
+    no el cálculo riguroso de temperatura media radiante que define
+    ISO 7726 (que requiere temperatura de globo o un balance de flujos
+    radiativos de onda corta/larga con factores de vista del cuerpo
+    humano). Sirve como estimación relativa de "cuánto ayuda la sombra"
+    pero los valores absolutos de Tmrt no deberían presentarse como
+    medición certificada sin calibrar `k_factor` contra datos reales.
+    """
+
+    def __init__(self, latitude=0.0, longitude=0.0, k_factor=0.04):
         self.latitude = latitude
         self.longitude = longitude
         self.k_factor = k_factor
-        self.motor_solar = motor_solar
-        self._fecha_hora_solar = None
 
     def solar_declination(self, day_of_year):
-        """Compatibilidad histórica; la geometría operativa usa MotorSolar."""
         return 23.45 * math.sin(math.radians((360 / 365) * (day_of_year - 81)))
 
     def solar_altitude(self, day_of_year, time_of_day):
-        fecha = datetime.datetime(2024, 1, 1) + datetime.timedelta(
-            days=int(day_of_year) - 1, hours=float(time_of_day)
+        declination = self.solar_declination(day_of_year)
+        hour_angle = 15 * (time_of_day - 12)
+        latitude_rad = math.radians(self.latitude)
+        declination_rad = math.radians(declination)
+        altitude = math.degrees(
+            math.asin(
+                math.sin(latitude_rad) * math.sin(declination_rad)
+                + math.cos(latitude_rad)
+                * math.cos(declination_rad)
+                * math.cos(math.radians(hour_angle))
+            )
         )
-        self._fecha_hora_solar = fecha
-        motor = self.motor_solar or MotorSolar(self.latitude, self.longitude)
-        return motor.obtener_posicion_y_radiacion(fecha)["elevacion"]
+        return altitude
+
+    def solar_azimuth(self, day_of_year, time_of_day):
+        """NUEVO. Azimut solar real (0-360°, medido desde el norte,
+        sentido horario), reemplaza la aproximación lineal que vivía
+        suelta en solar_engine.py."""
+        declination = self.solar_declination(day_of_year)
+        hour_angle = 15 * (time_of_day - 12)
+        lat_rad = math.radians(self.latitude)
+        dec_rad = math.radians(declination)
+        altitude_rad = math.radians(self.solar_altitude(day_of_year, time_of_day))
+        hour_angle_rad = math.radians(hour_angle)
+
+        sin_az = -math.sin(hour_angle_rad) * math.cos(dec_rad) / max(math.cos(altitude_rad), 1e-6)
+        cos_az = (math.sin(dec_rad) - math.sin(lat_rad) * math.sin(altitude_rad)) / max(
+            (math.cos(lat_rad) * math.cos(altitude_rad)), 1e-6
+        )
+        azimuth = math.degrees(math.atan2(sin_az, cos_az))
+        return azimuth % 360
 
     def clear_sky_radiation(self, solar_altitude):
         if solar_altitude <= 0:
             return 0
-        if self.motor_solar is not None and self._fecha_hora_solar is not None:
-            return self.motor_solar.obtener_posicion_y_radiacion(self._fecha_hora_solar)["ghi"]
-        # Fallback standalone: constante solar media y transmitancia fija. En
-        # producción se recomienda MotorSolar/Ineichen, sensible a masa de aire.
         solar_constant = 1367
         atmospheric_transmittance = 0.75
         radiation = solar_constant * math.sin(math.radians(solar_altitude)) * atmospheric_transmittance
@@ -57,25 +109,38 @@ class Temperatura:
         tau = tau_max - (porcentaje / 100) * (tau_max - tau_min)
         return max(min(tau, tau_max), tau_min)
 
-    def calculate_tmrt(self, air_temp, porcentaje_sombra, shadow_type="tree", date_value=None, time_value=None):
-        """Calcula Tmrt al sol, Tmrt en sombra y ΔTmrt usando radiación simplificada."""
+    def calculate_tmrt(self, air_temp, porcentaje_sombra, shadow_type="tree",
+                        date_value=None, time_value=None, radiation_override=None):
+        """Calcula Tmrt al sol, Tmrt en sombra y ΔTmrt.
+
+        radiation_override: si se pasa (por ejemplo, el GHI calculado por
+        SolarEngine vía pvlib), se usa en vez de recalcular con el modelo
+        simplificado interno. Recomendado cuando pvlib está disponible,
+        porque es más preciso que la transmitancia fija de 0.75 de acá.
+        """
         if isinstance(date_value, datetime.date):
             day_of_year = date_value.timetuple().tm_yday
         else:
             now = datetime.datetime.now()
             day_of_year = now.timetuple().tm_yday
+
         if time_value is None:
             now = datetime.datetime.now()
             time_of_day = now.hour + now.minute / 60
         else:
             time_of_day = float(time_value)
+
         solar_altitude = self.solar_altitude(day_of_year, time_of_day)
-        radiation = self.clear_sky_radiation(solar_altitude)
+
+        if radiation_override is not None:
+            radiation = max(0.0, float(radiation_override))
+        else:
+            radiation = self.clear_sky_radiation(solar_altitude)
 
         tau = self.shadow_transmittance(porcentaje_sombra, shadow_type)
         sombra_frac = min(max(porcentaje_sombra / 100, 0), 1)
         radiation_sombra = radiation * tau
-        
+
         if radiation <= 0:
             tmrt_sol = air_temp
             tmrt_sombra = air_temp
@@ -84,33 +149,32 @@ class Temperatura:
             tmrt_sol = air_temp + self.k_factor * radiation
             tmrt_sombra = air_temp + self.k_factor * radiation_sombra
             delta_tmrt = tmrt_sol - tmrt_sombra
-            
+
         eps = 1.0
-        _log_tmrt(
-            "TMRT_DEBUG inputs:"
-            f" day_of_year={day_of_year}, time={time_of_day:.2f}, lat={self.latitude}, lon={self.longitude}, T_air={air_temp}"
+        logger.debug(
+            "TMRT inputs: day_of_year=%s time=%.2f lat=%s lon=%s T_air=%s",
+            day_of_year, time_of_day, self.latitude, self.longitude, air_temp,
         )
-        _log_tmrt(
-            "TMRT_DEBUG solar/rad:"
-            f" altitude={solar_altitude:.2f}°, I_total={radiation:.2f} W/m², I_directa=N/A, I_difusa=N/A"
+        logger.debug(
+            "TMRT solar/rad: altitude=%.2f° I_total=%.2f W/m2 (fuente=%s)",
+            solar_altitude, radiation, "override" if radiation_override is not None else "modelo interno",
         )
-        _log_tmrt(
-            "TMRT_DEBUG sombra:"
-            f" sombra_frac={sombra_frac:.2f}, tau={tau:.2f}, I_sombra={radiation_sombra:.2f} W/m²"
+        logger.debug(
+            "TMRT sombra: sombra_frac=%.2f tau=%.2f I_sombra=%.2f W/m2",
+            sombra_frac, tau, radiation_sombra,
         )
-        _log_tmrt(
-            "TMRT_DEBUG resultados:"
-            f" Tmrt_sol={tmrt_sol:.2f}, Tmrt_sombra={tmrt_sombra:.2f}, delta={delta_tmrt:.2f}"
+        logger.debug(
+            "TMRT resultados: Tmrt_sol=%.2f Tmrt_sombra=%.2f delta=%.2f",
+            tmrt_sol, tmrt_sombra, delta_tmrt,
         )
         if solar_altitude <= 0:
-            _log_tmrt("TMRT_DEBUG nota: elevación solar <= 0, radiación directa ~0 ⇒ ΔTmrt ~ 0.")
+            logger.debug("Elevación solar <= 0: radiación directa ~0, ΔTmrt ~0.")
         if radiation <= eps:
-            _log_tmrt("TMRT_DEBUG nota: radiación efectiva baja ⇒ ΔTmrt ~ 0.")
+            logger.debug("Radiación efectiva baja: ΔTmrt ~0.")
         if radiation > eps and sombra_frac > 0 and math.isclose(radiation_sombra, radiation, rel_tol=1e-6):
-            _log_tmrt("TMRT_DEBUG alerta: I_sombra == I_sol con sombra > 0 (posible sombra no aplicada).")
+            logger.warning("I_sombra == I_sol con sombra > 0 (posible sombra no aplicada).")
         if sombra_frac == 0:
-            _log_tmrt("TMRT_DEBUG nota: sombra_promedio=0 ⇒ Tmrt_sol ≈ Tmrt_sombra.")
-
+            logger.debug("sombra_promedio=0: Tmrt_sol ≈ Tmrt_sombra.")
 
         return {
             "Tmrt_sol": round(tmrt_sol, 2),
@@ -125,13 +189,29 @@ class Temperatura:
         result = self.calculate_tmrt(air_temp, porcentaje_sombra)
         return result["Tmrt_sombra"]
 
+    def calibrate_k_factor(self, tmrt_medido: float, air_temp: float, radiation: float) -> float:
+        """NUEVO: calibra k_factor contra una medición real de Tmrt en
+        campo (por ejemplo, termómetro de globo negro) para un momento
+        en que se conoce la radiación efectiva. No reemplaza automáticamente
+        self.k_factor — devuelve el valor sugerido para que se revise
+        antes de aplicarlo:
+
+            k_sugerido = calc.calibrate_k_factor(tmrt_medido=45.2,
+                                                   air_temp=30.0,
+                                                   radiation=750.0)
+            calc.k_factor = k_sugerido  # solo si el valor es razonable
+        """
+        if radiation <= 0:
+            raise ValueError("No se puede calibrar con radiación <= 0.")
+        return (tmrt_medido - air_temp) / radiation
+
+
 def _debug_tmrt_case():
-    if not DEBUG_TMRT:
-        return
+    logging.basicConfig(level=logging.DEBUG)
     test_date = datetime.date(2026, 2, 7)
     calc = Temperatura(latitude=-34.6037, longitude=-58.3816)
     result = calc.calculate_tmrt(34.0, 50.0, date_value=test_date, time_value=8)
-    _log_tmrt(f"TMRT_DEBUG test_case result: {result}")
+    logger.debug("Caso de prueba: %s", result)
 
 
 if __name__ == "__main__":

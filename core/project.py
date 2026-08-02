@@ -1,5 +1,13 @@
-"""Representa la estructura física de un proyecto en disco."""
+"""Representa la estructura física de un proyecto en disco.
 
+CAMBIO: `ensure_structure()` creaba `resultados/histograma` (singular),
+pero `services/snapshot_service.py` guarda ahí usando
+`resultados/histogramas` (plural). Como nunca coincidían, la carpeta
+que realmente se usaba no quedaba pre-creada por `ensure_structure()`
+(aunque no rompe porque `safe_path`/`os.makedirs` en otros puntos son
+tolerantes, es un descuido que vale la pena alinear para que la
+estructura de carpetas declarada sea la que realmente se usa).
+"""
 from __future__ import annotations
 
 import os
@@ -11,7 +19,7 @@ class Project:
     def __init__(self, root_path: str, config_path: str | None = None):
         self.root_path = root_path
         self.config_path = config_path or os.path.join(root_path, "config", "project.json")
-        self.state_path = os.path.join(root_path, "config", "estado.json")        
+        self.state_path = os.path.join(root_path, "config", "estado.json")
         self.next_n = 1
 
     @classmethod
@@ -37,9 +45,9 @@ class Project:
             "mascaras",
             "Planos",
             "modelos",
-            os.path.join("resultados", "histograma"),
+            os.path.join("resultados", "histogramas"),  # antes: "histograma" (singular) — corregido
             os.path.join("resultados", "curvas_nivel"),
-            os.path.join("resultados", "excels"),            
+            os.path.join("resultados", "excels"),
             "config",
         )
         for folder in folders:

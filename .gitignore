@@ -1,19 +1,16 @@
-# Runtime state and logs
+__pycache__/
+*.pyc
+
+# Base de datos y backups locales — nunca versionar datos de usuarios reales
 *.db
+*.db.backup
+
+# Logs
 *.log
+
+# Empaquetados manuales — usar tags/releases de git en su lugar, no zips sueltos
 *.zip
 
-# Python caches and environments
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-
-# Generated datasets and masks
-DataSetSombra/
-mascaras_generadas/
-
-# Editor / OS files
-.DS_Store
-.vscode/
-.idea/
+# Archivos de trabajo tipo "copy" que no deberían llegar a main
+*copy*.py
+* copy.py

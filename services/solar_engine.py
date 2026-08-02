@@ -1,5 +1,13 @@
-"""Motor solar opcional con pvlib y fallback interno."""
+"""Motor solar opcional con pvlib y fallback interno.
 
+CAMBIO respecto a la versión original: el azimut de respaldo (cuando
+pvlib no está disponible) ya no se calcula con la aproximación lineal
+`(180 + (hora-12)*15) % 360` — eso ignora latitud, longitud y época
+del año, y puede desviarse fácilmente 10-20° del azimut real fuera del
+equinoccio. Ahora usa `Temperatura.solar_azimuth()`, la misma fuente
+que ya se usaba para la elevación, evitando tener dos aproximaciones
+distintas conviviendo en el mismo módulo.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -31,7 +39,7 @@ class SolarEngine:
         day = dt.timetuple().tm_yday
         hour = dt.hour + dt.minute / 60
         elev = calc.solar_altitude(day, hour)
-        azim = (180 + (hour - 12) * 15) % 360
+        azim = calc.solar_azimuth(day, hour)
         return azim, float(elev)
 
     def get_radiation(self, lat: float, lon: float, dt: datetime) -> dict:

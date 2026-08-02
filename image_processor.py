@@ -3,6 +3,7 @@ import numpy as np
 
 
 class ImageProcessor:
+
     def load_image(self, file_path):
         img = cv2.imread(file_path)
         if img is None:
@@ -18,24 +19,31 @@ class ImageProcessor:
         area_gris_resized = cv2.resize(area_gris, (matriz_size, matriz_size))
         return area_gris_resized
 
-    def calcular_porcentaje_sombra(self, area_gris, area_referencia):
-        """FIX: la versión anterior dividía directo por (max_val - min_val)
-        sin ninguna guardia. Si el área analizada era uniforme o la
-        referencia estaba mal elegida, eso producía una división por cero
-        (o casi cero), y además el resultado podía quedar fuera de [0, 100]
-        sin ningún clip. Ahora:
-          - si no hay contraste suficiente, se devuelve 0.0 explícitamente
-            en vez de dividir por (casi) cero.
-          - el resultado siempre queda clippeado a [0, 100].
+    def calcular_porcentaje_sombra(self, area_gris, area_referencia=None):
+        """
+        Calcula qué porcentaje del área analizada está en sombra.
+
+        CAMBIOS respecto a la versión original:
+        - Se evita la división por cero: si `max_val - min_val` es ~0
+          (superficie perfectamente uniforme, o area_referencia con un
+          solo tono), se retorna 0.0 en vez de crashear o devolver NaN/inf.
+        - El resultado se recorta (clip) a [0, 100]. En la versión original
+          era matemáticamente posible obtener valores fuera de ese rango
+          si area_referencia tenía píxeles más oscuros que area_gris.
+        - Se castea a float32 antes de restar para evitar overflow/underflow
+          silencioso típico de operar directo sobre arrays uint8.
         """
         min_val = float(np.min(area_gris))
-        max_val = float(np.median(area_referencia)) if area_referencia is not None \
-            else float(np.max(area_gris))
+        if area_referencia is not None and area_referencia.size > 0:
+            max_val = float(np.median(area_referencia))
+        else:
+            max_val = float(np.max(area_gris))
 
         rango = max_val - min_val
         if rango <= 1e-6:
+            # No hay contraste suficiente para afirmar que hay sombra.
             return 0.0
 
-        sombra_normalizada = (area_gris.astype(np.float64) - min_val) / rango
-        sombra_normalizada = np.clip(sombra_normalizada, 0.0, 1.0)
-        return float(100 - np.mean(sombra_normalizada) * 100)
+        sombra_normalizada = (area_gris.astype(np.float32) - min_val) / rango
+        porcentaje = 100 - np.mean(sombra_normalizada) * 100
+        return float(np.clip(porcentaje, 0, 100))

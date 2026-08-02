@@ -1,8 +1,19 @@
-"""Construcción de la barra de menús y atajos."""
+"""Construcción de la barra de menús y atajos.
 
+CAMBIO: "Abrir Panel 4 (Modelo)" llamaba a `open_panel(3)` (copy-paste
+del ítem de arriba) — corregido a `open_panel(4)`.
+
+Los enlaces de "Manual de usuario" y "Guía rápida" siguen apuntando a
+`https://www.example.com` — quedan como constantes al inicio del
+archivo para que sea evidente dónde reemplazarlos por las URLs reales
+en cuanto existan.
+"""
 from __future__ import annotations
 
 import tkinter as tk
+
+URL_MANUAL_USUARIO = "https://www.example.com"  # TODO: reemplazar por la URL real
+URL_GUIA_RAPIDA = "https://www.example.com"      # TODO: reemplazar por la URL real
 
 
 class MenuBar:
@@ -52,7 +63,7 @@ class MenuBar:
         paneles_menu.add_command(label="Abrir Panel 1", command=lambda: self.app.open_panel(1))
         paneles_menu.add_command(label="Abrir Panel 2", command=lambda: self.app.open_panel(2))
         paneles_menu.add_command(label="Abrir Panel 3 (Modo diseño)", command=lambda: self.app.open_panel(3))
-        paneles_menu.add_command(label="Abrir Panel 4 (Modelo)", command=lambda: self.app.open_panel(3))
+        paneles_menu.add_command(label="Abrir Panel 4 (Modelo)", command=lambda: self.app.open_panel(4))  # antes: open_panel(3)
         escena_menu.add_cascade(label="Paneles", menu=paneles_menu)
         escena_menu.add_separator()
         escena_menu.add_command(label="Mostrar frames Panel 2", command=self.app.show_panel2_frames)
@@ -88,11 +99,11 @@ class MenuBar:
         ayuda_menu = tk.Menu(menu_bar, tearoff=0)
         ayuda_menu.add_command(
             label="Manual de usuario",
-            command=lambda: self.app._open_link("manual", "https://www.example.com"),
+            command=lambda: self.app._open_link("manual", URL_MANUAL_USUARIO),
         )
         ayuda_menu.add_command(
             label="Guía rápida",
-            command=lambda: self.app._open_link("guia", "https://www.example.com"),
+            command=lambda: self.app._open_link("guia", URL_GUIA_RAPIDA),
         )
         ayuda_menu.add_command(label="Acerca de…", command=self.app.show_about)
         menu_bar.add_cascade(label="Ayuda", menu=ayuda_menu)
