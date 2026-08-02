@@ -413,6 +413,47 @@
         }
       ],
       "file_attributes": {}
+    },
+    "5499597_v2.jpg34347": {
+      "filename": "5499597_v2.jpg",
+      "size": 34347,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              152,
+              1,
+              3,
+              96,
+              98,
+              129,
+              176,
+              195,
+              219,
+              205,
+              200,
+              203
+            ],
+            "all_points_y": [
+              307,
+              313,
+              348,
+              355,
+              349,
+              356,
+              361,
+              356,
+              347,
+              328,
+              323,
+              307
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
     }
   },
   "_via_attributes": {
@@ -432,6 +473,7 @@
     "Eiche_bei_Graditz_v2.jpg306902",
     "shutterstock_577672450_v2.jpg2813413",
     "ChatGPT Image 16 nov 2025, 20_59_24_v2.png757685",
-    "elemento1.jpg451472"
+    "elemento1.jpg451472",
+    "5499597_v2.jpg34347"
   ]
 }
