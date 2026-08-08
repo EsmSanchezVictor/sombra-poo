@@ -2014,12 +2014,34 @@ class SombraApp:
         
 
             # Crear las curvas de nivel en una figura local
+            #
+            # CAMBIOS: antes esta figura no tenía colorbar, ni ejes con
+            # unidades, ni título con metadatos — se veían "formas" pero
+            # no había forma de leer un valor concreto ni de saber cuándo
+            # ni de qué imagen salió. Y usaba "jet" (mala práctica para
+            # datos científicos: no es perceptualmente uniforme). Ver
+            # plot_style.py para el detalle de cada elección.
+            from plot_style import (
+                CMAP_CURVAS_NIVEL, CMAP_HISTOGRAMA,
+                agregar_colorbar_temperatura, anotar_estadisticas,
+                anotar_metadatos,
+            )
+
             fig, ax = plt.subplots()
-            ax.contour(area_volteada, levels=100, cmap='jet', linewidths=1.5, alpha=0.8)
-            fig.tight_layout(pad=0)
+            contorno = ax.contour(
+                area_volteada, levels=20, cmap=CMAP_CURVAS_NIVEL,
+                linewidths=1.2, alpha=0.9,
+            )
+            ax.set_xlabel("Posición X (px)")
+            ax.set_ylabel("Posición Y (px)")
+            ax.set_title(f"Curvas de nivel — {self.current_image_stem}")
+            agregar_colorbar_temperatura(fig, ax, contorno, unidad="nivel de gris")
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            fig.tight_layout(pad=0.6)
+            anotar_metadatos(fig, f"Generado: {timestamp}  ·  Fuente: {self.current_image_stem}")
 
             buf = BytesIO()
-            fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", pad_inches=0)
+            fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", pad_inches=0.1)
             buf.seek(0)
             plt.close(fig)
 
@@ -2042,7 +2064,11 @@ class SombraApp:
             self.curvas_nivel_creadas = True
 
             project_root = self.project_manager.current_project.root_path
-            hist_dir = os.path.join(project_root, "resultados", "histograma")
+            # CAMBIO: "histograma" (singular) -> "histogramas" (plural),
+            # alineado con services/snapshot_service.py, que ya guardaba
+            # ahí — antes esta carpeta creada acá nunca era la que se
+            # usaba realmente.
+            hist_dir = os.path.join(project_root, "resultados", "histogramas")
             curve_dir = os.path.join(project_root, "resultados", "curvas_nivel")
             excel_dir = os.path.join(project_root, "resultados", "excels")
             os.makedirs(hist_dir, exist_ok=True)
@@ -2057,12 +2083,19 @@ class SombraApp:
             hist_fig, hist_ax = plt.subplots()
             values = self.shape_selector.area_seleccionada.flatten()
             counts, bins, patches = hist_ax.hist(values, bins=50, alpha=0.95)
-            cmap = plt.get_cmap("viridis")
+            cmap = plt.get_cmap(CMAP_HISTOGRAMA)
             max_count = max(counts) if len(counts) else 1
             for c, patch in zip(counts, patches):
                 patch.set_facecolor(cmap(c / max_count if max_count else 0))
-            hist_ax.set_title("Histograma")
+            hist_ax.set_xlabel("Nivel de gris")
+            hist_ax.set_ylabel("Frecuencia (cantidad de píxeles)")
+            hist_ax.set_title(f"Histograma — {self.current_image_stem}")
+            # CAMBIO: antes el histograma no tenía ningún resumen
+            # numérico (media, mediana, desvío, N) — solo la forma de
+            # la distribución, sin poder leer valores concretos.
+            anotar_estadisticas(hist_ax, values)
             hist_fig.tight_layout()
+            anotar_metadatos(hist_fig, f"Generado: {timestamp}")
             hist_fig.savefig(hist_path, dpi=150)
             plt.close(hist_fig)
             

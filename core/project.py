@@ -24,9 +24,27 @@ class Project:
 
     @classmethod
     def from_config_path(cls, config_path: str) -> "Project":
-        """Crea el proyecto a partir de un path a project.json."""
+        """Crea el proyecto a partir de un path a project.json O estado.json.
+
+        BUG CORREGIDO (el causante real de "no hay forma de volver a
+        cargar un proyecto"): antes esta función solo reconocía que
+        `config_path` estaba dentro de una carpeta `config/` cuando el
+        archivo se llamaba exactamente "project.json". Pero el flujo de
+        "Abrir proyecto" normalmente abre `estado.json` (ver
+        `ProjectManager._select_project_path`), y para ese caso la
+        condición era falsa: `root_path` quedaba mal calculado como la
+        propia carpeta `config/` en vez de la carpeta del proyecto un
+        nivel arriba. El siguiente `ensure_structure()` entonces creaba
+        una carpeta `config/config/`, `config/imagenes/`, etc. — el
+        proyecto se partía en dos ubicaciones y dejaba de poder abrirse
+        correctamente la próxima vez.
+
+        Ahora el criterio es: si el archivo vive directamente dentro de
+        una carpeta llamada "config" (sin importar su nombre), la raíz
+        del proyecto es un nivel arriba de esa carpeta "config".
+        """
         config_dir = os.path.dirname(config_path)
-        if os.path.basename(config_path) == "project.json" and os.path.basename(config_dir) == "config":
+        if os.path.basename(config_dir) == "config":
             root_path = os.path.dirname(config_dir)
         else:
             root_path = os.path.dirname(config_path)

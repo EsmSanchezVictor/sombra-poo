@@ -195,22 +195,39 @@ class ProjectManager:
             return False
 
     def _save_project_file(self, path: str) -> bool:
-        """Escribe el JSON de proyecto."""
+        """Escribe el JSON de proyecto.
+
+        BUG CORREGIDO: antes se escribía vía `safe_path(dirname, basename)`,
+        que existe para NUNCA sobrescribir un archivo existente (pensado
+        para imágenes/curvas que no deben perderse). Aplicado al estado
+        del proyecto, eso significa que cada "Guardar" generaba un
+        archivo nuevo (estado_v2.json, estado_v3.json, ...) en vez de
+        actualizar el mismo — y el "estado.json" original, el nombre
+        obvio para reabrir, quedaba congelado con los datos del momento
+        de creación del proyecto para siempre. Combinado con el bug de
+        `Project.from_config_path` (ver core/project.py), esto era la
+        causa real de "no hay forma de volver a cargar el proyecto".
+
+        Ahora se escribe siempre directamente en `path` (que es
+        `self.current_project.state_path`, fijo), sobrescribiendo. Si en
+        el futuro se quiere guardar un historial de versiones, debería
+        ser una acción explícita ("Guardar copia") y no el comportamiento
+        por defecto de "Guardar".
+        """
         if not self.current_project:
             return False
         try:
             payload = self.app_state.build_payload(self.current_project)
             self.current_project.next_n = int(payload.get("next_n", self.current_project.next_n))
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            state_path = safe_path(os.path.dirname(path), os.path.basename(path))
-            with open(state_path, "w", encoding="utf-8") as handle:
+            with open(path, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2, ensure_ascii=False)
             with open(self.current_project.config_path, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2, ensure_ascii=False)
             self._sync_excel_copies()
             self.app.is_dirty = False
-            self.app.current_project_path = str(state_path)
-            self._update_last_project_path(str(state_path))
+            self.app.current_project_path = str(path)
+            self._update_last_project_path(str(path))
             self.app.update_status_saved_time(payload.get("meta", {}).get("saved_at"))
             return True
         except Exception as exc:
