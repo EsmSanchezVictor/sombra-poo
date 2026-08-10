@@ -337,8 +337,15 @@ def actualizar_grafico(vars, frame):
     epsilon = np.full_like(X, materiales["suelo"].epsilon)
     
     for estructura in  vars['estructuras']:
-        if estructura.material.lower() in materiales:
-            mat = materiales[estructura.material.lower()]
+        # CORRECCIÓN: estructura.material puede ser None — por ejemplo,
+        # una celda "Material" vacía en el Excel de edición (abrir_archivo
+        # la lee tal cual con pandas), o un objeto de escena restaurado
+        # desde un proyecto guardado antes de que se le asignara material.
+        # Antes esto rompía TODA la vista de edición con
+        # AttributeError: 'NoneType' object has no attribute 'lower'.
+        material_nombre = (estructura.material or "").strip().lower()
+        if material_nombre in materiales:
+            mat = materiales[material_nombre]
             mask = (X >= estructura.x1) & (X <= estructura.x2) & \
                 (Y >= estructura.y1) & (Y <= estructura.y2)
             alpha[mask] = mat.alpha
@@ -382,8 +389,14 @@ def actualizar_grafico(vars, frame):
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     
     # Crear el gráfico de contorno
+    #
+    # CAMBIO: usaba 'viridis' hardcodeado acá, mientras que generar_3d()
+    # ya usaba CMAP_TEMPERATURA — dos paletas distintas para representar
+    # el mismo dato (temperatura) en 2D y 3D del mismo modo edición.
+    # Unificado a CMAP_TEMPERATURA para que el plano y la vista 3D se
+    # lean como la misma escala.
     try:
-        contorno = ax.contourf(X, Y, T_display, niveles, cmap='viridis', alpha=0.8)
+        contorno = ax.contourf(X, Y, T_display, niveles, cmap=CMAP_TEMPERATURA, alpha=0.8)
         ax.contour(X, Y, T_display, niveles, colors='k', linewidths=0.5)
     except ValueError as e:
         messagebox.showerror("Error", f"Problema al generar el gráfico: {str(e)}")

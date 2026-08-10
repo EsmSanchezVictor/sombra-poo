@@ -256,6 +256,7 @@ class SombraApp:
         self.menu_bar = MenuBar(self)
         self.porcentaje_sombra = None
         self.tmrt_result = None
+        self.snapshots = []  # NUEVO: historial de elementos analizados (imagen+sombra+curva+Tmrt) del proyecto actual
         self.ref_gray_mean = None
         self.tmrt_map = None
         self.original_rgb = None
@@ -505,21 +506,37 @@ class SombraApp:
             )
 
     def restore_project_artifacts(self):
-        self.last_image_path = self._resolve_artifact_path(self.last_image_path, "imagenes")
-        self.last_curve_path = self._resolve_artifact_path(self.last_curve_path, os.path.join("resultados", "curvas_nivel"))
-        self.last_mask_path = self._resolve_artifact_path(self.last_mask_path, "mascaras")
-        if self.last_image_path and os.path.exists(self.last_image_path):
-            self._load_image_from_path(self.last_image_path)
-        if self.last_curve_path and os.path.exists(self.last_curve_path):
-            self._load_curve_from_path(self.last_curve_path)
-        if self.last_mask_path and os.path.exists(self.last_mask_path):
-            self._load_mask_from_path(self.last_mask_path)
+        self.poblar_lista_snapshots()
+        if self.snapshots:
+            # Selecciona y carga el último elemento analizado —
+            # equivalente a lo que hacía antes (imagen+curva+máscara),
+            # pero ahora también restaura % de sombra y la barra de Tmrt,
+            # y el resto del historial queda disponible para elegir.
+            ultimo = len(self.snapshots) - 1
+            self.snapshot_listbox.selection_clear(0, tk.END)
+            self.snapshot_listbox.selection_set(ultimo)
+            self.snapshot_listbox.see(ultimo)
+            self.cargar_snapshot(ultimo)
+        else:
+            # Proyecto sin snapshots todavía: mantener el comportamiento
+            # anterior por si hay rutas sueltas guardadas.
+            self.last_image_path = self._resolve_artifact_path(self.last_image_path, "imagenes")
+            self.last_curve_path = self._resolve_artifact_path(self.last_curve_path, os.path.join("resultados", "curvas_nivel"))
+            self.last_mask_path = self._resolve_artifact_path(self.last_mask_path, "mascaras")
+            if self.last_image_path and os.path.exists(self.last_image_path):
+                self._load_image_from_path(self.last_image_path)
+            if self.last_curve_path and os.path.exists(self.last_curve_path):
+                self._load_curve_from_path(self.last_curve_path)
+            if self.last_mask_path and os.path.exists(self.last_mask_path):
+                self._load_mask_from_path(self.last_mask_path)
         self._restore_excel_files()
 
     def _restore_excel_files(self):
         self.last_edit_excel_path = self._resolve_artifact_path(self.last_edit_excel_path, "Planos")
         self.last_model_excel_path = self._resolve_artifact_path(self.last_model_excel_path, "modelos")
         if self.last_edit_excel_path and os.path.exists(self.last_edit_excel_path):
+            # abrir_archivo ya regenera el gráfico de edición internamente
+            # (llama a actualizar_grafico al final) — no hace falta nada más acá.
             loaded = design.abrir_archivo(self.vars, self, filepath=self.last_edit_excel_path)
             if loaded:
                 self.last_edit_excel_path = loaded
@@ -527,6 +544,16 @@ class SombraApp:
             loaded = modelo.cargar_excel(self.vars_modelo, filepath=self.last_model_excel_path)
             if loaded:
                 self.last_model_excel_path = loaded
+                # NUEVO: cargar_excel() solo llena vars_modelo, no vuelve a
+                # dibujar nada — el modelo quedaba con datos cargados pero
+                # invisible hasta que el usuario tocara algún control a
+                # mano. Se regenera acá con el mismo método que usa el
+                # botón "Ejecutar modelo", para que quede consistente con
+                # la ubicación/modo ya restaurados del proyecto.
+                try:
+                    self.generar_grafico_modelo()
+                except Exception as exc:
+                    print(f"[restore] No se pudo regenerar el gráfico del modelo automáticamente: {exc}")
 
     def _resolve_artifact_path(self, path_value, folder, filename=None):
         if path_value and os.path.exists(path_value):
@@ -541,6 +568,104 @@ class SombraApp:
         if candidate and os.path.exists(candidate):
             return candidate
         return path_value
+
+    def poblar_lista_snapshots(self):
+        """Refresca el Listbox de historial con self.snapshots.
+
+        NUEVO. Se llama después de guardar un snapshot y después de abrir
+        un proyecto, para que el historial de elementos analizados quede
+        siempre sincronizado con lo que hay guardado.
+        """
+        if not hasattr(self, "snapshot_listbox"):
+            return
+        self.snapshot_listbox.delete(0, tk.END)
+        for entry in self.snapshots:
+            etiqueta = entry.get("label") or f"elemento{entry.get('n', '?')}"
+            sombra = entry.get("porcentaje_sombra")
+            sombra_txt = f" — {sombra:.0f}% sombra" if isinstance(sombra, (int, float)) else ""
+            self.snapshot_listbox.insert(tk.END, f"{etiqueta}{sombra_txt}")
+
+    def _on_snapshot_select(self, _event=None):
+        seleccion = self.snapshot_listbox.curselection()
+        if not seleccion:
+            return
+        self.cargar_snapshot(seleccion[0])
+
+    def cargar_snapshot(self, index: int):
+        """Recarga TODO lo asociado a un elemento del historial: imagen,
+        selección de sombra (matriz), área de referencia, curva de nivel,
+        histograma, y la barra de temperatura calculada en "Calcular
+        temperatura en sombra" (redibujada a partir de los valores
+        guardados, no una imagen estática).
+
+        NUEVO — antes solo se restauraba el ÚLTIMO elemento guardado del
+        proyecto (una sola imagen), sin poder volver a ninguno anterior.
+        """
+        if index < 0 or index >= len(self.snapshots):
+            return
+        entry = self.snapshots[index]
+        project = self.project_manager.current_project
+        if not project:
+            return
+        root = project.root_path
+
+        def _abs(rel_path):
+            if not rel_path:
+                return None
+            return rel_path if os.path.isabs(rel_path) else os.path.join(root, rel_path)
+
+        image_path = _abs(entry.get("image"))
+        curve_path = _abs(entry.get("curve"))
+        reference_path = _abs(entry.get("reference"))
+        matrix_path = _abs(entry.get("matrix"))
+        histogram_path = _abs(entry.get("histogram"))
+
+        if image_path and os.path.exists(image_path):
+            self._load_image_from_path(image_path)
+        if curve_path and os.path.exists(curve_path):
+            self._load_curve_from_path(curve_path)
+        if reference_path and os.path.exists(reference_path):
+            self._load_mask_from_path(reference_path)
+        if matrix_path and os.path.exists(matrix_path):
+            try:
+                self.shape_selector.area_seleccionada = pd.read_excel(matrix_path).to_numpy()
+                self.last_matrix_path = matrix_path
+            except Exception:
+                pass
+        if histogram_path and os.path.exists(histogram_path):
+            self.last_histogram_path = histogram_path
+
+        sombra = entry.get("porcentaje_sombra")
+        self.porcentaje_sombra = sombra
+        if isinstance(sombra, (int, float)):
+            self.lbl_porcentaje_sombra.config(text=f"Porcentaje de sombra: {sombra:.2f}%")
+
+        # Redibujar la barra de temperatura a partir de los valores
+        # guardados en el snapshot (más confiable que depender de una
+        # imagen exportada, y consistente con calculate_temperature_in_shade).
+        tmrt_sombra = entry.get("tmrt_sombra")
+        temp_ambient = entry.get("temp_ambient")
+        if tmrt_sombra is not None and temp_ambient is not None:
+            self.tmrt_result = {
+                "Tmrt_sol": entry.get("tmrt_sol"),
+                "Tmrt_sombra": tmrt_sombra,
+                "Delta_Tmrt": entry.get("delta_tmrt"),
+            }
+            if hasattr(self, "lbl_tmrt_sol") and entry.get("tmrt_sol") is not None:
+                self.lbl_tmrt_sol.config(text=f"Tmrt al sol: {entry['tmrt_sol']:.2f} °C")
+            if hasattr(self, "lbl_tmrt_sombra"):
+                self.lbl_tmrt_sombra.config(text=f"Tmrt en sombra: {tmrt_sombra:.2f} °C")
+            if hasattr(self, "lbl_delta_tmrt") and entry.get("delta_tmrt") is not None:
+                self.lbl_delta_tmrt.config(text=f"ΔTmrt (impacto sombra): {entry['delta_tmrt']:.2f} °C")
+            if hasattr(self, "graph_frame"):
+                for widget in self.graph_frame.winfo_children():
+                    widget.destroy()
+                graph = TemperatureGraph(temp_ambient, tmrt_sombra, self.graph_frame)
+                graph.plot_temperature_scale()
+
+        self.curve_button.config(state=tk.NORMAL)
+        self.excel_button.config(state=tk.NORMAL)
+        self.pdf_button.config(state=tk.NORMAL)
 
     def _load_image_from_path(self, file_path: str):
         #self.img, self.img_rgb = self.image_processor.load_image(file_path)
@@ -634,6 +759,15 @@ class SombraApp:
     def _load_curve_from_path(self, file_path: str):
         if not self.curva_frame:
             return
+        # CORRECCIÓN: canvas2 es un lienzo vacío (ejes 0-1 en blanco) que
+        # _reset_panel2_for_new_image() vuelve a mostrar como placeholder.
+        # mostrar_curvas_nivel() ya lo ocultaba al generar una curva nueva,
+        # pero esta función (usada al restaurar un proyecto o un elemento
+        # del historial) no lo hacía — quedaba packed al lado de la curva
+        # real, achicándola. Es exactamente lo que se ve en el frame en
+        # blanco de la captura.
+        if self.canvas2 is not None:
+            self.canvas2.get_tk_widget().pack_forget()
         img = Image.open(file_path)
         self.curva_img_pil_original = img
         resized_img = self._fit_image_to_frame(self.curva_img_pil_original, self.curva_frame)
@@ -755,7 +889,29 @@ class SombraApp:
         self.entry_date = self.entries[2]
         self.entry_lat = self.entries[3]
         self.entry_lon = self.entries[4]
-        
+
+        # NUEVO: porcentaje de sombra manual. Antes "Calcular temperatura
+        # en sombra" exigía haber cargado una imagen y procesado la
+        # selección en el Panel 2 (self.porcentaje_sombra solo se
+        # llenaba ahí). Con este campo se puede calcular Tmrt para
+        # cualquier % de sombra hipotético sin pasar por una imagen —
+        # útil para explorar escenarios ("¿y si hubiera 60% de sombra
+        # acá?") o cuando no se tiene una foto todavía. Si se deja vacío,
+        # se sigue usando el % calculado desde la imagen, como antes.
+        manual_label = tk.Label(
+            panel, text="Porcentaje de sombra manual (%, opcional):",
+            bg=panel.cget("bg"), fg="black",
+        )
+        manual_label.pack(anchor="w", padx=20, pady=(15, 5))
+        self.entry_porcentaje_manual = tk.Entry(panel)
+        self.entry_porcentaje_manual.pack(anchor="w", padx=20, pady=5)
+        manual_hint = tk.Label(
+            panel,
+            text="Si se completa, se usa en vez del % calculado en el Panel 2.",
+            bg=panel.cget("bg"), fg="#666666", font=("Arial", 8),
+        )
+        manual_hint.pack(anchor="w", padx=20, pady=(0, 5))
+
         self.calculate_temp_button = tk.Button(
             panel,
             text="Calcular temperatura en sombra",
@@ -834,6 +990,30 @@ class SombraApp:
         
         self.save_dataset_button = tk.Button(panel, text="Guardar Dataset", command=self.save_dataset, state=tk.DISABLED)
         self.save_dataset_button.pack(anchor="w", padx=20, pady=10)
+
+        # NUEVO: historial de elementos analizados en este proyecto.
+        # Cada vez que se guarda un snapshot (imagen + sombra + curva +
+        # Tmrt), queda listado acá. Un click carga todo ese análisis de
+        # nuevo: imagen, selección de sombra, área de referencia, curva
+        # de nivel y la barra de temperatura calculada — sin tener que
+        # rehacer el cálculo.
+        historial_label = tk.Label(panel, text="Historial de elementos:", bg=panel.cget("bg"), fg="black")
+        historial_label.pack(anchor="w", padx=20, pady=(20, 4))
+
+        historial_frame = tk.Frame(panel, bg=panel.cget("bg"))
+        historial_frame.pack(anchor="w", padx=20, pady=(0, 10), fill="x")
+
+        historial_scroll = tk.Scrollbar(historial_frame, orient=tk.VERTICAL)
+        self.snapshot_listbox = tk.Listbox(
+            historial_frame, height=6, width=32,
+            yscrollcommand=historial_scroll.set, exportselection=False,
+        )
+        historial_scroll.config(command=self.snapshot_listbox.yview)
+        self.snapshot_listbox.pack(side=tk.LEFT, fill="x", expand=True)
+        historial_scroll.pack(side=tk.RIGHT, fill="y")
+        self.snapshot_listbox.bind("<<ListboxSelect>>", self._on_snapshot_select)
+        self.poblar_lista_snapshots()
+
         self._toggle_panel2_advanced()
         
     def setup_panel_3(self):
@@ -1915,9 +2095,35 @@ class SombraApp:
         if not self.require_project("calcular temperatura en sombra"):
             return
         try:
-            if self.porcentaje_sombra is None:
-                messagebox.showerror("Error", "Primero debe seleccionar el área para calcular el porcentaje de sombra.")
+            # NUEVO: se puede calcular con un % de sombra manual (campo
+            # nuevo en Panel 1) sin depender de haber procesado una
+            # imagen en el Panel 2. Si el campo manual está vacío, se
+            # usa self.porcentaje_sombra (el calculado desde la imagen),
+            # igual que antes.
+            manual_text = self.entry_porcentaje_manual.get().replace('\ufeff', '').strip() if hasattr(self, "entry_porcentaje_manual") else ""
+            if manual_text:
+                try:
+                    porcentaje_sombra = float(manual_text)
+                except ValueError:
+                    messagebox.showerror("Error", "El porcentaje de sombra manual debe ser un número.")
+                    return
+                if not (0 <= porcentaje_sombra <= 100):
+                    messagebox.showerror("Error", "El porcentaje de sombra manual debe estar entre 0 y 100.")
+                    return
+            elif self.porcentaje_sombra is not None:
+                porcentaje_sombra = self.porcentaje_sombra
+            else:
+                messagebox.showerror(
+                    "Error",
+                    "Ingrese un porcentaje de sombra manual, o seleccione el área de "
+                    "sombra en una imagen (Panel 2) para calcularlo automáticamente.",
+                )
                 return
+            # Se guarda en self.porcentaje_sombra para que el resto de la
+            # app (curvas de nivel, historial) use el mismo valor sin
+            # importar si vino de la imagen o se ingresó a mano.
+            self.porcentaje_sombra = porcentaje_sombra
+
             # Obtener valores ingresados por el usuario
             temp_ambient = float(self.entry_temp.get().replace('\ufeff', '').strip())
             latitude = float(self.entry_lat.get().replace('\ufeff', '').strip())
@@ -1931,12 +2137,14 @@ class SombraApp:
             _ = self.solar_engine.get_solar_position(latitude, longitude, datetime.combine(fecha, datetime.min.time()))
             result = self.temp_calculator.calculate_tmrt(
                 temp_ambient,
-                self.porcentaje_sombra,
+                porcentaje_sombra,
                 shadow_type="tree",
                 date_value=fecha,
                 time_value=hora,
             )            
             self.tmrt_result = result
+            if hasattr(self, "lbl_porcentaje_sombra"):
+                self.lbl_porcentaje_sombra.config(text=f"Porcentaje de sombra: {porcentaje_sombra:.2f}%")
             
             
             self.lbl_tmrt_sol.config(text=f"Tmrt al sol: {result['Tmrt_sol']:.2f} °C")
@@ -2003,15 +2211,67 @@ class SombraApp:
             file_path = export_to_excel(self.shape_selector.area_seleccionada)
             if file_path:
                 self.last_matrix_path = file_path
+    def _leer_parametros_tmrt(self):
+        """Lee temp. ambiente / hora / fecha / lat / lon desde el Panel 1,
+        con valores por defecto razonables si están vacíos.
+
+        NUEVO — antes calcular Tmrt exigía haber completado estos campos
+        a mano Y haber pasado por el flujo de imagen. Con esto, tanto
+        "Calcular temperatura en sombra" como "Generar curva de nivel"
+        pueden calcular usando lo que haya disponible (ubicación del
+        proyecto, hora actual, 25°C por defecto) sin bloquear al usuario.
+        """
+        def _f(entry, default):
+            if entry is None:
+                return default
+            try:
+                return float(entry.get().replace('\ufeff', '').strip())
+            except (ValueError, AttributeError):
+                return default
+
+        ahora = datetime.now()
+        loc = self.current_location or {}
+        temp_ambient = _f(self.entry_temp, 25.0)
+        hora = _f(self.entry_time, ahora.hour + ahora.minute / 60)
+        lat = _f(self.entry_lat, float(loc.get("lat", 0.0)))
+        lon = _f(self.entry_lon, float(loc.get("lon", 0.0)))
+        fecha_str = self.entry_date.get().replace('\ufeff', '').strip() if self.entry_date else ""
+        try:
+            fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+        except (ValueError, AttributeError):
+            fecha = ahora.date()
+        return temp_ambient, hora, fecha, lat, lon
+
     def mostrar_curvas_nivel(self):
         if not self.require_project("generar curvas de nivel"):
             return
         if self.shape_selector.area_seleccionada is not None:
-            
+
             # Rotar la matriz 90 grados en sentido horario
             area_volteada = np.flipud(self.shape_selector.area_seleccionada)
-            #area_rotada = np.rot90(self.shape_selector.area_seleccionada, k=0)  # k=-1 para rotar 90 grados a la derecha
-        
+
+            # CAMBIO PRINCIPAL: antes se graficaba directamente el nivel
+            # de gris de la foto (0-255), que no tiene unidad física ni
+            # es comparable entre dos fotos con distinta exposición o
+            # condiciones de luz. Ahora se calcula el % de sombra LOCAL
+            # de cada píxel (misma normalización que calcular_porcentaje_
+            # sombra, pero sin promediar) y se lo alimenta al modelo de
+            # Tmrt ya usado en "Calcular temperatura en sombra" — el
+            # contorno pasa a mostrar TEMPERATURA EN SOMBRA calculada en
+            # °C, punto por punto, según ubicación/fecha/hora y el propio
+            # % de sombra de cada zona de la imagen.
+            temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
+            mapa_sombra = self.image_processor.calcular_mapa_sombra(
+                self.shape_selector.area_seleccionada,
+                self.shape_selector.area_referencia,
+            )
+            mapa_sombra_volteado = np.flipud(mapa_sombra)
+            calculador = Temperatura(lat, lon)
+            resultado_mapa = calculador.calculate_tmrt_map(
+                temp_ambient, mapa_sombra_volteado,
+                shadow_type="tree", date_value=fecha, time_value=hora,
+            )
+            mapa_temperatura = resultado_mapa["Tmrt_map"]
 
             # Crear las curvas de nivel en una figura local
             #
@@ -2029,13 +2289,18 @@ class SombraApp:
 
             fig, ax = plt.subplots()
             contorno = ax.contour(
-                area_volteada, levels=20, cmap=CMAP_CURVAS_NIVEL,
+                mapa_temperatura, levels=20, cmap=CMAP_CURVAS_NIVEL,
                 linewidths=1.2, alpha=0.9,
             )
             ax.set_xlabel("Posición X (px)")
             ax.set_ylabel("Posición Y (px)")
-            ax.set_title(f"Curvas de nivel — {self.current_image_stem}")
-            agregar_colorbar_temperatura(fig, ax, contorno, unidad="nivel de gris")
+            ax.set_title(
+                f"Temperatura en sombra calculada — {self.current_image_stem}\n"
+                f"(rad. {resultado_mapa['Radiacion_Wm2']:.0f} W/m², "
+                f"alt. solar {resultado_mapa['Solar_altitude']:.1f}°)",
+                fontsize=10,
+            )
+            agregar_colorbar_temperatura(fig, ax, contorno, unidad="°C")
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
             fig.tight_layout(pad=0.6)
             anotar_metadatos(fig, f"Generado: {timestamp}  ·  Fuente: {self.current_image_stem}")

@@ -35,6 +35,8 @@ import datetime
 import logging
 import math
 
+import numpy as np
+
 logger = logging.getLogger("sombra_poo.tmrt")
 
 
@@ -108,6 +110,67 @@ class Temperatura:
             tau_min, tau_max = 0.15, 0.60
         tau = tau_max - (porcentaje / 100) * (tau_max - tau_min)
         return max(min(tau, tau_max), tau_min)
+
+    def shadow_transmittance_map(self, porcentaje_sombra_map, shadow_type):
+        """NUEVO: misma fórmula que shadow_transmittance() pero vectorizada
+        sobre un array de numpy en vez de un escalar."""
+        porcentaje = np.clip(porcentaje_sombra_map, 0, 100)
+        if shadow_type == "structure":
+            tau_min, tau_max = 0.05, 0.30
+        else:
+            tau_min, tau_max = 0.15, 0.60
+        tau = tau_max - (porcentaje / 100) * (tau_max - tau_min)
+        return np.clip(tau, tau_min, tau_max)
+
+    def calculate_tmrt_map(self, air_temp, porcentaje_sombra_map, shadow_type="tree",
+                            date_value=None, time_value=None, radiation_override=None):
+        """NUEVO: versión de calculate_tmrt() que opera sobre un mapa
+        (array 2D) de % de sombra en vez de un único valor promedio.
+
+        Se usa para que las curvas de nivel del Panel 2 muestren
+        TEMPERATURA en sombra calculada punto por punto (según el % de
+        sombra local de cada píxel, la ubicación, fecha y hora), en vez
+        de graficar directamente los valores crudos de gris de la
+        imagen — que no tienen unidad física ni son comparables entre
+        fotos con distinta exposición.
+
+        La posición solar y la radiación de cielo despejado son
+        iguales para toda la escena en un mismo instante, así que se
+        calculan UNA sola vez (escalares) y solo la transmitancia y el
+        Tmrt final se vectorizan sobre el mapa.
+        """
+        porcentaje_sombra_map = np.asarray(porcentaje_sombra_map, dtype=np.float32)
+
+        if isinstance(date_value, datetime.date):
+            day_of_year = date_value.timetuple().tm_yday
+        else:
+            now = datetime.datetime.now()
+            day_of_year = now.timetuple().tm_yday
+
+        if time_value is None:
+            now = datetime.datetime.now()
+            time_of_day = now.hour + now.minute / 60
+        else:
+            time_of_day = float(time_value)
+
+        solar_altitude = self.solar_altitude(day_of_year, time_of_day)
+        if radiation_override is not None:
+            radiation = max(0.0, float(radiation_override))
+        else:
+            radiation = self.clear_sky_radiation(solar_altitude)
+
+        if radiation <= 0:
+            tmrt_map = np.full_like(porcentaje_sombra_map, air_temp, dtype=np.float32)
+            return {"Tmrt_map": tmrt_map, "Radiacion_Wm2": 0.0, "Solar_altitude": solar_altitude}
+
+        tau_map = self.shadow_transmittance_map(porcentaje_sombra_map, shadow_type)
+        radiation_map = radiation * tau_map
+        tmrt_map = air_temp + self.k_factor * radiation_map
+        return {
+            "Tmrt_map": tmrt_map,
+            "Radiacion_Wm2": round(radiation, 2),
+            "Solar_altitude": round(solar_altitude, 2),
+        }
 
     def calculate_tmrt(self, air_temp, porcentaje_sombra, shadow_type="tree",
                         date_value=None, time_value=None, radiation_override=None):

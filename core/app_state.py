@@ -67,6 +67,7 @@ class AppState:
             "scene": {
                 "objects": [self.scene_object_to_dict(obj) for obj in scene_objects],
             },
+            "snapshots": getattr(self.app, "snapshots", []),
         }
 
     def apply_payload(self, payload: dict) -> None:
@@ -141,6 +142,12 @@ class AppState:
         last_meta = payload.get("last_results_meta", {})
         self.app.shadow_quality = last_meta.get("shadow_quality")
         self.app.last_temp_graph_path = self._abs(root, last_meta.get("temp_graph_image"))
+
+        # NUEVO: historial de elementos analizados (ver snapshot_service.py).
+        # Se restaura ANTES de restore_project_artifacts(), que lo usa para
+        # poblar el Listbox y cargar el último elemento automáticamente.
+        snapshots = payload.get("snapshots", [])
+        self.app.snapshots = snapshots if isinstance(snapshots, list) else []
         
         target_panel = ui.get("active_panel")
         if isinstance(target_panel, int) and 0 <= target_panel < len(self.app.panel_frames):

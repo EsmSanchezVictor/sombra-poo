@@ -38,10 +38,17 @@ class SnapshotService:
         if getattr(self.app, "fig1", None) is not None:
             self.app.fig1.savefig(img_path, dpi=150, bbox_inches="tight")
             self.app.last_image_path = img_path
-        if getattr(self.app, "fig2", None) is not None:
-            self.app.fig2.savefig(curve_path, dpi=150, bbox_inches="tight")
+        # CORRECCIÓN: mostrar_curvas_nivel() ya no dibuja el contorno en
+        # self.ax2/self.fig2 (esos quedaron como el lienzo vacío inicial
+        # del panel) — ahora genera su propia figura local con el mapa de
+        # temperatura calculado y la guarda directamente en
+        # self.last_curve_path. El chequeo de self.app.fig2 de acá nunca
+        # se cumplía, así que la curva nunca se copiaba al historial de
+        # snapshots. Se copia desde last_curve_path en su lugar.
+        self._copy_if_exists(getattr(self.app, "last_curve_path", None), curve_path, "curva de nivel")
+        if os.path.exists(curve_path):
             self.app.last_curve_path = curve_path
-            
+
         # Guardar matrices si están presentes en la selección
         if getattr(self.app, "shape_selector", None) is not None:
             if getattr(self.app.shape_selector, "area_seleccionada", None) is not None:
@@ -58,6 +65,50 @@ class SnapshotService:
         # Copiar artefactos adicionales si existen
         self._copy_if_exists(self.app.last_model_excel_path, model_excel, "excel modelo")
         self._copy_if_exists(self.app.last_edit_excel_path, edit_excel, "excel edición")
+
+        # NUEVO: registrar este snapshot en el historial del proyecto,
+        # con rutas RELATIVAS a project.root_path (para que el proyecto
+        # se pueda mover/copiar sin romper el historial) y los resultados
+        # calculados en ese momento (% sombra, Tmrt sol/sombra/delta,
+        # temperatura ambiente usada). Esto es lo que permite listar
+        # todos los elementos analizados y volver a cargar cualquiera
+        # con un click, en vez de solo el último.
+        def _rel(path):
+            if not path or not os.path.exists(path):
+                return None
+            return os.path.relpath(path, project.root_path)
+
+        entry = {
+            "n": n,
+            "timestamp": pd.Timestamp.now().isoformat(),
+            "label": getattr(self.app, "current_image_stem", None) or f"elemento{n}",
+            "image": _rel(img_path),
+            "curve": _rel(curve_path),
+            "matrix": _rel(matrix_path),
+            "reference": _rel(mask_path),
+            "histogram": _rel(histogram_path),
+            "porcentaje_sombra": getattr(self.app, "porcentaje_sombra", None),
+            "temp_ambient": None,
+            "tmrt_sol": None,
+            "tmrt_sombra": None,
+            "delta_tmrt": None,
+        }
+        tmrt_result = getattr(self.app, "tmrt_result", None)
+        if tmrt_result:
+            entry["tmrt_sol"] = tmrt_result.get("Tmrt_sol")
+            entry["tmrt_sombra"] = tmrt_result.get("Tmrt_sombra")
+            entry["delta_tmrt"] = tmrt_result.get("Delta_Tmrt")
+        if hasattr(self.app, "entry_temp"):
+            try:
+                entry["temp_ambient"] = float(self.app.entry_temp.get().replace('\ufeff', '').strip())
+            except (ValueError, AttributeError):
+                pass
+
+        if not hasattr(self.app, "snapshots") or self.app.snapshots is None:
+            self.app.snapshots = []
+        self.app.snapshots.append(entry)
+        if hasattr(self.app, "poblar_lista_snapshots"):
+            self.app.poblar_lista_snapshots()
 
         # Guardar el JSON del proyecto actualizado
         self.project_manager.save_project()

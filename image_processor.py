@@ -47,3 +47,25 @@ class ImageProcessor:
         sombra_normalizada = (area_gris.astype(np.float32) - min_val) / rango
         porcentaje = 100 - np.mean(sombra_normalizada) * 100
         return float(np.clip(porcentaje, 0, 100))
+
+    def calcular_mapa_sombra(self, area_gris, area_referencia=None):
+        """NUEVO: versión "mapa" de calcular_porcentaje_sombra — misma
+        normalización, pero sin promediar al final. Devuelve un array del
+        mismo tamaño que area_gris con el % de sombra LOCAL de cada
+        píxel (0-100). Se usa para que las curvas de nivel puedan
+        mostrar temperatura calculada punto por punto en vez de un único
+        valor agregado para toda el área.
+        """
+        min_val = float(np.min(area_gris))
+        if area_referencia is not None and area_referencia.size > 0:
+            max_val = float(np.median(area_referencia))
+        else:
+            max_val = float(np.max(area_gris))
+
+        rango = max_val - min_val
+        if rango <= 1e-6:
+            return np.zeros_like(area_gris, dtype=np.float32)
+
+        sombra_normalizada = (area_gris.astype(np.float32) - min_val) / rango
+        mapa = 100 - sombra_normalizada * 100
+        return np.clip(mapa, 0, 100)

@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import tkinter as tk
 from tkinter import ttk, filedialog
 from datetime import datetime
@@ -8,6 +9,7 @@ import pandas as pd
 import math
 from core.scene_objects import adaptar_objetos_escena
 from tkinter import messagebox
+from plot_style import CMAP_TEMPERATURA
 
 # Constantes
 sigma = 5.67e-8  # Constante de Stefan-Boltzmann
@@ -393,7 +395,9 @@ def generar_grafico(vars, frame):
         delta = max(margin, 0.01 * abs(tmin))
         niveles = np.array([tmin_auto - delta, tmax_auto + delta])
 
-    contorno = ax.contourf(X, Y, T_display, niveles, cmap='viridis', alpha=0.8)
+    # CAMBIO: 'viridis' -> CMAP_TEMPERATURA, misma paleta que el resto
+    # de la app (modo edición 2D/3D, curvas de nivel, histograma).
+    contorno = ax.contourf(X, Y, T_display, niveles, cmap=CMAP_TEMPERATURA, alpha=0.8)
     ax.contour(X, Y, T_display, niveles, colors='k', linewidths=0.5)
     ax.set_title('Distribución de temperatura', fontsize=12, pad=10)
     fig.colorbar(contorno, ax=ax, orientation='horizontal', pad=0.12).set_label(f'Temperatura ({temp_unit})')
@@ -537,12 +541,24 @@ def editar_elemento(vars, arbol=None, estructura=None):
 
 
 def generar_3d(vars):
+    """Vista 3D del modelo — misma lógica que diseño.py::generar_3d(),
+    para que modo edición y modelo se vean y se lean igual.
+
+    CAMBIOS respecto a la versión original (idénticos a los ya aplicados
+    en diseño.py): antes era una superficie de T en Kelvin con el eje Z
+    invertido, sin ningún árbol/estructura dibujado y con paleta
+    'viridis' distinta a la del resto de la app. Ahora la temperatura es
+    un mapa de color sobre el plano del suelo (misma paleta
+    CMAP_TEMPERATURA que el plano 2D de acá arriba y que modo edición),
+    el eje Z es altura real de los objetos, y los árboles/estructuras
+    cargados desde el Excel del modelo se dibujan igual que en edición.
+    """
     if "T" not in vars or "X" not in vars or "Y" not in vars:
         messagebox.showerror("Error", "Primero genere el gráfico 2D")
         return
 
     ventana_3d = tk.Toplevel()
-    ventana_3d.title("Vista 3D de Temperatura")
+    ventana_3d.title("Vista 3D simplificada — Modelo")
     ventana_3d.geometry("1000x800")
 
     fig = plt.figure(figsize=(10, 8))
@@ -552,13 +568,61 @@ def generar_3d(vars):
     Y = vars["Y"]
     T = vars["T"]
 
-    surf = ax.plot_surface(X, Y, T, cmap='viridis', rstride=2, cstride=2, alpha=0.8)
-    fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
+    app_instance = vars.get('_app_instance')
+    temp_unit = app_instance.get_temperature_unit_symbol() if app_instance else "K"
+    T_display = app_instance.convert_temperature_for_display(T) if app_instance else T
+
+    nivel_min, nivel_max = float(np.nanmin(T_display)), float(np.nanmax(T_display))
+    if not np.isfinite(nivel_min) or not np.isfinite(nivel_max) or nivel_min == nivel_max:
+        niveles = 10
+    else:
+        niveles = np.linspace(nivel_min, nivel_max, 20)
+
+    piso = ax.contourf(X, Y, T_display, niveles, zdir='z', offset=0,
+                        cmap=CMAP_TEMPERATURA, alpha=0.95)
+    cbar = fig.colorbar(piso, ax=ax, shrink=0.6, aspect=12, pad=0.08)
+    cbar.set_label(f"Temperatura ({temp_unit})")
+    cbar.ax.text(0.5, 1.02, "Más cálido", transform=cbar.ax.transAxes,
+                 ha='center', va='bottom', fontsize=8)
+    cbar.ax.text(0.5, -0.02, "Más fresco", transform=cbar.ax.transAxes,
+                 ha='center', va='top', fontsize=8)
+
+    arboles = vars.get('arboles', [])
+    if arboles:
+        ax.scatter(
+            [a.x for a in arboles], [a.y for a in arboles], [a.h for a in arboles],
+            s=[max(30, (a.radio_copa ** 2) * 25) for a in arboles],
+            c='forestgreen', alpha=0.85, depthshade=True,
+            edgecolors='darkgreen', label='Árboles',
+        )
+        for a in arboles:
+            ax.plot([a.x, a.x], [a.y, a.y], [0, a.h], color='saddlebrown', linewidth=2)
+
+    estructuras = vars.get('estructuras', [])
+    for e in estructuras:
+        color = {'Pared': '0.3', 'Galeria': 'saddlebrown', 'Sendero': 'gray'}.get(e.tipo, '0.5')
+        if e.tipo == 'Pared':
+            altura = max(e.altura, 0.1)
+            panel = [[
+                (e.x1, e.y1, 0), (e.x2, e.y2, 0),
+                (e.x2, e.y2, altura), (e.x1, e.y1, altura),
+            ]]
+            ax.add_collection3d(Poly3DCollection(panel, facecolor=color, alpha=0.7, edgecolor='black'))
+        else:
+            z_nivel = e.altura if e.tipo == 'Galeria' else 0.05
+            franja = [[
+                (e.x1, e.y1, z_nivel), (e.x2, e.y1, z_nivel),
+                (e.x2, e.y2, z_nivel), (e.x1, e.y2, z_nivel),
+            ]]
+            ax.add_collection3d(Poly3DCollection(franja, facecolor=color, alpha=0.5))
+
     ax.set_xlabel('X (m)')
     ax.set_ylabel('Y (m)')
-    ax.set_zlabel('Temperatura (K)')
-    ax.set_title('Distribución Térmica 3D')
-    ax.invert_zaxis()
+    ax.set_zlabel('Altura (m)')
+    ax.set_title('Vista 3D simplificada — Modelo')
+    ax.view_init(elev=42, azim=-60)
+    if arboles or estructuras:
+        ax.legend(loc='upper left', fontsize=8)
 
     canvas = FigureCanvasTkAgg(fig, master=ventana_3d)
     canvas.draw()
