@@ -73,6 +73,7 @@ class Project:
             os.path.join("resultados", "histogramas"),  # antes: "histograma" (singular) — corregido
             os.path.join("resultados", "curvas_nivel"),
             os.path.join("resultados", "excels"),
+            os.path.join("resultados", "analisis"),  # NUEVO: gráficos comparativos, curva de sensibilidad, informes PDF
             "config",
         )
         for folder in folders:

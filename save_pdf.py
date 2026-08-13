@@ -46,16 +46,18 @@ class PDFReportGenerator:
         os.remove(temp_img_file)  # Eliminar el archivo temporal
 
     def add_contour_image(self, pdf):
-        # Guardar imagen de las curvas de nivel
-        temp_img_file = tempfile.mktemp(".png")
-        self.app.fig2.savefig(temp_img_file)
-
+        # CORRECCIÓN: self.app.fig2 es el lienzo vacío inicial del panel
+        # — mostrar_curvas_nivel() genera su propia figura aparte con el
+        # mapa de temperatura calculado y la guarda directamente a disco.
+        # Usar el PNG real en last_curve_path en vez de re-guardar fig2
+        # (que siempre está en blanco).
+        curve_path = getattr(self.app, "last_curve_path", None)
+        if not curve_path or not os.path.exists(curve_path):
+            return
         pdf.add_page()
         pdf.set_font("Arial", "B", 12)
-        pdf.cell(200, 10, txt="Curvas de Nivel", ln=True)
-        pdf.image(temp_img_file, x=10, y=None, w=180)
-
-        os.remove(temp_img_file)
+        pdf.cell(200, 10, txt="Curvas de Nivel (temperatura en sombra calculada)", ln=True)
+        pdf.image(curve_path, x=10, y=None, w=180)
 
     def add_area_info(self, pdf):
         # Información de las áreas y porcentaje de sombra

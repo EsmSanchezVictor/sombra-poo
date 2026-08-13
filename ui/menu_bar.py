@@ -86,8 +86,23 @@ class MenuBar:
 
         analisis_menu = tk.Menu(menu_bar, tearoff=0)
         analisis_menu.add_command(label="Estadísticas rápidas", command=self.app.quick_stats)
+        analisis_menu.add_separator()
         analisis_menu.add_command(
-            label="Reporte PDF del modelo",
+            label="Comparar elementos del proyecto",
+            command=self.app.mostrar_analisis_comparativo,
+        )
+        analisis_menu.add_command(
+            label="Curva de sensibilidad sombra–temperatura",
+            command=self.app.mostrar_curva_sensibilidad,
+        )
+        analisis_menu.add_separator()
+        analisis_menu.add_command(
+            label="Generar informe completo (PDF)…",
+            accelerator="Ctrl+Shift+P",
+            command=self.app.generar_informe_completo,
+        )
+        analisis_menu.add_command(
+            label="Reporte PDF del último elemento",
             command=self.app.exportar_a_pdf,
         )
         analisis_menu.add_command(
@@ -119,3 +134,4 @@ class MenuBar:
         self.app.root.bind_all("<Control-q>", lambda _e: (self.app.exit_app(), "break")[1])
         self.app.root.bind_all("<F5>", lambda _e: (self.app.run_model_for_active_panel(), "break")[1])
         self.app.root.bind_all("<Control-F5>", lambda _e: (self.app.generar_grafico_modelo(), "break")[1])
+        self.app.root.bind_all("<Control-Shift-P>", lambda _e: (self.app.generar_informe_completo(), "break")[1])

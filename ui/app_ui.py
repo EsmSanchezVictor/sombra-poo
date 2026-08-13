@@ -27,6 +27,8 @@ from shape_selection import ShapeSelector
 from shadow_temp import Temperatura
 from temp_graph import TemperatureGraph
 from services.solar_engine import SolarEngine
+from services import analysis_service
+from services import report_service
 from ui.menu_bar import MenuBar
 from utils import export_to_excel
 import diseño as design
@@ -584,6 +586,8 @@ class SombraApp:
             sombra = entry.get("porcentaje_sombra")
             sombra_txt = f" — {sombra:.0f}% sombra" if isinstance(sombra, (int, float)) else ""
             self.snapshot_listbox.insert(tk.END, f"{etiqueta}{sombra_txt}")
+        if hasattr(self, "status_elements_var"):
+            self.status_elements_var.set(f"Elementos: {len(self.snapshots)}")
 
     def _on_snapshot_select(self, _event=None):
         seleccion = self.snapshot_listbox.curselection()
@@ -1853,6 +1857,112 @@ class SombraApp:
             "No hay gráfico disponible para el panel activo.",
         )
 
+    def mostrar_analisis_comparativo(self):
+        """NUEVO. Compara todos los elementos analizados del proyecto:
+        % de sombra y ΔTmrt lado a lado, más estadística descriptiva.
+        No depende de tener una imagen cargada — usa self.snapshots."""
+        if not self.require_project("comparar elementos del proyecto"):
+            return
+        if not self.snapshots:
+            messagebox.showinfo(
+                "Análisis comparativo",
+                "Todavía no hay elementos guardados en este proyecto.\n"
+                "Usá 'Confirmar selección y calcular' + 'Guardar Dataset' "
+                "sobre al menos un elemento primero.",
+            )
+            return
+
+        resumen = analysis_service.resumen_estadistico(self.snapshots)
+        project = self.project_manager.current_project
+        analisis_dir = os.path.join(project.root_path, "resultados", "analisis")
+        os.makedirs(analisis_dir, exist_ok=True)
+        chart_path = safe_path(analisis_dir, "comparativo_elementos.png")
+        resultado = analysis_service.grafico_comparativo(self.snapshots, str(chart_path))
+        if resultado is None:
+            messagebox.showinfo(
+                "Análisis comparativo",
+                "Ningún elemento guardado tiene % de sombra calculado todavía.",
+            )
+            return
+        self.last_comparative_chart_path = str(chart_path)
+
+        ventana = tk.Toplevel(self.root)
+        ventana.title("Análisis comparativo del proyecto")
+        ventana.geometry("720x680")
+
+        s = resumen["porcentaje_sombra"]
+        d = resumen["delta_tmrt"]
+        lineas = [f"Elementos analizados: {resumen['n_elementos']}"]
+        if s["n"]:
+            lineas.append(
+                f"% de sombra — media {s['media']:.1f}% · mín {s['min']:.1f}% · "
+                f"máx {s['max']:.1f}% · σ {s['desvio']:.1f}%"
+            )
+        if d["n"]:
+            lineas.append(
+                f"ΔTmrt — media {d['media']:.2f}°C · mín {d['min']:.2f}°C · "
+                f"máx {d['max']:.2f}°C · σ {d['desvio']:.2f}°C"
+            )
+        tk.Label(ventana, text="\n".join(lineas), justify="left", anchor="w",
+                 font=("Arial", 10)).pack(fill="x", padx=12, pady=10)
+
+        img = Image.open(resultado)
+        img.thumbnail((680, 560))
+        photo = ImageTk.PhotoImage(img)
+        lbl = tk.Label(ventana, image=photo)
+        lbl.image = photo
+        lbl.pack(padx=10, pady=5)
+
+    def mostrar_curva_sensibilidad(self):
+        """NUEVO. Grafica cómo responde el Tmrt en sombra al % de sombra
+        (0-100%) según el propio modelo, con la ubicación/fecha/hora/
+        temperatura actuales del Panel 1. Herramienta pura de
+        exploración del modelo — no requiere ninguna imagen."""
+        if not self.require_project("generar curva de sensibilidad"):
+            return
+        temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
+        calculador = Temperatura(lat, lon)
+
+        project = self.project_manager.current_project
+        analisis_dir = os.path.join(project.root_path, "resultados", "analisis")
+        os.makedirs(analisis_dir, exist_ok=True)
+        chart_path = safe_path(analisis_dir, "sensibilidad_sombra.png")
+        resultado_path, _, _ = analysis_service.curva_sensibilidad(
+            calculador, temp_ambient, fecha, hora, str(chart_path),
+        )
+        self.last_sensitivity_chart_path = str(resultado_path)
+
+        ventana = tk.Toplevel(self.root)
+        ventana.title("Sensibilidad sombra–temperatura")
+        ventana.geometry("650x620")
+        img = Image.open(resultado_path)
+        img.thumbnail((620, 560))
+        photo = ImageTk.PhotoImage(img)
+        lbl = tk.Label(ventana, image=photo)
+        lbl.image = photo
+        lbl.pack(padx=10, pady=10)
+
+    def generar_informe_completo(self):
+        """NUEVO. Informe PDF consolidado de TODO el proyecto: resumen
+        estadístico, tabla de elementos, comparación entre ellos, curva
+        de sensibilidad del modelo y últimos artefactos visuales.
+        Se guarda directamente en resultados/analisis/ del proyecto
+        (sin diálogo de guardado) para que quede siempre junto con el
+        resto de los resultados del proyecto."""
+        if not self.require_project("generar el informe completo"):
+            return
+        project = self.project_manager.current_project
+        analisis_dir = os.path.join(project.root_path, "resultados", "analisis")
+        os.makedirs(analisis_dir, exist_ok=True)
+        nombre = f"informe_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        destino = os.path.join(analisis_dir, nombre)
+        try:
+            ruta_final = report_service.generar_informe_proyecto(self, project, destino)
+        except Exception as exc:
+            messagebox.showerror("Informe completo", f"No se pudo generar el informe: {exc}")
+            return
+        messagebox.showinfo("Informe completo", f"Informe guardado en:\n{ruta_final}")
+
     def quick_stats(self):
         if self.last_T is None:
             messagebox.showinfo(
@@ -1910,6 +2020,19 @@ class SombraApp:
             font=("Arial", 9),
         )
         self.saved_status_label.pack(side="left", padx=10)
+
+        # NUEVO: cantidad de elementos analizados, siempre visible.
+        # Software de análisis científico debería mostrar el tamaño de
+        # muestra sin que haya que abrir el historial para contarlo.
+        self.status_elements_var = tk.StringVar(value="Elementos: 0")
+        self.elements_status_label = tk.Label(
+            self.frame6,
+            textvariable=self.status_elements_var,
+            bg=self.palette["accent"],
+            fg="#2c3e50",
+            font=("Arial", 9),
+        )
+        self.elements_status_label.pack(side="left", padx=10)
 
         tk.Label(
             self.frame6,
