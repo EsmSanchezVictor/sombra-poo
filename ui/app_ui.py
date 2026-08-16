@@ -379,6 +379,15 @@ class SombraApp:
         # Para recordar cuál panel está abierto
         self.active_panel = None
         self.is_animating = False
+        # NUEVO: se incrementa cada vez que toggle_panel arranca una
+        # acción nueva (abrir/cerrar/cambiar de panel). Cada animación
+        # en curso (animate_panel_open/close) guarda el valor que tenía
+        # este contador al arrancar, y en cada paso se fija si sigue
+        # siendo el mismo — si no, significa que otra acción la
+        # interrumpió, y esa corrida vieja se aborta sola en vez de
+        # seguir escribiendo sobre frame1/el panel al mismo tiempo que
+        # la animación nueva. Ver toggle_panel/animate_panel_open/close.
+        self._panel_anim_token = 0
 
         # Inicializar componentes
         self.menu_bar.setup()
@@ -983,7 +992,7 @@ class SombraApp:
         # acá?") o cuando no se tiene una foto todavía. Si se deja vacío,
         # se sigue usando el % calculado desde la imagen, como antes.
         manual_label = tk.Label(
-            panel, text="Porcentaje de sombra manual\n (%, opcional):",
+            panel, text="Porcentaje de sombra manual (%, opcional):",
             bg=panel.cget("bg"), fg="black",
         )
         manual_label.pack(anchor="w", padx=20, pady=(15, 5))
@@ -991,7 +1000,7 @@ class SombraApp:
         self.entry_porcentaje_manual.pack(anchor="w", padx=20, pady=5)
         manual_hint = tk.Label(
             panel,
-            text="Si se completa,\n se usa en vez del % calculado \n en el Panel 2.",
+            text="Si se completa, se usa en vez del % calculado en el Panel 2.",
             bg=panel.cget("bg"), fg="#666666", font=("Arial", 8),
         )
         manual_hint.pack(anchor="w", padx=20, pady=(0, 5))
@@ -1001,7 +1010,7 @@ class SombraApp:
             text="Calcular temperatura en sombra",
             command=self.calculate_temperature_in_shade,
         )
-        self.calculate_temp_button.pack(anchor="w",padx=20, pady=10)
+        self.calculate_temp_button.pack(padx=20, pady=20)
     def setup_panel_2(self):
         """Configura el contenido del Panel 2"""
         panel = self.panel_frames[1]
@@ -1635,38 +1644,62 @@ class SombraApp:
         return contenido
 
     def toggle_panel(self, index):
+        """Abre, cierra, o cambia de panel lateral.
+
+        BUG CORREGIDO ("conflicto al tocar los íconos"): antes, para
+        cambiar de un panel a otro, se cerraba el viejo y se programaba
+        abrir el nuevo con `frame1.after(250, ...)` — un tiempo fijo
+        inventado que NO espera a que la animación de cierre realmente
+        termine. animate_panel_close reduce el ancho de a 10px cada
+        10ms, así que con un panel de, por ejemplo, 260px de ancho, el
+        cierre tarda 260ms — MÁS que los 250ms de espera. Resultado: el
+        open_panel del panel nuevo arrancaba mientras el close_panel
+        del viejo todavía estaba corriendo, y las dos animaciones
+        terminaban escribiendo `frame1.config(width=...)` una encima de
+        la otra — de ahí el conflicto visual.
+
+        Ahora close_panel() recibe un callback `on_complete` y recién
+        llama a open_panel() cuando el cierre TERMINÓ de verdad — sin
+        adivinar tiempos. Además, cualquier clic nuevo invalida
+        cualquier animación vieja todavía en curso (ver
+        self._panel_anim_token), así que ya no hace falta bloquear el
+        clic con `if self.is_animating: return` — un clic de más ya no
+        puede corromper nada, como mucho reinicia la animación.
+        """
         if not self.require_project("acceder a los paneles"):
             return
-        if self.is_animating:
-            return
+        self._panel_anim_token += 1  # invalida cualquier animación en curso
 
         if self.active_panel is not None and self.active_panel != index:
-            self.close_panel(self.active_panel)
-            self.frame1.after(250, lambda: self.open_panel(index))  # Espera antes de abrir el nuevo panel
+            self.close_panel(self.active_panel, on_complete=lambda: self.open_panel(index))
         elif self.active_panel == index:
             self.close_panel(self.active_panel)
             self.active_panel = None
         else:
             self.open_panel(index)
+
     def open_panel(self, index):
         """Abre (despliega) el panel lateral 'index' (0-3).
 
-        GEOMETRÍA (bug corregido): frame1 se crea con un ancho fijo de
-        apenas 100px — suficiente para la columna de íconos sola, pero
-        NO para columna de íconos + panel desplegado. Como los paneles
-        se ubican con .place() (que no fuerza a su contenedor a
-        agrandarse), el panel terminaba dibujándose más ancho que
-        frame1 y la parte que sobraba quedaba recortada/tapada por lo
-        que hay al lado. Acá se agranda frame1 al ancho real necesario
-        ANTES de animar la apertura; close_panel lo vuelve a achicar.
+        GEOMETRÍA (bug corregido en la vuelta anterior): frame1 se crea
+        con un ancho fijo de apenas 100px — suficiente para la columna
+        de íconos sola, pero NO para columna de íconos + panel
+        desplegado. Como los paneles se ubican con .place() (que no
+        fuerza a su contenedor a agrandarse), el panel terminaba
+        dibujándose más ancho que frame1 y la parte que sobraba quedaba
+        recortada/tapada por lo que hay al lado. Acá se agranda frame1
+        al ancho real necesario ANTES de animar la apertura; close_panel
+        lo vuelve a achicar (solo si no hay otro open_panel encadenado
+        justo después — ver animate_panel_close).
         """
         if not self.require_project("acceder a los paneles"):
             return
+        token = self._panel_anim_token
         self.active_panel = index
         self.is_animating = True
         icon_width = max(self.icon_frame.winfo_width(), 40)
         self.frame1.config(width=icon_width + self.panel_width)
-        self.animate_panel_open(index, 0)
+        self.animate_panel_open(index, 0, token)
         if index == 1:
             self.show_panel2_frames()
         elif index == 2:
@@ -1676,58 +1709,76 @@ class SombraApp:
         self.switch_buttons_to_horizontal()
         self.highlight_button(index)
 
-    def animate_panel_open(self, index, current_width):
+    def animate_panel_open(self, index, current_width, token=None):
         """Animación de apertura: el ANCHO del panel crece de a 10px
         por frame hasta llegar a self.panel_width. Para tocar la
         velocidad, ajustar el paso (+10) o el delay (after(10, ...)).
 
-        ALTURA (bug corregido): antes era relheight=1 (= 100% del alto
-        de frame1) posicionado en y=button_height — eso hace que el
-        panel mida MÁS que el espacio libre debajo de la barra de
-        íconos, y el sobrante (button_height píxeles) queda por debajo
-        del borde inferior real de la ventana, invisible. Con
-        height=-button_height, place() resta esa franja del alto total
-        (relheight y height se pueden combinar así), y el panel termina
-        exactamente al ras — de ahí en más, lo que no entra lo cubre el
-        scroll de _crear_panel_desplazable().
+        SINCRONIZACIÓN: si `token` ya no coincide con
+        self._panel_anim_token, quiere decir que otra acción (otro
+        clic) interrumpió esta animación mientras estaba en curso —
+        esta corrida "vieja" se corta acá mismo en vez de seguir
+        peleando por frame1/el panel con la animación nueva.
+
+        ALTURA (bug corregido en la vuelta anterior): antes era
+        relheight=1 (= 100% del alto de frame1) posicionado en
+        y=button_height — eso hace que el panel mida MÁS que el espacio
+        libre debajo de la barra de íconos, y el sobrante quedaba por
+        debajo del borde inferior real de la ventana, invisible. Con
+        height=-button_height, place() resta esa franja del alto total.
         """
+        if token is not None and token != self._panel_anim_token:
+            return
         button_height = self.icon_frame.winfo_height()
         if current_width <= self.panel_width:
             self.panel_outer_frames[index].config(width=current_width)
             self.panel_outer_frames[index].place(
                 x=0, y=button_height, relheight=1, height=-button_height,
             )
-            self.frame1.after(10, self.animate_panel_open, index, current_width + 10)
+            self.frame1.after(10, self.animate_panel_open, index, current_width + 10, token)
         else:
             self.is_animating = False
 
-    def close_panel(self, index):
+    def close_panel(self, index, on_complete=None):
+        """Cierra el panel 'index'. Si se pasa on_complete, se llama
+        recién cuando la animación de cierre TERMINÓ de verdad — así
+        se encadena una apertura sin adivinar tiempos (ver toggle_panel)."""
+        token = self._panel_anim_token
         self.is_animating = True
-        self.animate_panel_close(index, self.panel_width)
+        self.animate_panel_close(index, self.panel_width, token, on_complete)
         self.reset_button(index)
         self.switch_buttons_to_vertical()
 
-    def animate_panel_close(self, index, current_width):
+    def animate_panel_close(self, index, current_width, token=None, on_complete=None):
         """Igual que animate_panel_open pero decreciendo el ancho.
-        Mismo fix de altura (height=-button_height) — antes tenía,
-        ADEMÁS, un rely=0.1 mezclado con y=button_height que no tenía
-        relación con cómo se abría el panel (asimetría entre abrir y
-        cerrar); se sacó para que ambas animaciones usen exactamente la
-        misma geometría."""
+        Mismo chequeo de token (ver animate_panel_open) y mismo fix de
+        altura (height=-button_height) — antes tenía, además, un
+        rely=0.1 mezclado con y=button_height que no tenía relación con
+        cómo se abría el panel; se sacó para que abrir/cerrar usen
+        exactamente la misma geometría.
+
+        Si viene on_complete (se está encadenando una apertura), NO se
+        achica frame1 acá — el open_panel que sigue va a fijar el ancho
+        que corresponda; achicarlo acá de paso sería trabajo perdido y,
+        peor, un parpadeo visual (achica y al toque vuelve a agrandar).
+        """
+        if token is not None and token != self._panel_anim_token:
+            return
         button_height = self.icon_frame.winfo_height()
         if current_width > 0:
             self.panel_outer_frames[index].config(width=current_width)
             self.panel_outer_frames[index].place(
                 x=0, y=button_height, relheight=1, height=-button_height,
             )
-            self.frame1.after(10, self.animate_panel_close, index, current_width - 10)
+            self.frame1.after(10, self.animate_panel_close, index, current_width - 10, token, on_complete)
         else:
             self.panel_outer_frames[index].place_forget()
-            # Volver a achicar frame1 al ancho de solo la barra de
-            # íconos (ver comentario de geometría en open_panel).
-            icon_width = max(self.icon_frame.winfo_width(), 40)
-            self.frame1.config(width=icon_width)
-            self.is_animating = False
+            if on_complete is None:
+                icon_width = max(self.icon_frame.winfo_width(), 40)
+                self.frame1.config(width=icon_width)
+                self.is_animating = False
+            else:
+                on_complete()
 
     def hide_all_frames(self):
         """Oculta todos los paneles desplegables. Actúa sobre los
@@ -2379,7 +2430,7 @@ class SombraApp:
         sombra_frame.pack(side=tk.LEFT, padx=50, pady=10)
 
         self.lbl_dimensiones_calculo = tk.Label(
-            #sombra_frame, text="Dimensiones del Área de Cálculo: N/A", font=("Arial", 12, "bold")
+            #sombra_frame, text="Área de Cálculo: N/A", font=("Arial", 12, "bold")
             sombra_frame,
             text="Dimensiones del Área de Cálculo: N/A",
             font=("Arial", 9, "bold"),
@@ -2389,7 +2440,7 @@ class SombraApp:
         self.lbl_dimensiones_calculo.pack(pady=5)
 
         self.lbl_dimensiones_referencia = tk.Label(
-            #sombra_frame, text="Dimensiones del Área de Referencia: N/A", font=("Arial", 12, "bold")
+            #sombra_frame, text="Área de Referencia: N/A", font=("Arial", 12, "bold")
             sombra_frame,
             text="Dimensiones del Área de Referencia: N/A",
             font=("Arial", 9, "bold"),
