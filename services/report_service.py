@@ -44,6 +44,19 @@ def generar_informe_proyecto(app, project, output_path: str) -> str:
             snapshots, os.path.join(analisis_dir, "comparativo_elementos.png"),
         )
 
+    dispersion_path, pendiente, r2 = analysis_service.dispersión_sombra_tmrt(
+        snapshots, os.path.join(analisis_dir, "dispersion_sombra_tmrt.png"),
+    )
+
+    # NUEVO: tabla también en Excel, junto al PDF en la misma carpeta.
+    if snapshots:
+        try:
+            analysis_service.exportar_tabla_excel(
+                snapshots, os.path.join(analisis_dir, "elementos_proyecto.xlsx"),
+            )
+        except Exception as exc:
+            print(f"[informe] No se pudo exportar la tabla a Excel: {exc}")
+
     sensibilidad_path = None
     try:
         from shadow_temp import Temperatura
@@ -105,6 +118,16 @@ def generar_informe_proyecto(app, project, output_path: str) -> str:
         pdf.set_font("Arial", "B", 14)
         pdf.cell(0, 10, txt="Comparacion entre elementos del proyecto", ln=True)
         pdf.image(comparativo_path, x=10, y=None, w=180)
+
+    # --- Dispersión real (datos del proyecto) ---
+    if dispersion_path and os.path.exists(dispersion_path):
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 10, txt="Dispersion real: % de sombra vs. Delta Tmrt", ln=True)
+        if pendiente is not None and r2 is not None:
+            pdf.set_font("Arial", "", 10)
+            pdf.cell(0, 7, txt=f"Tendencia lineal: pendiente {pendiente:.3f}  |  R2 {r2:.2f}", ln=True)
+        pdf.image(dispersion_path, x=25, y=None, w=150)
 
     # --- Curva de sensibilidad ---
     if sensibilidad_path and os.path.exists(sensibilidad_path):

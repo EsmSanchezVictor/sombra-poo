@@ -739,6 +739,49 @@
         }
       ],
       "file_attributes": {}
+    },
+    "istockphoto-930082108-612x612_v2.jpg42174": {
+      "filename": "istockphoto-930082108-612x612_v2.jpg",
+      "size": 42174,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              233,
+              109,
+              56,
+              23,
+              22,
+              80,
+              132,
+              152,
+              185,
+              201,
+              227,
+              247,
+              260
+            ],
+            "all_points_y": [
+              288,
+              289,
+              287,
+              314,
+              321,
+              313,
+              315,
+              310,
+              302,
+              297,
+              307,
+              304,
+              304
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
     }
   },
   "_via_attributes": {
@@ -768,6 +811,7 @@
     "elemento2.jpg1035628",
     "elemento3.jpg1035628",
     "20250504_152602_v2.jpg66018",
-    "elemento2.jpg65897"
+    "elemento2.jpg65897",
+    "istockphoto-930082108-612x612_v2.jpg42174"
   ]
 }

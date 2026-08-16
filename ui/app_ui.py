@@ -29,6 +29,8 @@ from temp_graph import TemperatureGraph
 from services.solar_engine import SolarEngine
 from services import analysis_service
 from services import report_service
+from ui import icon_factory
+from ui import theme
 from ui.menu_bar import MenuBar
 from utils import export_to_excel
 import diseño as design
@@ -40,6 +42,17 @@ class SombraApp:
 
         self.root = root
         self.root.title("Distribución Grid")
+        # NUEVO: la ventana arranca siempre maximizada. Antes se creaba
+        # con el tamaño por defecto de Tk (chico, sin geometría propia)
+        # — con layouts complejos como el de esta app, eso generaba
+        # huecos en blanco y contenido apretado, como el de la captura.
+        try:
+            self.root.state("zoomed")  # Windows / algunos WMs de Linux
+        except tk.TclError:
+            try:
+                self.root.attributes("-zoomed", True)  # X11
+            except tk.TclError:
+                pass
         self.modo = None  # 'arbol', 'estructura'
         self.elemento_temporal = None
 
@@ -51,13 +64,13 @@ class SombraApp:
         self.frame4 = tk.Frame(root, bg="yellow", width=100, height=100)
         self.frame5 = tk.Frame(root, bg="purple", width=100, height=100)
         self.frame6 = tk.Frame(root, bg="orange", width=100, height=1) """
-        # Paleta de colores suave para toda la interfaz
-        self.palette = {
-            "background": "#f5f7fb",
-            "panel": "#ffffff",
-            "accent": "#e6ebf5",
-            "border": "#d6dce8",
-        }
+        # Paleta de colores para toda la interfaz — centralizada en
+        # ui/theme.py (antes vivía duplicada acá con solo 4 colores;
+        # ahora además hay vocabulario con intención: primario, éxito,
+        # texto — en vez de códigos hex sueltos repetidos en cada
+        # pantalla).
+        self.palette = dict(theme.PALETA)
+        self.style = theme.aplicar_tema(self.root, self.palette)
 
         self.root.configure(bg=self.palette["background"])
         base_dir = os.path.dirname(os.path.dirname(__file__))
@@ -341,6 +354,7 @@ class SombraApp:
 
         # Inicializar componentes
         self.menu_bar.setup()
+        self.setup_ribbon()
         self.setup_status_bar()
         self.resultados(self.frame4)
         self.temp_sombra(self.frame5)
@@ -358,66 +372,104 @@ class SombraApp:
         self.canvas1.mpl_connect('button_release_event', self.shape_selector.on_mouse_release)
     
     def setup_startup_screen(self):
+        """Pantalla de inicio — REDISEÑADA.
+
+        Antes: título + subtítulo + 2 botones + unidades, todo gridado
+        pegado arriba-izquierda de startup_frame, sin nada que centre
+        el contenido — con la ventana grande (ahora maximizada por
+        defecto) eso dejaba mucho espacio en blanco alrededor, y con
+        una ventana chica el contenido se veía apretado (la captura que
+        compartiste). Ahora es una tarjeta centrada, con logo y
+        jerarquía tipográfica clara (Heading/Muted de ui/theme.py) —
+        se ve igual de bien maximizada o no.
+        """
         for widget in self.startup_frame.winfo_children():
             widget.destroy()
+        self.startup_frame.configure(bg=self.palette["background"])
+        self.startup_frame.grid_rowconfigure(0, weight=1)
         self.startup_frame.grid_columnconfigure(0, weight=1)
-        title = tk.Label(
-            self.startup_frame,
-            text="Gestión de proyectos",
-            bg=self.palette["panel"],
-            font=("Arial", 12, "bold"),
-        )
-        title.grid(row=0, column=0, padx=20, pady=(20, 8))
-        tk.Label(
-            self.startup_frame,
-            text="Para continuar, cree o abra un proyecto.",
-            bg=self.palette["panel"],
-        ).grid(row=1, column=0, padx=20, pady=(0, 16))
-        tk.Button(
-            self.startup_frame,
-            text="Crear proyecto",
-            command=self.new_project,
-            bg="#4CAF50",
-            fg="white",
-            width=20,
-        ).grid(row=2, column=0, pady=6)
-        tk.Button(
-            self.startup_frame,
-            text="Abrir proyecto",
-            command=self.open_project,
-            bg="#4CAF50",
-            fg="white",
-            width=20,
-        ).grid(row=3, column=0, pady=(0, 16))
 
-        units_frame = tk.Frame(self.startup_frame, bg=self.palette["panel"])
-        units_frame.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 16))
-        units_frame.grid_columnconfigure(0, weight=1)
-
-        tk.Label(units_frame, text="Primeras configuraciones", bg=self.palette["panel"], font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 6)
+        card = tk.Frame(
+            self.startup_frame, bg=self.palette["panel"],
+            highlightbackground=self.palette["border"], highlightthickness=1,
         )
-        tk.Label(units_frame, text="Temperatura", bg=self.palette["panel"]).grid(row=1, column=0, sticky="w")
+        card.grid(row=0, column=0)
+        card.grid_columnconfigure(0, weight=1)
+
+        logo = icon_factory.obtener_icono("logo", size=56, color=self.palette["primario"])
+        logo_lbl = tk.Label(card, image=logo, bg=self.palette["panel"])
+        logo_lbl.image = logo
+        logo_lbl.grid(row=0, column=0, pady=(30, 10))
+
+        ttk.Label(
+            card, text="Análisis de sombra y confort térmico",
+            style="Heading.TLabel",
+        ).grid(row=1, column=0, padx=40, pady=(0, 2))
+        ttk.Label(
+            card, text="Creá o abrí un proyecto para empezar.",
+            style="Muted.TLabel",
+        ).grid(row=2, column=0, padx=40, pady=(0, 22))
+
+        ttk.Button(
+            card, text="Crear proyecto nuevo", style="Success.TButton",
+            command=self.new_project, width=26,
+        ).grid(row=3, column=0, padx=40, pady=(0, 8))
+        ttk.Button(
+            card, text="Abrir proyecto existente", style="Primary.TButton",
+            command=self.open_project, width=26,
+        ).grid(row=4, column=0, padx=40, pady=(0, 30))
+
+    def _mostrar_dialogo_primeras_configuraciones(self, on_continuar):
+        """NUEVO. Antes "Primeras configuraciones" (unidades de
+        temperatura/distancia) vivía siempre visible en la pantalla de
+        inicio, incluso antes de elegir crear o abrir algo. Ahora es un
+        paso propio que solo aparece al elegir "Nuevo proyecto" — tiene
+        sentido ahí porque son las unidades CON LAS QUE se va a trabajar
+        ese proyecto, no una configuración global de la pantalla vacía.
+        """
+        dialogo = tk.Toplevel(self.root)
+        dialogo.title("Primeras configuraciones")
+        dialogo.configure(bg=self.palette["panel"])
+        dialogo.transient(self.root)
+        dialogo.grab_set()
+        dialogo.resizable(False, False)
+
+        ttk.Label(
+            dialogo, text="Primeras configuraciones", style="Heading.TLabel",
+        ).grid(row=0, column=0, padx=24, pady=(18, 4), sticky="w")
+        ttk.Label(
+            dialogo, text="Unidades de trabajo para el proyecto nuevo.",
+            style="Muted.TLabel",
+        ).grid(row=1, column=0, padx=24, pady=(0, 14), sticky="w")
+
+        ttk.Label(dialogo, text="Temperatura").grid(row=2, column=0, padx=24, sticky="w")
         temp_combo = ttk.Combobox(
-            units_frame,
-            textvariable=self.temp_unit,
-            values=["C", "F", "K"],
-            state="readonly",
-            width=10,
+            dialogo, textvariable=self.temp_unit, values=["C", "F", "K"],
+            state="readonly", width=10,
         )
-        temp_combo.grid(row=2, column=0, sticky="w", pady=(2, 8))
-        temp_combo.bind("<<ComboboxSelected>>", lambda _e: self._save_unit_settings())
+        temp_combo.grid(row=3, column=0, padx=24, pady=(2, 10), sticky="w")
 
-        tk.Label(units_frame, text="Distancia", bg=self.palette["panel"]).grid(row=3, column=0, sticky="w")
+        ttk.Label(dialogo, text="Distancia").grid(row=4, column=0, padx=24, sticky="w")
         distance_combo = ttk.Combobox(
-            units_frame,
-            textvariable=self.distance_unit,
+            dialogo, textvariable=self.distance_unit,
             values=["cm", "m", "km", "in", "ft", "yd", "mi"],
-            state="readonly",
-            width=10,
+            state="readonly", width=10,
         )
-        distance_combo.grid(row=4, column=0, sticky="w", pady=(2, 0))
-        distance_combo.bind("<<ComboboxSelected>>", lambda _e: self._save_unit_settings())
+        distance_combo.grid(row=5, column=0, padx=24, pady=(2, 18), sticky="w")
+
+        def _continuar():
+            self._save_unit_settings()
+            dialogo.destroy()
+            on_continuar()
+
+        botones = tk.Frame(dialogo, bg=self.palette["panel"])
+        botones.grid(row=6, column=0, padx=24, pady=(0, 18), sticky="e")
+        ttk.Button(botones, text="Cancelar", command=dialogo.destroy).pack(side="left", padx=6)
+        ttk.Button(
+            botones, text="Continuar", command=_continuar, style="Success.TButton",
+        ).pack(side="left")
+
+        dialogo.protocol("WM_DELETE_WINDOW", dialogo.destroy)
 
     def show_startup_screen(self):
         self.hide_all_frames()
@@ -1591,8 +1643,12 @@ class SombraApp:
             button.grid(row=i, column=0, sticky="ew")
 
     def new_project(self):
-        """Crea un proyecto nuevo utilizando ProjectManager."""
-        self.project_manager.new_project()
+        """Crea un proyecto nuevo. Pide primero las unidades de trabajo
+        (ver _mostrar_dialogo_primeras_configuraciones) — ese paso ya no
+        vive suelto en la pantalla de inicio, solo aparece acá."""
+        self._mostrar_dialogo_primeras_configuraciones(
+            on_continuar=self.project_manager.new_project
+        )
 
     def open_project(self):
         """Abre un proyecto utilizando ProjectManager."""
@@ -1888,7 +1944,7 @@ class SombraApp:
 
         ventana = tk.Toplevel(self.root)
         ventana.title("Análisis comparativo del proyecto")
-        ventana.geometry("720x680")
+        ventana.geometry("720x950")
 
         s = resumen["porcentaje_sombra"]
         d = resumen["delta_tmrt"]
@@ -1907,11 +1963,53 @@ class SombraApp:
                  font=("Arial", 10)).pack(fill="x", padx=12, pady=10)
 
         img = Image.open(resultado)
-        img.thumbnail((680, 560))
+        img.thumbnail((680, 400))
         photo = ImageTk.PhotoImage(img)
         lbl = tk.Label(ventana, image=photo)
         lbl.image = photo
         lbl.pack(padx=10, pady=5)
+
+        # NUEVO: dispersión real % sombra vs. ΔTmrt con línea de
+        # tendencia — a diferencia de la curva de sensibilidad (teórica,
+        # según el modelo), esto usa los datos reales ya calculados de
+        # cada elemento del proyecto.
+        scatter_path = safe_path(analisis_dir, "dispersion_sombra_tmrt.png")
+        scatter_result, pendiente, r2 = analysis_service.dispersión_sombra_tmrt(
+            self.snapshots, str(scatter_path),
+        )
+        if scatter_result:
+            self.last_scatter_chart_path = str(scatter_result)
+            img2 = Image.open(scatter_result)
+            img2.thumbnail((680, 400))
+            photo2 = ImageTk.PhotoImage(img2)
+            lbl2 = tk.Label(ventana, image=photo2)
+            lbl2.image = photo2
+            lbl2.pack(padx=10, pady=5)
+        else:
+            tk.Label(
+                ventana,
+                text="(Se necesitan al menos 2 elementos con % de sombra y ΔTmrt "
+                     "para la dispersión real)",
+                fg="#888888",
+            ).pack(pady=5)
+
+        tk.Button(
+            ventana, text="Exportar tabla a Excel…",
+            command=lambda: self._exportar_tabla_elementos_excel(analisis_dir),
+        ).pack(pady=(4, 12))
+
+    def _exportar_tabla_elementos_excel(self, analisis_dir: str):
+        """NUEVO. Exporta self.snapshots a Excel en resultados/analisis/."""
+        if not self.snapshots:
+            messagebox.showinfo("Exportar tabla", "No hay elementos para exportar.")
+            return
+        chart_path = safe_path(analisis_dir, "elementos_proyecto.xlsx")
+        try:
+            resultado = analysis_service.exportar_tabla_excel(self.snapshots, str(chart_path))
+        except Exception as exc:
+            messagebox.showerror("Exportar tabla", f"No se pudo exportar: {exc}")
+            return
+        messagebox.showinfo("Exportar tabla", f"Tabla exportada a:\n{resultado}")
 
     def mostrar_curva_sensibilidad(self):
         """NUEVO. Grafica cómo responde el Tmrt en sombra al % de sombra
@@ -1997,6 +2095,75 @@ class SombraApp:
     def _open_link(self, label, url):
         """Muestra un mensaje informativo para enlaces externos."""
         messagebox.showinfo("Enlace", f"Abrir {label}: {url}")
+    def setup_ribbon(self):
+        """NUEVO: barra de herramientas con íconos agrupados por
+        categoría (Archivo / Escena / Modelo / Análisis), con etiqueta
+        debajo de cada ícono — mismo lenguaje visual que las barras de
+        herramientas de software técnico (CAD, edición de imagen, etc.)
+        en vez de depender solo del menú de texto.
+
+        Es ADITIVA: no reemplaza el menú ni el selector de paneles
+        lateral (self.icon_frame/self.buttons) — llama exactamente a
+        los mismos métodos, así que cualquiera de los dos caminos
+        funciona igual y no hay lógica duplicada que pueda desincronizarse.
+        """
+        ribbon = tk.Frame(self.frame0, bg=self.palette["panel"])
+        ribbon.pack(fill="x", padx=4, pady=(2, 0))
+
+        def _grupo(nombre):
+            contenedor = tk.Frame(ribbon, bg=self.palette["panel"])
+            contenedor.pack(side="left", padx=(6, 2), pady=2)
+            botones = tk.Frame(contenedor, bg=self.palette["panel"])
+            botones.pack(side="top")
+            tk.Label(
+                contenedor, text=nombre, bg=self.palette["panel"],
+                fg="#8a8f9c", font=("Arial", 7),
+            ).pack(side="top", pady=(1, 0))
+            return botones
+
+        def _boton(padre, icono, texto, comando):
+            marco = tk.Frame(padre, bg=self.palette["panel"])
+            marco.pack(side="left", padx=3)
+            btn = tk.Button(
+                marco, image=icono, command=comando, relief=tk.FLAT,
+                bg=self.palette["panel"], activebackground=self.palette["accent"],
+                cursor="hand2",
+            )
+            btn.image = icono  # evita que el ícono se libere (bug clásico de Tkinter)
+            theme.dar_hover(btn, self.palette["panel"], self.palette["accent"])
+            btn.pack()
+            tk.Label(
+                marco, text=texto, bg=self.palette["panel"], fg="#4a4f63",
+                font=("Arial", 7),
+            ).pack()
+            return btn
+
+        def _separador():
+            tk.Frame(ribbon, bg=self.palette["border"], width=1).pack(
+                side="left", fill="y", padx=4, pady=4)
+
+        grupo_archivo = _grupo("Archivo")
+        _boton(grupo_archivo, icon_factory.obtener_icono("nuevo"), "Nuevo", self.new_project)
+        _boton(grupo_archivo, icon_factory.obtener_icono("abrir"), "Abrir", self.open_project)
+        _boton(grupo_archivo, icon_factory.obtener_icono("guardar"), "Guardar", self.save_project)
+        _separador()
+
+        grupo_escena = _grupo("Escena")
+        _boton(grupo_escena, self.images[0], "Temp.", lambda: self.open_panel(1))
+        _boton(grupo_escena, self.images[1], "Sombra", lambda: self.open_panel(2))
+        _boton(grupo_escena, self.images[2], "Edición", lambda: self.open_panel(3))
+        _boton(grupo_escena, self.images[3], "Modelo", lambda: self.open_panel(4))
+        _separador()
+
+        grupo_modelo = _grupo("Modelo")
+        _boton(grupo_modelo, icon_factory.obtener_icono("play"), "Ejecutar", self.run_model_for_active_panel)
+        _separador()
+
+        grupo_analisis = _grupo("Análisis")
+        _boton(grupo_analisis, icon_factory.obtener_icono("barras"), "Comparar", self.mostrar_analisis_comparativo)
+        _boton(grupo_analisis, icon_factory.obtener_icono("curva"), "Sensib.", self.mostrar_curva_sensibilidad)
+        _boton(grupo_analisis, icon_factory.obtener_icono("pdf"), "Informe", self.generar_informe_completo)
+
     def setup_status_bar(self):
         self.frame6.configure(bg=self.palette["accent"])
         username = getattr(self, "username", "Usuario")

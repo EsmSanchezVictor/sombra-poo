@@ -26,6 +26,39 @@ class AppState:
     def __init__(self, app):
         self.app = app
 
+    @staticmethod
+    def _build_resumen_estadistico(snapshots: list) -> dict:
+        """Estadística descriptiva (n, media, mín, máx, desvío) de %
+        de sombra y ΔTmrt, cacheada en el JSON del proyecto. Se
+        recalcula en cada guardado (es barato) — evita que alguien que
+        abra el .sombra a mano tenga que recalcularla, y deja una
+        referencia rápida sin abrir la app.
+
+        Duplica la lógica de services/analysis_service.py::
+        resumen_estadistico() a propósito: ese módulo importa cosas de
+        UI/matplotlib que no queremos como dependencia de core/.
+        """
+        sombras = [s["porcentaje_sombra"] for s in snapshots if isinstance(s.get("porcentaje_sombra"), (int, float))]
+        deltas = [s["delta_tmrt"] for s in snapshots if isinstance(s.get("delta_tmrt"), (int, float))]
+
+        def _stats(values):
+            if not values:
+                return {"n": 0, "media": None, "min": None, "max": None, "desvio": None}
+            arr = np.array(values, dtype=float)
+            return {
+                "n": int(arr.size),
+                "media": float(np.mean(arr)),
+                "min": float(np.min(arr)),
+                "max": float(np.max(arr)),
+                "desvio": float(np.std(arr)),
+            }
+
+        return {
+            "n_elementos": len(snapshots),
+            "porcentaje_sombra": _stats(sombras),
+            "delta_tmrt": _stats(deltas),
+        }
+
     def build_payload(self, project) -> dict:
         saved_at = datetime.now().isoformat(timespec="seconds")
         meta = ProjectMeta(name=project.name, saved_at=saved_at)
@@ -68,6 +101,7 @@ class AppState:
                 "objects": [self.scene_object_to_dict(obj) for obj in scene_objects],
             },
             "snapshots": getattr(self.app, "snapshots", []),
+            "resumen_estadistico": self._build_resumen_estadistico(getattr(self.app, "snapshots", [])),
         }
 
     def apply_payload(self, payload: dict) -> None:

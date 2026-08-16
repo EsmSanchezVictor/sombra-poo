@@ -74,6 +74,73 @@ def grafico_comparativo(snapshots: list, output_path: str, temp_unit: str = "°C
     return output_path
 
 
+def dispersión_sombra_tmrt(snapshots: list, output_path: str, temp_unit: str = "°C"):
+    """Dispersión real % de sombra vs. ΔTmrt de los elementos del
+    proyecto, con línea de tendencia (regresión lineal simple). A
+    diferencia de curva_sensibilidad() (puramente teórica, according al
+    modelo), esto usa los DATOS REALES ya calculados de cada elemento
+    — permite ver si la relación sombra→ΔTmrt se comporta como el
+    modelo predice o si hay dispersión/outliers en la práctica.
+
+    Devuelve (output_path, pendiente, r2) o (None, None, None) si no
+    hay al menos 2 elementos con ambos datos.
+    """
+    puntos = [
+        (s["porcentaje_sombra"], s["delta_tmrt"]) for s in snapshots
+        if isinstance(s.get("porcentaje_sombra"), (int, float))
+        and isinstance(s.get("delta_tmrt"), (int, float))
+    ]
+    if len(puntos) < 2:
+        return None, None, None
+
+    x = np.array([p[0] for p in puntos], dtype=float)
+    y = np.array([p[1] for p in puntos], dtype=float)
+
+    pendiente, ordenada = np.polyfit(x, y, 1)
+    y_pred = pendiente * x + ordenada
+    ss_res = float(np.sum((y - y_pred) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot > 1e-9 else 0.0
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    cmap = plt.get_cmap(CMAP_TEMPERATURA)
+    ax.scatter(x, y, c=[cmap(v / 100) for v in x], edgecolors="0.3", s=70, zorder=3)
+    x_linea = np.linspace(x.min(), x.max(), 50)
+    ax.plot(x_linea, pendiente * x_linea + ordenada, color="firebrick", linewidth=1.5,
+            label=f"Tendencia: ΔTmrt ≈ {pendiente:.3f}·sombra {ordenada:+.2f}  (R²={r2:.2f})")
+    ax.set_xlabel("% de sombra (dato real del elemento)")
+    ax.set_ylabel(f"ΔTmrt real ({temp_unit})")
+    ax.set_title("Dispersión real: % de sombra vs. ΔTmrt\n(datos de los elementos del proyecto)", fontsize=FONT_TITULO)
+    ax.legend(fontsize=FONT_ANOTACION, loc="best")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    return output_path, float(pendiente), float(r2)
+
+
+def exportar_tabla_excel(snapshots: list, output_path: str) -> str:
+    """Exporta la tabla de elementos analizados a Excel — mismas
+    columnas que la tabla del informe PDF, para quien prefiera analizar
+    los datos en otra herramienta (Excel, pandas, R, lo que sea)."""
+    import pandas as pd
+
+    filas = []
+    for entry in snapshots:
+        filas.append({
+            "Elemento": entry.get("label", "N/D"),
+            "% sombra": entry.get("porcentaje_sombra"),
+            "Tmrt sol (°C)": entry.get("tmrt_sol"),
+            "Tmrt sombra (°C)": entry.get("tmrt_sombra"),
+            "Delta Tmrt (°C)": entry.get("delta_tmrt"),
+            "Temp. ambiente (°C)": entry.get("temp_ambient"),
+            "Fecha": entry.get("timestamp"),
+        })
+    df = pd.DataFrame(filas)
+    df.to_excel(output_path, index=False)
+    return output_path
+
+
 def curva_sensibilidad(temp_calculator, temp_ambient: float, fecha, hora: float,
                         output_path: str, shadow_type: str = "tree", temp_unit: str = "°C"):
     """Recorre 0-100% de sombra con la ubicación/fecha/hora/temperatura
