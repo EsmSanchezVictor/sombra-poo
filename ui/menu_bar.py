@@ -1,7 +1,14 @@
 """Construcción de la barra de menús y atajos.
 
-CAMBIO: "Abrir Panel 4 (Modelo)" llamaba a `open_panel(3)` (copy-paste
-del ítem de arriba) — corregido a `open_panel(4)`.
+CORRECCIÓN: open_panel() indexa directo en self.panel_frames (4
+elementos, índices 0-3) — los ítems de este menú usaban 1-4, lo que
+hacía que "Panel 4 (Modelo)" quedara fuera de rango (IndexError) y que
+"Panel 1/2/3" abrieran cada uno el panel siguiente al que decía la
+etiqueta. Un "fix" anterior en esta misma sección había cambiado
+"Panel 4" de open_panel(3) a open_panel(4) pensando que era un
+copy-paste — en realidad open_panel(3) ERA el valor correcto (0-based),
+lo que estaba mal era el texto del label, no el índice. Corregido acá
+de raíz, junto con Panel 1/2/3.
 
 Los enlaces de "Manual de usuario" y "Guía rápida" siguen apuntando a
 `https://www.example.com` — quedan como constantes al inicio del
@@ -60,10 +67,10 @@ class MenuBar:
 
         escena_menu = tk.Menu(menu_bar, tearoff=0)
         paneles_menu = tk.Menu(escena_menu, tearoff=0)
-        paneles_menu.add_command(label="Abrir Panel 1", command=lambda: self.app.open_panel(1))
-        paneles_menu.add_command(label="Abrir Panel 2", command=lambda: self.app.open_panel(2))
-        paneles_menu.add_command(label="Abrir Panel 3 (Modo diseño)", command=lambda: self.app.open_panel(3))
-        paneles_menu.add_command(label="Abrir Panel 4 (Modelo)", command=lambda: self.app.open_panel(4))  # antes: open_panel(3)
+        paneles_menu.add_command(label="Abrir Panel 1", command=lambda: self.app.open_panel(0))
+        paneles_menu.add_command(label="Abrir Panel 2", command=lambda: self.app.open_panel(1))
+        paneles_menu.add_command(label="Abrir Panel 3 (Modo diseño)", command=lambda: self.app.open_panel(2))
+        paneles_menu.add_command(label="Abrir Panel 4 (Modelo)", command=lambda: self.app.open_panel(3))
         escena_menu.add_cascade(label="Paneles", menu=paneles_menu)
         escena_menu.add_separator()
         escena_menu.add_command(label="Mostrar frames Panel 2", command=self.app.show_panel2_frames)

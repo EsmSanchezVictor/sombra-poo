@@ -782,6 +782,64 @@
         }
       ],
       "file_attributes": {}
+    },
+    "aunque-no-exista-un-arbol-que-no-ensucie-en-U5ZHLIDSWJFPJMRELBGGE56IL4_v2.jpg393542": {
+      "filename": "aunque-no-exista-un-arbol-que-no-ensucie-en-U5ZHLIDSWJFPJMRELBGGE56IL4_v2.jpg",
+      "size": 393542,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              104,
+              472,
+              800,
+              852,
+              775,
+              715,
+              314,
+              181
+            ],
+            "all_points_y": [
+              1042,
+              1063,
+              1054,
+              1037,
+              990,
+              901,
+              901,
+              952
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
+    },
+    "plidtjuw_v2.jpg420004": {
+      "filename": "plidtjuw_v2.jpg",
+      "size": 420004,
+      "regions": [
+        {
+          "shape_attributes": {
+            "name": "polygon",
+            "all_points_x": [
+              872,
+              1669,
+              1697,
+              802
+            ],
+            "all_points_y": [
+              1258,
+              1405,
+              1531,
+              1559
+            ]
+          },
+          "region_attributes": {}
+        }
+      ],
+      "file_attributes": {}
     }
   },
   "_via_attributes": {
@@ -812,6 +870,8 @@
     "elemento3.jpg1035628",
     "20250504_152602_v2.jpg66018",
     "elemento2.jpg65897",
-    "istockphoto-930082108-612x612_v2.jpg42174"
+    "istockphoto-930082108-612x612_v2.jpg42174",
+    "aunque-no-exista-un-arbol-que-no-ensucie-en-U5ZHLIDSWJFPJMRELBGGE56IL4_v2.jpg393542",
+    "plidtjuw_v2.jpg420004"
   ]
 }

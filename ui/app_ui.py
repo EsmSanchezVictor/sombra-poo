@@ -287,10 +287,21 @@ class SombraApp:
         self.curva_photo = None
         self.curva_img_pil_original = None
         #self.frame1 = frame1
-        self.panel_width =  min(int(self.frame1.winfo_screenwidth() / 6), self.frame1.winfo_width())
 
-        # Crear un frame para los iconos (botones), inicialmente vertical a la izquierda
-        """self.icon_frame = tk.Frame(self.frame1)"""
+        # --- Ancho del panel desplegable -----------------------------
+        # panel_width se calcula UNA sola vez acá: el menor entre 1/6
+        # del ancho de pantalla y el ancho actual de frame1. En este
+        # punto de __init__ frame1 todavía no se dibujó en pantalla, así
+        # que frame1.winfo_width() puede devolver un valor chico/no
+        # definitivo — si el panel se ve angosto o ancho de más al
+        # ajustarlo, este es el número a tocar (o reemplazarlo por una
+        # constante fija en píxeles, ej. 260).
+        self.panel_width = min(int(self.frame1.winfo_screenwidth() / 6), self.frame1.winfo_width())
+
+        # --- Barra de íconos lateral (columna 0 de frame1) -----------
+        # Se queda siempre en column=0 de frame1; los paneles se abren
+        # A LA DERECHA de esta barra (ver open_panel/animate_panel_open
+        # más abajo, sección "GEOMETRÍA").
         self.icon_frame = tk.Frame(self.frame1, bg=self.palette["background"])
         self.icon_frame.grid(row=0, column=0, sticky="ns")
 
@@ -304,7 +315,15 @@ class SombraApp:
 
         # Lista de botones que representan los iconos
         self.buttons = []
+        # self.panel_frames: frame de CONTENIDO de cada panel (acá es
+        # donde setup_panel_1/2/3/4 empacan sus widgets — sin cambios
+        # en esas funciones). Vive DENTRO de un Canvas con scrollbar.
         self.panel_frames = []
+        # self.panel_outer_frames: frame FÍSICO de cada panel — es el
+        # que se anima (ancho creciente/decreciente) y se posiciona con
+        # .place() debajo de la barra de íconos. Acá NUNCA se empacan
+        # widgets directamente.
+        self.panel_outer_frames = []
 
         # Crear 4 botones que actuarán como iconos y 4 paneles
         for i in range(4):
@@ -313,10 +332,18 @@ class SombraApp:
             btn.grid(row=i, column=0, pady=0, padx=0, sticky="ew")
             self.buttons.append(btn)
 
-        # Crear los paneles desplegables (inicialmente ocultos)
+        # --- Paneles desplegables (inicialmente ocultos) -------------
+        # Cada panel = 1 frame outer (animado/posicionado) que contiene
+        # un Canvas+Scrollbar vertical, y adentro el frame de contenido
+        # real. Esto es lo que arregla dos bugs reportados:
+        #   1) el panel quedaba parcialmente tapado por la barra de
+        #      íconos (frame1 no se agrandaba para darle lugar — ver
+        #      open_panel/close_panel), y
+        #   2) contenido más alto que la pantalla se perdía sin forma
+        #      de llegar a él (ahora hay scroll vertical con rueda del
+        #      mouse o la scrollbar).
         for i in range(4):
-            """panel = tk.Frame(self.frame1, bg="white", width=0, height=400)"""
-            panel = tk.Frame(
+            outer = tk.Frame(
                 self.frame1,
                 bg=self.palette["panel"],
                 width=0,
@@ -325,9 +352,10 @@ class SombraApp:
                 highlightthickness=1,
                 bd=0,
             )
-            panel.place(x=0, y=0, relheight=1)
-            panel.place_forget()
-            self.panel_frames.append(panel)
+            outer.place(x=0, y=0, relheight=1)
+            outer.place_forget()
+            self.panel_outer_frames.append(outer)
+            self.panel_frames.append(self._crear_panel_desplazable(outer))
 
         # Ocultar paneles al inicio
         self.hide_all_frames()
@@ -955,7 +983,7 @@ class SombraApp:
         # acá?") o cuando no se tiene una foto todavía. Si se deja vacío,
         # se sigue usando el % calculado desde la imagen, como antes.
         manual_label = tk.Label(
-            panel, text="Porcentaje de sombra manual (%, opcional):",
+            panel, text="Porcentaje de sombra manual\n (%, opcional):",
             bg=panel.cget("bg"), fg="black",
         )
         manual_label.pack(anchor="w", padx=20, pady=(15, 5))
@@ -963,7 +991,7 @@ class SombraApp:
         self.entry_porcentaje_manual.pack(anchor="w", padx=20, pady=5)
         manual_hint = tk.Label(
             panel,
-            text="Si se completa, se usa en vez del % calculado en el Panel 2.",
+            text="Si se completa,\n se usa en vez del % calculado \n en el Panel 2.",
             bg=panel.cget("bg"), fg="#666666", font=("Arial", 8),
         )
         manual_hint.pack(anchor="w", padx=20, pady=(0, 5))
@@ -973,7 +1001,7 @@ class SombraApp:
             text="Calcular temperatura en sombra",
             command=self.calculate_temperature_in_shade,
         )
-        self.calculate_temp_button.pack(padx=20, pady=20)
+        self.calculate_temp_button.pack(anchor="w",padx=20, pady=10)
     def setup_panel_2(self):
         """Configura el contenido del Panel 2"""
         panel = self.panel_frames[1]
@@ -1553,6 +1581,59 @@ class SombraApp:
             self.last_T = result.get("T")
             self.last_shadow = result.get("shadow")
             self.last_meta = result.get("meta")
+    def _crear_panel_desplazable(self, contenedor):
+        """Envuelve el contenido de un panel lateral en un Canvas +
+        Scrollbar vertical.
+
+        POR QUÉ: los paneles 1, 2 y 4 tienen más controles de los que
+        entran en el alto de la pantalla — antes lo que no entraba
+        quedaba directamente invisible, sin ninguna forma de llegar a
+        eso (no había scroll). Ahora sí.
+
+        Devuelve el FRAME INTERNO donde hay que empacar los widgets del
+        panel — setup_panel_1/2/3/4 ya hacen exactamente eso
+        (`panel = self.panel_frames[i]` + `.pack(...)`), sin ningún
+        cambio en esas funciones.
+
+        AJUSTE DE ANCHO: el bind de "<Configure>" del canvas fuerza al
+        frame interno a medir lo mismo que el canvas visible — así los
+        widgets empacados con `fill="x"` (comboboxes, entries anchos)
+        se ajustan al ancho real del panel en vez de quedarse cortados
+        o sobrar espacio vacío a la derecha.
+        """
+        canvas = tk.Canvas(contenedor, bg=self.palette["panel"], highlightthickness=0)
+        scrollbar = tk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
+        contenido = tk.Frame(canvas, bg=self.palette["panel"])
+
+        # Cada vez que el contenido cambia de tamaño (se agregan/sacan
+        # widgets), actualizar la región scrolleable.
+        contenido.bind(
+            "<Configure>",
+            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        ventana_id = canvas.create_window((0, 0), window=contenido, anchor="nw")
+        # Ajuste de ancho (ver docstring): el frame interno copia el
+        # ancho del canvas cada vez que este cambia.
+        canvas.bind(
+            "<Configure>",
+            lambda e: canvas.itemconfig(ventana_id, width=e.width),
+        )
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Scroll con la rueda del mouse — se activa/desactiva solo
+        # mientras el puntero está sobre ESTE panel en particular, para
+        # no interceptar el scroll de otras partes de la ventana.
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
+        return contenido
+
     def toggle_panel(self, index):
         if not self.require_project("acceder a los paneles"):
             return
@@ -1568,10 +1649,23 @@ class SombraApp:
         else:
             self.open_panel(index)
     def open_panel(self, index):
+        """Abre (despliega) el panel lateral 'index' (0-3).
+
+        GEOMETRÍA (bug corregido): frame1 se crea con un ancho fijo de
+        apenas 100px — suficiente para la columna de íconos sola, pero
+        NO para columna de íconos + panel desplegado. Como los paneles
+        se ubican con .place() (que no fuerza a su contenedor a
+        agrandarse), el panel terminaba dibujándose más ancho que
+        frame1 y la parte que sobraba quedaba recortada/tapada por lo
+        que hay al lado. Acá se agranda frame1 al ancho real necesario
+        ANTES de animar la apertura; close_panel lo vuelve a achicar.
+        """
         if not self.require_project("acceder a los paneles"):
             return
         self.active_panel = index
         self.is_animating = True
+        icon_width = max(self.icon_frame.winfo_width(), 40)
+        self.frame1.config(width=icon_width + self.panel_width)
         self.animate_panel_open(index, 0)
         if index == 1:
             self.show_panel2_frames()
@@ -1581,32 +1675,67 @@ class SombraApp:
             self.show_modelo_frames()
         self.switch_buttons_to_horizontal()
         self.highlight_button(index)
-    def animate_panel_open(self, index, current_width):
-        button_height = self.icon_frame.winfo_height()
 
+    def animate_panel_open(self, index, current_width):
+        """Animación de apertura: el ANCHO del panel crece de a 10px
+        por frame hasta llegar a self.panel_width. Para tocar la
+        velocidad, ajustar el paso (+10) o el delay (after(10, ...)).
+
+        ALTURA (bug corregido): antes era relheight=1 (= 100% del alto
+        de frame1) posicionado en y=button_height — eso hace que el
+        panel mida MÁS que el espacio libre debajo de la barra de
+        íconos, y el sobrante (button_height píxeles) queda por debajo
+        del borde inferior real de la ventana, invisible. Con
+        height=-button_height, place() resta esa franja del alto total
+        (relheight y height se pueden combinar así), y el panel termina
+        exactamente al ras — de ahí en más, lo que no entra lo cubre el
+        scroll de _crear_panel_desplazable().
+        """
+        button_height = self.icon_frame.winfo_height()
         if current_width <= self.panel_width:
-            self.panel_frames[index].config(width=current_width)
-            self.panel_frames[index].place(x=0, y=button_height-90, relheight=1)#, rely=0.1
+            self.panel_outer_frames[index].config(width=current_width)
+            self.panel_outer_frames[index].place(
+                x=0, y=button_height, relheight=1, height=-button_height,
+            )
             self.frame1.after(10, self.animate_panel_open, index, current_width + 10)
         else:
             self.is_animating = False
+
     def close_panel(self, index):
         self.is_animating = True
         self.animate_panel_close(index, self.panel_width)
         self.reset_button(index)
         self.switch_buttons_to_vertical()
+
     def animate_panel_close(self, index, current_width):
+        """Igual que animate_panel_open pero decreciendo el ancho.
+        Mismo fix de altura (height=-button_height) — antes tenía,
+        ADEMÁS, un rely=0.1 mezclado con y=button_height que no tenía
+        relación con cómo se abría el panel (asimetría entre abrir y
+        cerrar); se sacó para que ambas animaciones usen exactamente la
+        misma geometría."""
         button_height = self.icon_frame.winfo_height()
         if current_width > 0:
-            self.panel_frames[index].config(width=current_width)
-            self.panel_frames[index].place(x=0, y=button_height, relheight=1, rely=0.1)
+            self.panel_outer_frames[index].config(width=current_width)
+            self.panel_outer_frames[index].place(
+                x=0, y=button_height, relheight=1, height=-button_height,
+            )
             self.frame1.after(10, self.animate_panel_close, index, current_width - 10)
         else:
-            self.panel_frames[index].place_forget()
+            self.panel_outer_frames[index].place_forget()
+            # Volver a achicar frame1 al ancho de solo la barra de
+            # íconos (ver comentario de geometría en open_panel).
+            icon_width = max(self.icon_frame.winfo_width(), 40)
+            self.frame1.config(width=icon_width)
             self.is_animating = False
+
     def hide_all_frames(self):
-        """Oculta todos los paneles desplegables."""
-        for frame in self.panel_frames:
+        """Oculta todos los paneles desplegables. Actúa sobre los
+        frames FÍSICOS (panel_outer_frames) — son los que están
+        realmente posicionados con .place(); los de contenido
+        (panel_frames) viven dentro de un Canvas y no necesitan
+        esconderse por separado."""
+        for frame in self.panel_outer_frames:
             frame.place_forget()
     def _toggle_frames(self, frames_to_show, frames_to_hide):
         for frame in frames_to_hide:
@@ -2149,10 +2278,10 @@ class SombraApp:
         _separador()
 
         grupo_escena = _grupo("Escena")
-        _boton(grupo_escena, self.images[0], "Temp.", lambda: self.open_panel(1))
-        _boton(grupo_escena, self.images[1], "Sombra", lambda: self.open_panel(2))
-        _boton(grupo_escena, self.images[2], "Edición", lambda: self.open_panel(3))
-        _boton(grupo_escena, self.images[3], "Modelo", lambda: self.open_panel(4))
+        _boton(grupo_escena, self.images[0], "Temp.", lambda: self.open_panel(0))
+        _boton(grupo_escena, self.images[1], "Sombra", lambda: self.open_panel(1))
+        _boton(grupo_escena, self.images[2], "Edición", lambda: self.open_panel(2))
+        _boton(grupo_escena, self.images[3], "Modelo", lambda: self.open_panel(3))
         _separador()
 
         grupo_modelo = _grupo("Modelo")
