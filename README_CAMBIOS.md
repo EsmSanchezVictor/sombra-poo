@@ -421,12 +421,15 @@ Cremaschi & Botta 2013; INTA).
 validación por campo, presencia y rangos de las 13 nativas, colores de
 copa por especie). Suite total: 63/63 verdes.
 
-### 5.8 Panel 2 — carrusel de elementos analizados en vez de historial de texto
+### 5.8 Panel 2 — carrusel de elementos analizados (ÁREA PROPIA)
 
-A pedido del usuario: se eliminaron el "Historial de elementos" del
-sidebar del Panel 2 y la caja de resultados del área principal, y se
-los reemplazó por un **carrusel de miniaturas** en la parte inferior
-del Panel 2 (`ui/app_ui.py::carrusel`):
+A pedido del usuario: se eliminó el "Historial de elementos" del
+sidebar del Panel 2 y el carrusel quedó como una **nueva área propia**
+en la parte inferior (`ui/app_ui.py::carrusel`), en una fila fija de la
+grilla (`frame15`, fila 4, `weight=0`) que **no interfiere con los
+tamaños fijos de las 4 secciones** (foto, curva, resultados y Tmrt —
+que conservan su grilla original, filas 1 y 2, y su caja de resultados
+con los labels de % de sombra):
 
 - Cada árbol/elemento analizado aparece como miniatura de su
   **histograma** (`resultados/histogramas/helementoN.png`); la
@@ -446,13 +449,12 @@ del Panel 2 (`ui/app_ui.py::carrusel`):
   snapshot_service.py::_serializar_patch`) y `cargar_snapshot` los
   reconstruye sobre la foto (`_restaurar_patch`), además de restaurar
   `ref_gray_mean` desde la matriz de referencia.
-- La fila de detalle del carrusel conserva los labels de resultados
-  (dimensiones, promedio de referencia, % de sombra) con los mismos
-  nombres de atributo, para no tocar los call sites existentes.
+- El carrusel se oculta junto con las demás secciones al cambiar de
+  modo (Diseño/Modelo) y vuelve a aparecer en el Panel 2.
 
 **Tests:** sin cambios de suite (63/63); validado por smoke completo
-(miniaturas, click con recarga total, desplazamiento y redibujado de
-áreas).
+(miniaturas, click con recarga total, desplazamiento, redibujado de
+áreas y ocultamiento por modo).
 
 ## 6. Pendiente — la refactorización grande
 

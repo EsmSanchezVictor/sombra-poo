@@ -232,6 +232,16 @@ class SombraApp:
             highlightbackground=self.palette["border"],
             highlightthickness=1,
         )
+        # Área propia del carrusel del Panel 2 (fila fija debajo de las
+        # 4 secciones, sin peso de grilla: no afecta sus tamaños).
+        self.frame15 = tk.Frame(
+            root,
+            bg=self.palette["panel"],
+            width=100,
+            height=130,
+            highlightbackground=self.palette["border"],
+            highlightthickness=1,
+        )
 
         # Ubicar frames
         self.frame0.grid(row=0, column=0, columnspan=3, sticky="nsew")
@@ -249,6 +259,7 @@ class SombraApp:
         self.frame12.grid(row=1, column=2, sticky="nsew")
         self.frame13.grid(row=2, column=1, sticky="nsew")
         self.frame14.grid(row=2, column=2, sticky="nsew")
+        self.frame15.grid(row=4, column=1, columnspan=2, sticky="ew")
         self.frame7.grid_remove()
         self.frame8.grid_remove()
         self.frame9.grid_remove()
@@ -257,6 +268,7 @@ class SombraApp:
         self.frame12.grid_remove()
         self.frame13.grid_remove()
         self.frame14.grid_remove()
+        self.frame15.grid_remove()
 
         self.startup_frame = tk.Frame(
             root,
@@ -268,6 +280,7 @@ class SombraApp:
         root.grid_rowconfigure(0, weight=0)
         root.grid_rowconfigure(1, weight=1)
         root.grid_rowconfigure(3, weight=0)
+        root.grid_rowconfigure(4, weight=0)  # carrusel: alto fijo, no crece
         root.grid_columnconfigure(0, weight=0)
         root.grid_columnconfigure(1, weight=1)
         root.grid_columnconfigure(2, weight=1)
@@ -428,7 +441,8 @@ class SombraApp:
         self.menu_bar.setup()
         self.setup_ribbon()
         self.setup_status_bar()
-        self.carrusel(self.frame4)
+        self.resultados(self.frame4)
+        self.carrusel(self.frame15)
         self.temp_sombra(self.frame5)
         self.imagen(self.frame2)
         self.curva_de_nivel(self.frame3)
@@ -1563,18 +1577,18 @@ class SombraApp:
             frame.grid()
     def show_panel2_frames(self):
         self._toggle_frames(
-            [self.frame2, self.frame3, self.frame4, self.frame5],
+            [self.frame2, self.frame3, self.frame4, self.frame5, self.frame15],
             [self.frame7, self.frame8, self.frame9, self.frame10, self.frame11, self.frame12, self.frame13, self.frame14],
         )
     def show_diseno_frames(self):
         self._toggle_frames(
             [self.frame7, self.frame8, self.frame9, self.frame10],
-            [self.frame2, self.frame3, self.frame4, self.frame5, self.frame11, self.frame12, self.frame13, self.frame14],
+            [self.frame2, self.frame3, self.frame4, self.frame5, self.frame11, self.frame12, self.frame13, self.frame14, self.frame15],
         )
     def show_modelo_frames(self):
         self._toggle_frames(
             [self.frame11, self.frame12, self.frame13, self.frame14],
-            [self.frame2, self.frame3, self.frame4, self.frame5, self.frame7, self.frame8, self.frame9, self.frame10],
+            [self.frame2, self.frame3, self.frame4, self.frame5, self.frame7, self.frame8, self.frame9, self.frame10, self.frame15],
         )
     def highlight_button(self, index):
         for i, button in enumerate(self.buttons):
@@ -2195,54 +2209,72 @@ class SombraApp:
             padx=12,
             pady=12,
         )
-    def carrusel(self, frame):
-        """Carrusel de elementos analizados (Panel 2, parte inferior).
-
-        Reemplaza la caja de resultados y el historial de texto: muestra
-        una miniatura del HISTOGRAMA de cada árbol/elemento analizado
-        (se agrega al generarse el histograma, vía self.snapshots). Un
-        click en una miniatura recarga la foto, las áreas dibujadas de
-        sombra y referencia, sus cálculos (% sombra y Tmrt) y el
-        histograma. La fila de detalle mantiene los labels de resultados
-        que usan el resto de la app.
-        """
+    def resultados(self, frame):
+        """Configura el área de resultados (sección fija del Panel 2)."""
         result_frame = self.create_card(frame)
         result_frame.pack(expand=True, fill='both', pady=5)
 
-        detalle = tk.Frame(result_frame, bg=self.palette["panel"])
-        detalle.pack(fill="x", padx=6, pady=(4, 2))
+        sombra_frame = tk.Frame(result_frame, bg=self.palette["panel"])
+        sombra_frame.pack(side=tk.LEFT, padx=50, pady=10)
 
         self.lbl_dimensiones_calculo = tk.Label(
-            detalle, text="Dimensiones del Área de Cálculo: N/A",
-            font=("Arial", 8, "bold"), bg=self.palette["panel"], fg="#2c3e50",
+            sombra_frame,
+            text="Dimensiones del Área de Cálculo: N/A",
+            font=("Arial", 9, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
         )
-        self.lbl_dimensiones_calculo.pack(side="left", padx=6)
-        self.lbl_dimensiones_referencia = tk.Label(
-            detalle, text="Dimensiones del Área de Referencia: N/A",
-            font=("Arial", 8, "bold"), bg=self.palette["panel"], fg="#2c3e50",
-        )
-        self.lbl_dimensiones_referencia.pack(side="left", padx=6)
-        self.lbl_promedio_referencia = tk.Label(
-            detalle, text="Promedio Gris Referencia: N/A",
-            font=("Arial", 8, "bold"), bg=self.palette["panel"], fg="#2c3e50",
-        )
-        self.lbl_promedio_referencia.pack(side="left", padx=6)
-        self.lbl_porcentaje_sombra = tk.Label(
-            detalle, text="Porcentaje de sombra: N/A",
-            font=("Arial", 8, "bold"), bg=self.palette["panel"], fg="#2c3e50",
-        )
-        self.lbl_porcentaje_sombra.pack(side="left", padx=6)
+        self.lbl_dimensiones_calculo.pack(pady=5)
 
-        # franja del carrusel con flechas de desplazamiento
+        self.lbl_dimensiones_referencia = tk.Label(
+            sombra_frame,
+            text="Dimensiones del Área de Referencia: N/A",
+            font=("Arial", 9, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
+        )
+        self.lbl_dimensiones_referencia.pack(pady=5)
+
+        self.lbl_promedio_referencia = tk.Label(
+            sombra_frame,
+            text="Promedio Gris Referencia: N/A",
+            font=("Arial", 9, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
+        )
+        self.lbl_promedio_referencia.pack(pady=5)
+
+        self.lbl_porcentaje_sombra = tk.Label(
+            sombra_frame,
+            text="Porcentaje de sombra: N/A",
+            font=("Arial", 9, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
+        )
+        self.lbl_porcentaje_sombra.pack(pady=5)
+
+    def carrusel(self, frame):
+        """Carrusel de elementos analizados — ÁREA PROPIA del Panel 2
+        (fila fija debajo de las 4 secciones; no modifica sus tamaños).
+
+        Muestra una miniatura del HISTOGRAMA de cada árbol/elemento
+        analizado (se agrega al generarse el histograma, vía
+        self.snapshots). Un click en una miniatura recarga la foto, las
+        áreas dibujadas de sombra y referencia, sus cálculos (% sombra
+        y Tmrt) y el histograma.
+        """
+        result_frame = self.create_card(frame)
+        result_frame.pack(fill="both", expand=True)
+
         strip = tk.Frame(result_frame, bg=self.palette["panel"])
-        strip.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        strip.pack(fill="both", expand=True, padx=6, pady=6)
         self.carrusel_izq = tk.Button(
             strip, text="◀", bd=0, bg=self.palette["panel"], fg="#2c3e50",
             font=("Arial", 10, "bold"), command=lambda: self._carrusel_desplazar(-1),
         )
         self.carrusel_izq.pack(side="left", fill="y")
         self.carrusel_canvas = tk.Canvas(
-            strip, height=118, bg=self.palette["panel"], highlightthickness=0,
+            strip, height=110, bg=self.palette["panel"], highlightthickness=0,
         )
         self.carrusel_canvas.pack(side="left", fill="both", expand=True)
         self.carrusel_der = tk.Button(
