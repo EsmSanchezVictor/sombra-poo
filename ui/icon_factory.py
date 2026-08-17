@@ -137,6 +137,17 @@ def _confort(size, color):
     return img
 
 
+def _arbol(size, color):
+    """Ícono de árbol para el ranking de efectividad."""
+    img = _lienzo(size)
+    d = ImageDraw.Draw(img)
+    d.polygon([(size * 0.5, size * 0.1), (size * 0.16, size * 0.5),
+               (size * 0.84, size * 0.5)], outline=color, width=2)
+    d.line([size * 0.5, size * 0.42, size * 0.5, size * 0.9], fill=color, width=2)
+    d.line([size * 0.38, size * 0.9, size * 0.62, size * 0.9], fill=color, width=2)
+    return img
+
+
 _GENERADORES = {
     "nuevo": _nuevo,
     "abrir": _abrir,
@@ -146,6 +157,7 @@ _GENERADORES = {
     "curva": _curva,
     "calibrar": _calibrar,
     "confort": _confort,
+    "arbol": _arbol,
     "pdf": _pdf,
     "logo": _logo,
 }

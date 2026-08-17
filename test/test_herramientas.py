@@ -70,6 +70,19 @@ def test_temperatura_aparente_disminuye_con_viento():
     assert at_ventoso < at_calmo
 
 
+def test_utci_delega_o_informa_no_disponible():
+    """UTCI oficial delegado en pythermalcomfort; si falta la librería
+    devuelve None en vez de fabricar un valor."""
+    if not tc.UTCI_DISPONIBLE:
+        assert tc.utci(30.0, 45.0, 1.0, 60.0) is None
+        return
+    valor = tc.utci(30.0, 45.0, 1.0, 60.0)
+    assert valor is not None
+    # entre Ta y Tmrt (el UTCI pesa ambos), en rango de calor fuerte
+    assert 30.0 < valor < 45.0
+    assert tc.categoria_utci(valor) == "Estrés de calor fuerte"
+
+
 def test_grados_hora_trapecio():
     series = [(6, 30.0), (10, 34.0), (14, 36.0), (18, 32.0)]
     gh = tc.grados_hora(series, umbral=32.0)
@@ -164,6 +177,17 @@ def test_escenario_horario_mas_sombra_menos_estres():
     hi20 = max(r["hi_sombra"] for r in esc20)
     hi80 = max(r["hi_sombra"] for r in esc80)
     assert hi80 < hi20
+
+
+def test_escenario_horario_utci_sombra_no_mayor_que_sol():
+    """Si el UTCI está disponible, la sombra no puede dar más estrés."""
+    calc = Temperatura(-31.4, -64.2, k_factor=0.04)
+    esc = escenario_horario(calc, date(2026, 1, 15), [8, 12, 16],
+                            20.0, 34.0, 60.0, 4.0, sombra_pct=60.0)
+    if all(r["utci_sol"] is None for r in esc):
+        return  # librería no instalada — el contrato es devolver None
+    for r in esc:
+        assert r["utci_sombra"] <= r["utci_sol"]
 
 
 def test_resumen_y_comparacion_ab():

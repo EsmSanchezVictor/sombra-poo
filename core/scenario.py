@@ -12,8 +12,8 @@ import math
 import numpy as np
 
 from core.climate_profile import atenuacion_copa, descomponer_radiacion, velocidad_viento
-from core.thermal_comfort import (categoria_estres, grados_hora, indice_calor,
-                                  temperatura_aparente)
+from core.thermal_comfort import (categoria_estres, categoria_utci, grados_hora,
+                                  indice_calor, temperatura_aparente, utci)
 from modelo_con_excel import calcular_sombra_arboles
 
 UMBRAL_HI = 32.2  # "Mucha precaución" (NWS) — sobre esto hay estrés real
@@ -60,6 +60,8 @@ def escenario_horario(calc, fecha, horas, ta_min: float, ta_max: float,
         tau = calc.shadow_transmittance(sombra_pct, shadow_type)
         tmrt_sol = ta + k * rad["ghi"]
         tmrt_sombra = ta + k * rad["ghi"] * tau
+        utci_sol = utci(ta, tmrt_sol, v_efectivo, rh)
+        utci_sombra = utci(ta, tmrt_sombra, v_efectivo, rh)
         resultados.append({
             "hora": hora,
             "elevacion": round(elev, 2),
@@ -72,6 +74,8 @@ def escenario_horario(calc, fecha, horas, ta_min: float, ta_max: float,
             "hi_sombra": round(indice_calor(max(tmrt_sombra, ta), rh), 2),
             "at_sol": round(temperatura_aparente(tmrt_sol, rh, v_efectivo), 2),
             "at_sombra": round(temperatura_aparente(tmrt_sombra, rh, v_efectivo), 2),
+            "utci_sol": round(utci_sol, 2) if utci_sol is not None else None,
+            "utci_sombra": round(utci_sombra, 2) if utci_sombra is not None else None,
             "delta_tmrt": round(tmrt_sol - tmrt_sombra, 2),
         })
     return resultados
@@ -84,11 +88,19 @@ def resumen_escenario(resultados: list[dict], umbral: float = UMBRAL_HI) -> dict
     horas_sombra = [(r["hora"], r["hi_sombra"]) for r in resultados]
     horas_at_sol = [(r["hora"], r["at_sol"]) for r in resultados]
     horas_at_sombra = [(r["hora"], r["at_sombra"]) for r in resultados]
+    utcis_sol = [r["utci_sol"] for r in resultados if r["utci_sol"] is not None]
+    utcis_sombra = [r["utci_sombra"] for r in resultados if r["utci_sombra"] is not None]
+    utci_sol = max(utcis_sol) if utcis_sol else None
+    utci_sombra = max(utcis_sombra) if utcis_sombra else None
     return {
         "hi_max_sol": max((r["hi_sol"] for r in resultados), default=0.0),
         "hi_max_sombra": max((r["hi_sombra"] for r in resultados), default=0.0),
         "at_max_sol": max((r["at_sol"] for r in resultados), default=0.0),
         "at_max_sombra": max((r["at_sombra"] for r in resultados), default=0.0),
+        "utci_max_sol": utci_sol,
+        "utci_max_sombra": utci_sombra,
+        "utci_categoria_sol": categoria_utci(utci_sol),
+        "utci_categoria_sombra": categoria_utci(utci_sombra),
         "delta_tmrt_max": max((r["delta_tmrt"] for r in resultados), default=0.0),
         "grados_hora_hi_sol": grados_hora(horas, umbral),
         "grados_hora_hi_sombra": grados_hora(horas_sombra, umbral),

@@ -35,7 +35,9 @@ from services.solar_engine import SolarEngine
 from services import analysis_service
 from services import report_service
 from ui import icon_factory
+from ui import panels as ui_panels
 from ui import theme
+from ui.dialogs import HerramientasDialogs
 from ui.menu_bar import MenuBar
 from utils import export_to_excel
 import diseño as design
@@ -85,6 +87,13 @@ class SombraApp:
         self.settings = self.settings_manager.load()
         self.k_factor = float(self.settings.get("k_factor", 0.04))
         self.k_factor_info = self.settings.get("k_factor_info")
+        # Refactor (README §6): los diálogos viven en ui/dialogs.py;
+        # SombraApp conserva los nombres públicos como bound methods.
+        self._herramientas = HerramientasDialogs(self)
+        for _n in ("_dialogo_calibrar_k_factor", "_dialogo_confort",
+                   "_dialogo_escenario_ab", "_dialogo_validar_csv",
+                   "_dialogo_especies", "_dialogo_ranking_arboles"):
+            setattr(self, _n, getattr(self._herramientas, _n))
         self.current_project_path = self.settings.get("last_project_path")
         self.current_location = None        
         self.is_dirty = False
@@ -965,71 +974,6 @@ class SombraApp:
         }
         # Controles de parámetros
         
-    def _build_controles(self, vars_dict):
-        return [
-            ("Fecha (AAAA-MM-DD)", vars_dict["dia"], 1, None, True),  # es_fecha=True
-            ("Latitud (°)", vars_dict["lat"], 2, [-90, 90], False),
-            ("Longitud (°)", vars_dict["lon"], 3, [-180, 180], False),
-            ("Hora Local", vars_dict["hora"], 4, [0, 24], False),
-            ("Humedad (%)", vars_dict["humedad"], 5, [0, 100], False),
-            ("Temp. Base (K)", vars_dict["T_amb_base"], 6, [250, 350], False),
-            ("Radiación (W/m²)", vars_dict["I_sol_base"], 7, [0, 1500], False),
-            ("Temp. Mín (K)", vars_dict["T_min"], 8, [250, 350], False),
-            ("Temp. Máx (K)", vars_dict["T_max"], 9, [250, 350], False),
-        ]
-    def setup_panel_1(self):
-        """Configura el contenido del Panel 1"""
-        panel = self.panel_frames[0]
-        
-        labels = ["Temperatura ambiente (°C):", "Hora del día (0-23):", "Fecha (YYYY-MM-DD):", "Latitud:", "Longitud:"]
-        self.entries = []
-        self.entry_temp = None
-        self.entry_time = None
-        self.entry_date = None
-        self.entry_lat = None
-        self.entry_lon = None
-
-        for label_text in labels:
-            label = tk.Label(panel, text=label_text, bg=panel.cget("bg"), fg="black")
-            label.pack(fill="x", padx=20, pady=5)
-            entry = tk.Entry(panel)
-            entry.pack(fill="x", padx=20, pady=5)
-            self.entries.append(entry)
-        
-        self.entry_temp = self.entries[0]
-        self.entry_time = self.entries[1]
-        self.entry_date = self.entries[2]
-        self.entry_lat = self.entries[3]
-        self.entry_lon = self.entries[4]
-
-        # NUEVO: porcentaje de sombra manual. Antes "Calcular temperatura
-        # en sombra" exigía haber cargado una imagen y procesado la
-        # selección en el Panel 2 (self.porcentaje_sombra solo se
-        # llenaba ahí). Con este campo se puede calcular Tmrt para
-        # cualquier % de sombra hipotético sin pasar por una imagen —
-        # útil para explorar escenarios ("¿y si hubiera 60% de sombra
-        # acá?") o cuando no se tiene una foto todavía. Si se deja vacío,
-        # se sigue usando el % calculado desde la imagen, como antes.
-        manual_label = tk.Label(
-            panel, text="Porcentaje de sombra manual (%, opcional):",
-            bg=panel.cget("bg"), fg="black",
-        )
-        manual_label.pack(fill="x", padx=20, pady=(15, 5))
-        self.entry_porcentaje_manual = tk.Entry(panel)
-        self.entry_porcentaje_manual.pack(fill="x", padx=20, pady=5)
-        manual_hint = tk.Label(
-            panel,
-            text="Si se completa, se usa en vez del % calculado en el Panel 2.",
-            bg=panel.cget("bg"), fg="#666666", font=("Arial", 8),
-        )
-        manual_hint.pack(fill="x", padx=20, pady=(0, 5))
-
-        self.calculate_temp_button = tk.Button(
-            panel,
-            text="Calcular temperatura en sombra",
-            command=self.calculate_temperature_in_shade,
-        )
-        self.calculate_temp_button.pack(fill="x", padx=20, pady=20)
     def setup_panel_2(self):
         """Configura el contenido del Panel 2"""
         panel = self.panel_frames[1]
@@ -1256,281 +1200,6 @@ class SombraApp:
         for texto, var, fila, rango, es_fecha in self.controles:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
         self._toggle_edicion_mode()    
-    def setup_panel_4(self):
-        """Configura el contenido del Panel 4"""
-        panel = self.panel_frames[3]
-        
-        # BUG CORREGIDO ("controles del Panel 4 ocultos"): antes acá se
-        # creaba un SEGUNDO canvas scrolleable anidado (vía
-        # _build_scrollable_content) dentro del frame de contenido que
-        # YA vive en un canvas con scrollbar. El canvas anidado quedaba
-        # con altura propia chica (solo alcanzaba a mostrar el título y
-        # los radiobuttons) y SIN rueda del mouse — los botones y
-        # controles de abajo quedaban fuera de vista, "ocultos". Ahora
-        # se usan los widgets directamente sobre `panel` (igual que los
-        # paneles 1/2), que ya tiene scroll + rueda funcionando.
-        for widget in panel.winfo_children():
-            widget.destroy()        
-
-        panel.grid_columnconfigure(0, weight=1)
-        contenido = panel
-
-        diseno_label = tk.Label(contenido, text="Modelo", bg=panel.cget("bg"), fg="black")
-        diseno_label.grid(row=0, column=0, sticky="w", pady=(0, 6))
-
-        modo_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        modo_frame.grid(row=1, column=0, sticky="w", pady=4)
-        self.simple_mode_radio = tk.Radiobutton(
-            modo_frame,
-            text="Modo Simple",
-            variable=self.modo_modelo,
-            value="simple",
-            bg=panel.cget("bg"),
-            command=self._toggle_modelo_mode,
-        )
-        self.simple_mode_radio.grid(row=0, column=0, sticky="w")
-        self.advanced_mode_radio = tk.Radiobutton(
-            modo_frame,
-            text="Modo Avanzado",
-            variable=self.modo_modelo,
-            value="advanced",
-            bg=panel.cget("bg"),
-            command=self._toggle_modelo_mode,
-        )
-        self.advanced_mode_radio.grid(row=1, column=0, sticky="w", pady=(2, 0))
-
-        acciones_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        acciones_frame.grid(row=4, column=0, sticky="ew", pady=(6, 0))
-        acciones_frame.grid_columnconfigure(0, weight=1)
-        self.apply_location_button = tk.Button(
-            acciones_frame,
-            text="Aplicar ubicación",
-            command=lambda: self._apply_location(True),
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-            state="normal" if self.locations_data else "disabled",
-        )
-        self.apply_location_button.grid(row=0, column=0, sticky="ew", padx=0, pady=3)
-        tk.Button(
-            acciones_frame,
-            text="Cargar Excel",
-            command=self.cargar_excel_modelo,
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-        ).grid(row=1, column=0, sticky="ew", padx=0, pady=3)
-        tk.Button(
-            acciones_frame,
-            text="Guardar Excel",
-            command=self.guardar_excel_modelo,
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-        ).grid(row=2, column=0, sticky="ew", padx=0, pady=3)        
-        tk.Button(
-            acciones_frame,
-            text="Generar Gráfico",
-            command=self.generar_grafico_modelo,
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-        ).grid(row=3, column=0, sticky="ew", padx=0, pady=3)
-        tk.Button(
-            acciones_frame,
-            text="Vista 3D",
-            command=lambda: modelo.generar_3d(self.vars_modelo),
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-        ).grid(row=4, column=0, sticky="ew", padx=0, pady=3)
-
-        self.simple_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        self.simple_frame.grid(row=2, column=0, sticky="nsew", pady=6)
-        self.simple_frame.grid_columnconfigure(0, weight=1)
-
-        if self.locations_error:
-            self._locations_error_label = tk.Label(
-                self.simple_frame,
-                text=self.locations_error,
-                fg="red",
-                bg=panel.cget("bg"),
-                wraplength=max(120, self.simple_frame.winfo_width() - 40),
-                justify="left",
-            )
-            self._locations_error_label.grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
-            # Ajuste dinámico: el texto de error se re-envuelve al ancho
-            # real del frame (el ancho del panel puede variar) en vez de
-            # quedar fijo en 260px y desbordar el contenedor.
-            self.simple_frame.bind(
-                "<Configure>",
-                lambda e: self._locations_error_label.config(
-                    wraplength=max(120, e.width - 40)),
-            )
-
-        tk.Label(self.simple_frame, text="País", bg=panel.cget("bg")).grid(row=1, column=0, sticky="w", pady=(2, 0))
-        self.country_combo = ttk.Combobox(
-            self.simple_frame,
-            textvariable=self.simple_country,
-            values=self.locations_data["countries"] if self.locations_data else [],
-            state="readonly" if self.locations_data else "disabled",
-        )
-        self.country_combo.grid(row=2, column=0, sticky="ew", pady=(2, 6), padx=0)
-        self.country_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_city_options())
-
-        tk.Label(self.simple_frame, text="Ciudad", bg=panel.cget("bg")).grid(row=3, column=0, sticky="w", pady=(2, 0))
-        self.city_combo = ttk.Combobox(
-            self.simple_frame,
-            textvariable=self.simple_city,
-            values=[],
-            state="normal" if self.locations_data else "disabled",
-        )
-        self.city_combo.grid(row=4, column=0, sticky="ew", pady=(2, 6), padx=0)
-        self.city_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_location(False))
-        self.city_combo.bind("<KeyRelease>", self._filter_city_options)
-
-        tk.Label(self.simple_frame, text="Nubosidad", bg=panel.cget("bg")).grid(row=5, column=0, sticky="w", pady=(2, 0))
-        ttk.Combobox(
-            self.simple_frame,
-            textvariable=self.simple_cloudiness,
-            values=["Despejado", "Parcial", "Nublado"],
-            state="readonly",
-        ).grid(row=6, column=0, sticky="ew", pady=(2,6), padx=0)
-
-        tk.Label(self.simple_frame, text="Temperatura aire (°C)", bg=panel.cget("bg")).grid(row=7, column=0, sticky="w", pady=(2, 0))
-        tk.Entry(self.simple_frame, textvariable=self.simple_temp_air_c).grid(
-            row=8, column=0, sticky="ew", pady=(2,6), padx=0
-        )
-        tk.Label(self.simple_frame, text="Viento", bg=panel.cget("bg")).grid(row=9, column=0, sticky="w", pady=(2, 0))
-        ttk.Combobox(
-            self.simple_frame,
-            textvariable=self.vars_modelo["viento"],
-            values=["nulo", "moderado", "fuerte"],
-        ).grid(row=10, column=0, sticky="ew", pady=(2,6), padx=0)
-
-        tk.Label(self.simple_frame, text="Humedad relativa (%)", bg=panel.cget("bg")).grid(
-            row=11, column=0, sticky="w", pady=(2, 0)
-        )
-        tk.Entry(self.simple_frame, textvariable=self.simple_rh).grid(
-            row=12, column=0, sticky="ew", pady=(2,6), padx=0
-        )
-
-        # Herramientas de confort y calibración (análisis térmico)
-        herramientas = tk.Frame(contenido, bg=panel.cget("bg"))
-        herramientas.grid(row=3, column=0, sticky="ew", pady=(2, 6))
-        herramientas.grid_columnconfigure(0, weight=1)
-        tk.Label(herramientas, text="Herramientas", bg=panel.cget("bg"),
-                 font=("Arial", 9, "bold"), anchor="w").grid(
-            row=0, column=0, sticky="ew", pady=(0, 4))
-        herramientas_estado = {
-            "Calibrar k_factor": self._dialogo_calibrar_k_factor,
-            "Confort térmico": self._dialogo_confort,
-            "Escenario A/B": self._dialogo_escenario_ab,
-            "Validar CSV": self._dialogo_validar_csv,
-            "Especies": self._dialogo_especies,
-        }
-        fila_btn = 1
-        for texto, comando in herramientas_estado.items():
-            tk.Button(herramientas, text=texto, command=comando,
-                      anchor="w", bg="#2196F3", fg="white",
-                      font=("Arial", 8, "bold")).grid(
-                row=fila_btn, column=0, sticky="ew", pady=2)
-            fila_btn += 1
-
-        self.advanced_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        self.advanced_frame.grid(row=2, column=0, sticky="nsew", pady=6)
-        self.advanced_frame.grid_columnconfigure(1, weight=1)
-
-        tk.Label(self.advanced_frame, text="Viento", bg=panel.cget("bg")).grid(row=0, column=0, sticky="w", pady=2)
-        ttk.Combobox(
-            self.advanced_frame,
-            textvariable=self.vars_modelo["viento"],
-            values=["nulo", "moderado", "fuerte"],
-        ).grid(row=0, column=1, sticky="ew", pady=2, padx=(8, 0))
-
-        tk.Label(self.advanced_frame, text="Configuraciones rápidas", bg=panel.cget("bg")).grid(
-            row=1, column=0, sticky="w", pady=6
-        )
-        tk.Button(
-            self.advanced_frame,
-            text="Soleado",
-            command=lambda: modelo.cargar_preset("soleado", self.vars_modelo),
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-        ).grid(row=2, column=0, sticky="w", padx=0, pady=3)
-        tk.Button(
-            self.advanced_frame,
-            text="Verano",
-            command=lambda: modelo.cargar_preset("verano", self.vars),
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-        ).grid(row=2, column=1, sticky="w", padx=10, pady=3)
-        tk.Button(
-            self.advanced_frame,
-            text="Soleado",
-            command=lambda: modelo.cargar_preset("soleado", self.vars),
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-        ).grid(row=3, column=0, sticky="w", padx=0, pady=3)
-        tk.Button(
-            self.advanced_frame,
-            text="Nublado",
-            command=lambda: modelo.cargar_preset("nublado", self.vars),
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 8, "bold"),
-        ).grid(row=3, column=1, sticky="w", padx=10, pady=3)
-
-        panelin = tk.Frame(self.advanced_frame, bg=panel.cget("bg"))
-        panelin.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=10)
-        for texto, var, fila, rango, es_fecha in self.controles_modelo:
-            self.crear_control(panelin, texto, var, fila, rango, es_fecha)
-        self.vars_modelo["graph_frame"] = self.frame11
-        self._update_city_options()
-        if self.locations_error:
-            self.modo_modelo.set("advanced")
-            self.simple_mode_radio.config(state="disabled")
-        self._toggle_modelo_mode()  
-    def crear_control(self, panel, texto, var, fila, rango=None, es_fecha=False):
-        # Columna del control con peso: el entry/scale se estira hasta
-        # el ancho disponible del panel (antes quedaba fijo al tamaño
-        # pedido y el panel avanzado desbordaba el contenedor).
-        panel.grid_columnconfigure(1, weight=1)
-        tk.Label(panel, text=texto, anchor="w",font=("Arial", 8),width=18).grid(row=fila, column=0, sticky="ew", padx=0, pady=10)
-        if es_fecha:
-            entry = tk.Entry(panel,width=12)
-            entry.grid(row=fila, column=1, sticky="ew", padx=0)
-            entry.bind("<Return>", lambda e: actualizar_dia(entry.get(), var))
-        elif rango:
-            scale = tk.Scale(panel, from_=rango[0], to=rango[1], variable=var, 
-                            orient=tk.HORIZONTAL,length=1,width=5)
-            scale.grid(row=fila, column=1, sticky="ew", padx=0)
-    def _toggle_modelo_mode(self):
-        if self.modo_modelo.get() == "simple" and not self.locations_error:
-            self.advanced_frame.grid_remove()
-            self.simple_frame.grid()
-        else:
-            self.simple_frame.grid_remove()
-            self.advanced_frame.grid()
-    
-    def _toggle_edicion_mode(self):
-        if self.modo_edicion.get() == "simple":
-            self.advanced_edit_frame.grid_remove()
-            self.simple_edit_frame.grid()
-        else:
-            self.simple_edit_frame.grid_remove()
-            self.advanced_edit_frame.grid()
-
-    def _toggle_panel2_advanced(self):
-        if self.panel2_advanced_mode.get():
-            self.matrix_size_combo.config(state="readonly")
-        else:
-            self.matriz_size.set(480)
-            self.matrix_size_combo.config(state="disabled")
-            
     def _build_scrollable_content(self, parent):
         canvas = tk.Canvas(parent, bg=parent.cget("bg"), highlightthickness=0, bd=0)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
@@ -1566,42 +1235,6 @@ class SombraApp:
 
     def get_distance_unit(self):
         return self.settings.get("distance_unit", "m")
-
-    def _update_city_options(self):
-        if not self.locations_data:
-            return
-        country = self.simple_country.get()
-        cities = self.locations_data["cities"].get(country, [])
-        self.city_combo["values"] = cities
-        if cities and self.simple_city.get() not in cities:
-            self.simple_city.set(cities[0])
-
-    def _filter_city_options(self, event):
-        if not self.locations_data:
-            return
-        country = self.simple_country.get()
-        query = self.simple_city.get().lower().strip()
-        cities = self.locations_data["cities"].get(country, [])
-        if query:
-            filtered = [city for city in cities if query in city.lower()]
-        else:
-            filtered = cities
-        self.city_combo["values"] = filtered
-
-    def _apply_location(self, show_message):
-        if not self.locations_data:
-            return
-        city_label = self.simple_city.get().strip()
-        location = self.locations_data["lookup"].get(city_label)
-        if not location:
-            if show_message:
-                messagebox.showwarning("Ubicación", "Seleccione una ciudad válida.")
-            return
-        self.vars_modelo["lat"].set(location["lat"])
-        self.vars_modelo["lon"].set(location["lon"])
-        self.vars_modelo["_update_required"] = True
-        if show_message:
-            messagebox.showinfo("Ubicación aplicada", f"Lat/Lon: {location['lat']}, {location['lon']}")
 
     def _validate_kelvin_input(self):
         """Valida que los campos de temperatura del modo modelo estén en
@@ -2476,6 +2109,7 @@ class SombraApp:
         _boton(grupo_analisis, icon_factory.obtener_icono("curva"), "Sensib.", self.mostrar_curva_sensibilidad)
         _boton(grupo_analisis, icon_factory.obtener_icono("calibrar"), "Calibrar", self._dialogo_calibrar_k_factor)
         _boton(grupo_analisis, icon_factory.obtener_icono("confort"), "Confort", self._dialogo_confort)
+        _boton(grupo_analisis, icon_factory.obtener_icono("arbol"), "Ranking", self._dialogo_ranking_arboles)
         _boton(grupo_analisis, icon_factory.obtener_icono("pdf"), "Informe", self.generar_informe_completo)
 
     def setup_status_bar(self):
@@ -2844,417 +2478,41 @@ class SombraApp:
             fecha = ahora.date()
         return temp_ambient, hora, fecha, lat, lon
 
-    # ---------------------------------------------------------------- herramientas
-    # Asistente de calibración de k_factor, confort térmico, escenario
-    # A/B horario, validación contra mediciones y biblioteca de especies.
+    # ---------------------------------------------------------------- delegados
+    # Refactor (README §6): los constructores de panel y los toggles de
+    # modo viven en ui/panels.py; SombraApp conserva estos delegados de
+    # un renglón porque los llaman módulos externos (settings_manager,
+    # app_state) y los call sites internos con los mismos nombres.
 
-    def _dialogo_calibrar_k_factor(self):
-        """Asistente de calibración: ingresa mediciones de campo
-        (temperatura de globo o Tmrt, temperatura de aire, radiación,
-        viento), ajusta k_factor por mínimos cuadrados y lo persiste en
-        settings.json para que todo el modelo lo use."""
-        dlg = tk.Toplevel(self.root)
-        dlg.title("Asistente de calibración de k_factor")
-        dlg.geometry("640x520")
-        dlg.transient(self.root)
+    def _build_controles(self, vars_dict):
+        return ui_panels._build_controles(vars_dict)
 
-        intro = ("k_factor convierte la radiación efectiva en elevación de Tmrt "
-                 "(Tmrt = Ta + k·GHI). Ingresá mediciones de campo y el asistente "
-                 "ajusta k por mínimos cuadrados. Los cambios se aplican a todo el modelo.")
-        tk.Label(dlg, text=intro, wraplength=600, justify="left").pack(padx=12, pady=8)
+    def setup_panel_1(self):
+        return ui_panels.setup_panel_1(self)
 
-        cuerpo = tk.Frame(dlg)
-        cuerpo.pack(fill="both", expand=True, padx=12)
-        cuerpo.grid_columnconfigure(1, weight=1)
+    def setup_panel_4(self):
+        return ui_panels.setup_panel_4(self)
 
-        entradas = {}
-        fila = 0
-        for i, (texto, clave, por_defecto) in enumerate([
-            ("Tg globo (°C)", "tg", ""),
-            ("Ta aire (°C)", "ta", "30.0"),
-            ("Radiación (W/m²)", "rad", "750.0"),
-            ("Viento (m/s)", "v", "0.5"),
-        ]):
-            tk.Label(cuerpo, text=texto).grid(row=fila, column=0, sticky="w", pady=2)
-            var = tk.StringVar(value=por_defecto)
-            entradas[clave] = var
-            tk.Entry(cuerpo, textvariable=var).grid(row=fila, column=1, sticky="ew", pady=2)
-            fila += 1
+    def crear_control(self, panel, texto, var, fila, rango=None, es_fecha=False):
+        return ui_panels.crear_control(self, panel, texto, var, fila, rango, es_fecha)
 
-        botones = tk.Frame(cuerpo)
-        botones.grid(row=fila, column=0, columnspan=2, sticky="ew", pady=6)
-        tk.Button(botones, text="Agregar medición",
-                  command=lambda: self._calibrador_agregar(entradas, lista, error_lbl)).pack(side="left")
-        tk.Button(botones, text="Quitar seleccionada",
-                  command=lambda: self._calibrador_quitar(lista, error_lbl)).pack(side="left", padx=6)
-        tk.Button(botones, text="Calcular",
-                  command=lambda: self._calibrador_calcular(lista, resultado, error_lbl)).pack(side="right")
-        fila += 1
+    def _toggle_modelo_mode(self):
+        return ui_panels._toggle_modelo_mode(self)
 
-        lista = tk.Listbox(cuerpo, height=6)
-        lista.grid(row=fila, column=0, columnspan=2, sticky="nsew", pady=4)
-        cuerpo.grid_rowconfigure(fila, weight=1)
-        fila += 1
+    def _toggle_edicion_mode(self):
+        return ui_panels._toggle_edicion_mode(self)
 
-        error_lbl = tk.Label(cuerpo, text="", fg="red", justify="left", anchor="w")
-        error_lbl.grid(row=fila, column=0, columnspan=2, sticky="ew")
-        fila += 1
+    def _toggle_panel2_advanced(self):
+        return ui_panels._toggle_panel2_advanced(self)
 
-        resultado = tk.Label(cuerpo, text="", justify="left", anchor="w", fg="#1565C0")
-        resultado.grid(row=fila, column=0, columnspan=2, sticky="ew", pady=4)
-        fila += 1
+    def _update_city_options(self):
+        return ui_panels._update_city_options(self)
 
-        pie = tk.Frame(dlg)
-        pie.pack(fill="x", padx=12, pady=8)
-        k_actual = f"k_factor actual: {self.k_factor:.4f}"
-        if self.k_factor_info:
-            k_actual += f"  (calibrado {self.k_factor_info})"
-        tk.Label(pie, text=k_actual).pack(side="left")
-        tk.Button(pie, text="Aplicar y guardar",
-                  command=lambda: self._calibrador_aplicar(resultado, dlg)).pack(side="right")
-        tk.Button(pie, text="Cerrar", command=dlg.destroy).pack(side="right", padx=6)
+    def _filter_city_options(self, event):
+        return ui_panels._filter_city_options(self, event)
 
-    def _calibrador_agregar(self, entradas, lista, error_lbl):
-        error_lbl.config(text="")
-        try:
-            fila = {k: float(entradas[k].get().replace(",", ".").strip())
-                    for k in ("tg", "ta", "rad", "v")}
-        except ValueError:
-            error_lbl.config(text="Completá los 4 campos con números válidos.")
-            return
-        if fila["rad"] <= 0:
-            error_lbl.config(text="La radiación debe ser mayor a 0 W/m².")
-            return
-        if fila["tg"] <= fila["ta"]:
-            error_lbl.config(text="Tg debe ser mayor que Ta (el globo se calienta por radiación).")
-            return
-        lista.insert("end",
-                     f"Tg={fila['tg']:.1f}°C  Ta={fila['ta']:.1f}°C  "
-                     f"rad={fila['rad']:.0f} W/m²  v={fila['v']:.1f} m/s")
-
-    def _calibrador_quitar(self, lista, error_lbl):
-        error_lbl.config(text="")
-        sel = lista.curselection()
-        if not sel:
-            error_lbl.config(text="Seleccioná una medición de la lista para quitar.")
-            return
-        lista.delete(sel[0])
-
-    def _calibrador_calcular(self, lista, resultado, error_lbl):
-        error_lbl.config(text="")
-        if lista.size() < 2:
-            error_lbl.config(text="Agregá al menos 2 mediciones para ajustar k_factor.")
-            return
-        import re
-        filas = []
-        for i in range(lista.size()):
-            valores = {k.lower(): float(v) for k, v in
-                       re.findall(r"([A-Za-z]+)=(-?[\d.]+)", lista.get(i))}
-            try:
-                tg, ta, rad, v = valores["tg"], valores["ta"], valores["rad"], valores["v"]
-            except KeyError:
-                error_lbl.config(text="La lista de mediciones está corrupta; quitá y volvé a agregar.")
-                return
-            tmrt = thermal_comfort.globo_negro_a_tmrt(tg, ta, v)
-            filas.append({"tmrt_medido": tmrt, "ta": ta, "rad": rad, "v": v, "tg": tg})
-        ajuste = k_factor_desde_mediciones(filas)
-        texto = (f"k_factor ajustado: {ajuste['k_factor']:.5f}  "
-                 f"R²: {ajuste['r2']:.3f}  RMSE: {ajuste['rmse']:.2f} °C  "
-                 f"(n={ajuste['n']})")
-        texto += "\nTmrt del globo por medición: " + ", ".join(
-            f"{f['tmrt_medido']:.1f}" for f in filas)
-        resultado.config(text=texto)
-        # el dict se guarda en el propio widget para aplicarlo después
-        resultado.ajuste = ajuste
-
-    def _calibrador_aplicar(self, resultado, dlg):
-        ajuste = getattr(resultado, "ajuste", None)
-        if not ajuste:
-            messagebox.showwarning("Sin resultados", "Calculá primero el ajuste.")
-            return
-        self.k_factor = ajuste["k_factor"]
-        self.settings["k_factor"] = ajuste["k_factor"]
-        self.settings["k_factor_info"] = f"{datetime.now().strftime('%Y-%m-%d %H:%M')}, n={ajuste['n']}"
-        self.settings_manager.write(self.settings)
-        messagebox.showinfo(
-            "Calibrado",
-            f"k_factor = {ajuste['k_factor']:.5f}\n"
-            f"R² = {ajuste['r2']:.3f} · RMSE = {ajuste['rmse']:.2f} °C\n\n"
-            "Se guardó en settings.json y se aplicó a todo el modelo.\n"
-            "Ejecutá el modelo de nuevo (F5) para ver el efecto.")
-        dlg.destroy()
-
-    def _dialogo_confort(self):
-        """Índices de confort para las condiciones actuales: Heat Index
-        (NWS/Rothfusz) y Temperatura Aparente (Steadman) en sol y en
-        sombra, más la clasificación de estrés del mapa de Tmrt si el
-        modelo ya se ejecutó."""
-        temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
-        rh = float(self.simple_rh.get() or 60.0)
-        if rh < 0 or rh > 100:
-            messagebox.showwarning("Humedad", "La humedad relativa debe estar entre 0 y 100.")
-            return
-        v_ms = viento_categoria_a_ms(self.vars_modelo["viento"].get())
-        calculador = Temperatura(lat, lon, k_factor=self.k_factor)
-        doy = fecha.timetuple().tm_yday
-        elev = calculador.solar_altitude(doy, hora)
-        ghi = calculador.clear_sky_radiation(elev)
-        sombra_pct = 50.0
-        if self.last_shadow is not None:
-            sombra_pct = (1 - np.asarray(self.last_shadow, dtype=float)).mean() * 100
-
-        tau = calculador.shadow_transmittance(sombra_pct, "tree")
-        tmrt_sol = temp_ambient + self.k_factor * ghi
-        tmrt_sombra = temp_ambient + self.k_factor * ghi * tau
-        hi_sol = thermal_comfort.indice_calor(max(tmrt_sol, temp_ambient), rh)
-        hi_sombra = thermal_comfort.indice_calor(max(tmrt_sombra, temp_ambient), rh)
-        at_sol = thermal_comfort.temperatura_aparente(tmrt_sol, rh, v_ms)
-        at_sombra = thermal_comfort.temperatura_aparente(tmrt_sombra, rh, v_ms)
-
-        lineas = [
-            f"Condiciones: Ta={temp_ambient:.1f}°C · RH={rh:.0f}% · viento={v_ms:.1f} m/s "
-            f"· GHI={ghi:.0f} W/m² · % sombra={sombra_pct:.0f}%",
-            "",
-            f"Tmrt sol = {tmrt_sol:.1f} °C     Tmrt sombra = {tmrt_sombra:.1f} °C",
-            f"Heat Index sol = {hi_sol:.1f} °C ({thermal_comfort.categoria_estres(hi_sol, 'heat')})",
-            f"Heat Index sombra = {hi_sombra:.1f} °C ({thermal_comfort.categoria_estres(hi_sombra, 'heat')})",
-            f"T. aparente sol = {at_sol:.1f} °C ({thermal_comfort.categoria_estres(at_sol, 'at')})",
-            f"T. aparente sombra = {at_sombra:.1f} °C ({thermal_comfort.categoria_estres(at_sombra, 'at')})",
-        ]
-        if self.last_T is not None:
-            try:
-                mapa = scenario_tools.mapa_estres(
-                    np.asarray(self.last_T, dtype=float), temp_ambient, rh)
-                por_area = ", ".join(f"{k}: {v}%" for k, v in mapa["por_area"].items())
-                lineas += ["", f"Mapa de Tmrt (modelo ya ejecutado): {por_area}"]
-            except ValueError:
-                pass
-        lineas += [
-            "",
-            "Heat Index: índice operativo del NWS (Rothfusz 1990), válido "
-            "para Ta ≥ 26.7 °C. Temperatura Aparente: Steadman (1984). "
-            "El UTCI completo requiere el modelo de Fiala (pythermalcomfort).",
-        ]
-        dlg = tk.Toplevel(self.root)
-        dlg.title("Confort térmico")
-        dlg.geometry("560x420")
-        dlg.transient(self.root)
-        tk.Label(dlg, text="\n".join(lineas), justify="left", anchor="w").pack(
-            fill="both", expand=True, padx=14, pady=12)
-        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=8)
-
-    def _dialogo_escenario_ab(self):
-        """Escenario A/B horario: comparar dos % de sombra (p. ej. línea
-        base vs. propuesta de arbolado) a lo largo del día, con curvas de
-        Heat Index, Tmrt y resumen de grados-hora de estrés."""
-        temp_ambient, _hora, fecha, lat, lon = self._leer_parametros_tmrt()
-        dlg = tk.Toplevel(self.root)
-        dlg.title("Escenario A/B horario (sombra vs. propuesta)")
-        dlg.geometry("720x640")
-        dlg.transient(self.root)
-
-        form = tk.Frame(dlg)
-        form.pack(fill="x", padx=12, pady=8)
-        form.grid_columnconfigure(1, weight=1)
-        defaults = {
-            "hora_ini": "8", "hora_fin": "18",
-            "ta_min": "20", "ta_max": str(round(temp_ambient, 1)),
-            "rh": str(self.simple_rh.get() or 60),
-            "sombra_a": "20", "sombra_b": "60",
-        }
-        vars_ab = {}
-        fila = 0
-        for texto, clave, ancho in [
-            ("Hora inicio", "hora_ini", 8), ("Hora fin", "hora_fin", 8),
-            ("Ta mín (°C)", "ta_min", 8), ("Ta máx (°C)", "ta_max", 8),
-            ("Humedad (%)", "rh", 8), ("Sombra A (%)", "sombra_a", 8),
-            ("Sombra B (%)", "sombra_b", 8),
-        ]:
-            tk.Label(form, text=texto).grid(row=fila // 2, column=(fila % 2) * 2, sticky="w", padx=(0, 4), pady=2)
-            var = tk.StringVar(value=defaults[clave])
-            vars_ab[clave] = var
-            tk.Entry(form, textvariable=var, width=ancho).grid(
-                row=fila // 2, column=(fila % 2) * 2 + 1, sticky="ew", pady=2)
-            fila += 1
-
-        tk.Label(form, text="Viento:", justify="left").grid(row=4, column=0, sticky="w", padx=(0, 4))
-        viento_var = tk.StringVar(value=self.vars_modelo["viento"].get())
-        ttk.Combobox(form, textvariable=viento_var, values=["nulo", "moderado", "fuerte"],
-                     width=8, state="readonly").grid(row=4, column=1, sticky="w")
-
-        fig = plt.Figure(figsize=(6.6, 3.6), dpi=100)
-        ax = fig.add_subplot(111)
-        canvas = FigureCanvasTkAgg(fig, master=dlg)
-        canvas.get_tk_widget().pack(fill="both", expand=True, padx=12)
-
-        resumen_txt = tk.Label(dlg, text="", justify="left", anchor="w", font=("Consolas", 8))
-        resumen_txt.pack(fill="x", padx=12)
-
-        def calcular():
-            try:
-                datos = {k: float(v.get().replace(",", ".").strip()) for k, v in vars_ab.items()}
-                datos["viento"] = viento_categoria_a_ms(viento_var.get())
-            except ValueError:
-                messagebox.showwarning("Entrada", "Revisá los valores numéricos.", parent=dlg)
-                return
-            horas = [float(h) for h in
-                     np.arange(datos["hora_ini"], datos["hora_fin"] + 1)]
-            calc = Temperatura(lat, lon, k_factor=self.k_factor)
-            esc_a = scenario_tools.escenario_horario(
-                calc, fecha, horas, datos["ta_min"], datos["ta_max"],
-                datos["rh"], datos["viento"], datos["sombra_a"])
-            esc_b = scenario_tools.escenario_horario(
-                calc, fecha, horas, datos["ta_min"], datos["ta_max"],
-                datos["rh"], datos["viento"], datos["sombra_b"])
-            cmp = scenario_tools.comparar_escenarios(esc_a, esc_b)
-            ax.clear()
-            ax.plot(horas, [r["hi_sombra"] for r in esc_a], "o-", color="#E53935",
-                    label=f"HI sombra A ({datos['sombra_a']:.0f}%)")
-            ax.plot(horas, [r["hi_sombra"] for r in esc_b], "s-", color="#1E88E5",
-                    label=f"HI sombra B ({datos['sombra_b']:.0f}%)")
-            ax.plot(horas, [r["hi_sol"] for r in esc_a], "--", color="#FB8C00",
-                    label="HI pleno sol")
-            ax.axhline(scenario_tools.UMBRAL_HI, color="gray", linestyle=":")
-            ax.text(horas[0], scenario_tools.UMBRAL_HI + 0.3,
-                    f"umbral estrés {scenario_tools.UMBRAL_HI:.1f} °C", fontsize=7)
-            ax.set_xlabel("Hora")
-            ax.set_ylabel("Heat Index (°C)")
-            ax.legend(fontsize=8)
-            ax.grid(True, alpha=0.3)
-            fig.tight_layout()
-            canvas.draw()
-            r = cmp["propuesto"]
-            resumen_txt.config(text=(
-                f"A: pico HI {r['hi_max_sombra']:.1f} °C · grados-hora (HI>{scenario_tools.UMBRAL_HI:.0f}) "
-                f"{r['grados_hora_hi_sombra']:.1f} °C·h · categoría: {r['categoria_pico_sombra']}\n"
-                f"Δ al pasar de A a B: HI pico {cmp['delta_hi_max']:+.1f} °C · "
-                f"grados-hora {cmp['delta_grados_hora_hi']:+.1f} °C·h · "
-                f"ΔTmrt máx {r['delta_tmrt_max']:.1f} °C"))
-
-        botones = tk.Frame(dlg)
-        botones.pack(fill="x", padx=12, pady=8)
-        tk.Button(botones, text="Calcular", command=calcular, bg="#4CAF50", fg="white",
-                  font=("Arial", 9, "bold")).pack(side="left")
-        tk.Button(botones, text="Cerrar", command=dlg.destroy).pack(side="right")
-        calcular()
-
-    def _dialogo_validar_csv(self):
-        """Valida el modelo contra mediciones de campo en CSV (tg o tmrt,
-        ta, rad, v) y opcionalmente recalibra k_factor desde el archivo."""
-        dlg = tk.Toplevel(self.root)
-        dlg.title("Validación contra mediciones (CSV)")
-        dlg.geometry("640x560")
-        dlg.transient(self.root)
-
-        top = tk.Frame(dlg)
-        top.pack(fill="x", padx=12, pady=8)
-        tk.Label(top, text="Archivo:").pack(side="left")
-        archivo_lbl = tk.Label(top, text="(ninguno)", fg="gray")
-        archivo_lbl.pack(side="left", padx=6)
-        tk.Button(top, text="Seleccionar CSV…",
-                  command=lambda: self._validar_cargar(archivo_lbl, resumen_txt, fig, canvas,
-                                                       aplicar_btn, dlg)).pack(side="right")
-
-        fig = plt.Figure(figsize=(6.4, 3.2), dpi=100)
-        ax = fig.add_subplot(111)
-        canvas = FigureCanvasTkAgg(fig, master=dlg)
-        canvas.get_tk_widget().pack(fill="both", expand=True, padx=12)
-
-        resumen_txt = tk.Label(dlg, text="", justify="left", anchor="w", font=("Consolas", 8))
-        resumen_txt.pack(fill="x", padx=12)
-
-        aplicar_btn = tk.Button(dlg, text="Aplicar k_factor sugerido",
-                                state="disabled", bg="#2196F3", fg="white")
-        aplicar_btn.pack(pady=6)
-        aplicar_btn.config(command=lambda: self._validar_aplicar_k(aplicar_btn, dlg))
-        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=4)
-
-    def _validar_cargar(self, archivo_lbl, resumen_txt, fig, canvas, aplicar_btn, dlg):
-        path = filedialog.askopenfilename(
-            parent=dlg,
-            filetypes=[("CSV", "*.csv"), ("Todos", "*.*")],
-            title="Seleccionar mediciones de campo")
-        if not path:
-            return
-        try:
-            filas = leer_csv_mediciones(path)
-        except (ValueError, FileNotFoundError) as e:
-            messagebox.showerror("CSV inválido",
-                                 f"{e}\n\nColumnas esperadas: tg (o tmrt), ta, rad, "
-                                 "v (opcional), hora (opcional).", parent=dlg)
-            return
-        obs = np.array([f["tmrt_medido"] for f in filas], dtype=float)
-        pred = np.array([f["ta"] + self.k_factor * f["rad"] for f in filas], dtype=float)
-        met = metricas(obs, pred)
-        archivo_lbl.config(text=os.path.basename(path), fg="black")
-        resumen_txt.config(text=(
-            f"n={met['n']} · RMSE={met['rmse']:.2f} °C · MAE={met['mae']:.2f} °C · "
-            f"bias={met['bias']:+.2f} °C · R²={met['r2']:.3f}  (k_factor actual {self.k_factor:.4f})"))
-        try:
-            ajuste = k_factor_desde_mediciones(filas)
-            resumen_txt.config(text=resumen_txt.cget("text") +
-                               f"\nk_factor sugerido por el CSV: {ajuste['k_factor']:.5f} "
-                               f"(R²={ajuste['r2']:.3f}, RMSE={ajuste['rmse']:.2f} °C)")
-            aplicar_btn.config(state="normal")
-            aplicar_btn.sugerido = ajuste["k_factor"]
-        except ValueError as e:
-            aplicar_btn.config(state="disabled")
-            messagebox.showwarning("Calibración", str(e), parent=dlg)
-        ax = fig.axes[0]
-        ax.clear()
-        ax.scatter(obs, pred, alpha=0.7, s=28)
-        lim = [min(float(obs.min()), float(pred.min())) - 1,
-               max(float(obs.max()), float(pred.max())) + 1]
-        ax.plot(lim, lim, "--", color="gray", label="1:1")
-        ax.set_xlabel("Tmrt medida (°C)")
-        ax.set_ylabel("Tmrt modelo (°C)")
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
-        canvas.draw()
-
-    def _validar_aplicar_k(self, aplicar_btn, dlg):
-        k = getattr(aplicar_btn, "sugerido", None)
-        if k is None:
-            return
-        self.k_factor = k
-        self.settings["k_factor"] = k
-        self.settings["k_factor_info"] = "CSV de validación"
-        self.settings_manager.write(self.settings)
-        messagebox.showinfo("Calibrado", f"k_factor = {k:.5f} aplicado y guardado.", parent=dlg)
-
-    def _dialogo_especies(self):
-        """Biblioteca de especies con propiedades térmicas (transmitancia
-        de copa, densidad, caducidad) y su referencia bibliográfica."""
-        dlg = tk.Toplevel(self.root)
-        dlg.title("Biblioteca de especies")
-        dlg.geometry("560x520")
-        dlg.transient(self.root)
-        tk.Label(dlg, text="Propiedades térmicas por especie (literatura de biometeorología urbana):",
-                 anchor="w").pack(fill="x", padx=12, pady=(10, 4))
-        contenedor = tk.Frame(dlg)
-        contenedor.pack(fill="both", expand=True, padx=12)
-        canvas = tk.Canvas(contenedor, highlightthickness=0)
-        scroll = ttk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
-        interior = tk.Frame(canvas)
-        interior.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=interior, anchor="nw")
-        canvas.configure(yscrollcommand=scroll.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-        fila = 0
-        for nombre in nombres_especies():
-            p = CATALOGO_ESPECIES[nombre]
-            frame = tk.LabelFrame(interior, text=nombre, padx=8, pady=4)
-            frame.grid(row=fila, column=0, sticky="ew", pady=3)
-            interior.grid_columnconfigure(0, weight=1)
-            tk.Label(frame, justify="left", anchor="w", font=("Consolas", 8), text=(
-                f"Densidad de copa: {p['rho_copa']:.2f}  Transmitancia: {p['transmitancia']:.2f}\n"
-                f"Caducifolio: {'sí' if p['caducifolio'] else 'no'}  Albedo copa: {p['albedo_copa']:.2f}\n"
-                f"Altura típica: {p['altura_tipica']:.0f} m  Radio copa: {p['radio_copa_tipico']:.0f} m\n"
-                f"Ref.: {p['ref']}")).pack(anchor="w")
-            fila += 1
-        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=8)
+    def _apply_location(self, show_message):
+        return ui_panels._apply_location(self, show_message)
 
     def mostrar_curvas_nivel(self):
         if not self.require_project("generar curvas de nivel"):

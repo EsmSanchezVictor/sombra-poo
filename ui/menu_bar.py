@@ -123,6 +123,10 @@ class MenuBar:
             label="Biblioteca de especies…",
             command=self.app._dialogo_especies,
         )
+        analisis_menu.add_command(
+            label="Efectividad de árboles (ranking)…",
+            command=self.app._dialogo_ranking_arboles,
+        )
         analisis_menu.add_separator()
         analisis_menu.add_command(
             label="Generar informe completo (PDF)…",

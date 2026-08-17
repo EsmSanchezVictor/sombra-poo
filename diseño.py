@@ -7,6 +7,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 import pandas as pd
 import math
 from core.scene_objects import adaptar_objetos_escena
+from core.species import nombres_especies, propiedades_especie
 from plot_style import CMAP_TEMPERATURA
 
 # Constantes físicas
@@ -81,6 +82,31 @@ def manejar_click(event, app):
             app.elemento_temporal = None
     else:
         seleccionar_elemento(x, y,app.vars,app)
+def _combo_especie(parent, entries, fila, prefijo=""):
+    """Combobox de especie que autocompleta Altura/Densidad/Radio con
+    las propiedades documentadas de la biblioteca (core/species.py).
+    El usuario puede sobreescribir los valores después del autocompletado."""
+    ttk.Label(parent, text="Especie:").grid(row=fila, column=0, sticky="w", pady=(6, 2))
+    combo = ttk.Combobox(parent, values=nombres_especies(), state="readonly")
+    combo.set("Plátano (Platanus × acerifolia)")
+
+    def aplicar(_event=None):
+        p = propiedades_especie(combo.get())
+        for clave, valor in (("Altura (m):", p["altura_tipica"]),
+                             ("Densidad Copa (0-1):", p["rho_copa"]),
+                             ("Radio Copa (m):", p["radio_copa_tipico"])):
+            entry = entries.get(clave)
+            if entry is None:
+                continue
+            entry.delete(0, "end")
+            entry.insert(0, str(valor))
+
+    combo.bind("<<ComboboxSelected>>", aplicar)
+    combo.grid(row=fila, column=1, sticky="ew", pady=(6, 2))
+    aplicar()
+    return combo
+
+
 def mostrar_dialogo_arbol(x, y,app):
     dialogo = tk.Toplevel()
     dialogo.title("Nuevo Árbol")
@@ -93,11 +119,13 @@ def mostrar_dialogo_arbol(x, y,app):
     
     entries = {}
     for i, (label, valor) in enumerate(campos):
-        ttk.Label(dialogo, text=label).grid(row=i, column=0)
+        ttk.Label(dialogo, text=label).grid(row=i + 1, column=0)
         entry = ttk.Entry(dialogo)
         entry.insert(0, valor)
-        entry.grid(row=i, column=1)
+        entry.grid(row=i + 1, column=1)
         entries[label] = entry
+
+    combo_especie = _combo_especie(dialogo, entries, 0)
     
     def guardar():
         try:
@@ -108,6 +136,7 @@ def mostrar_dialogo_arbol(x, y,app):
                 rho_copa=float(entries['Densidad Copa (0-1):'].get()),
                 radio_copa=float(entries['Radio Copa (m):'].get())
             )
+            nuevo_arbol.especie = combo_especie.get()
             app.vars['arboles'].append(nuevo_arbol)
             if hasattr(app, "mark_dirty"):
                 app.mark_dirty()
@@ -118,7 +147,7 @@ def mostrar_dialogo_arbol(x, y,app):
         except ValueError:
             messagebox.showerror("Error", "Valores inválidos")
             
-    ttk.Button(dialogo, text="Guardar", command=guardar).grid(row=len(campos), columnspan=2)
+    ttk.Button(dialogo, text="Guardar", command=guardar).grid(row=len(campos) + 1, columnspan=2)
 def mostrar_dialogo_estructura(x1, y1, x2, y2,app):
     dialogo = tk.Toplevel()
     dialogo.title("Nueva Estructura")
@@ -189,6 +218,7 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
             ('Radio Copa:', arbol.radio_copa)
         ]
         obj = arbol
+        es_arbol = True
     else:
         campos = [
             ('X1:', estructura.x1),
@@ -200,18 +230,34 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
             ('Material:', estructura.material)
         ]
         obj = estructura
+        es_arbol = False
     
     entries = {}
     for i, (label, valor) in enumerate(campos):
-        ttk.Label(dialogo, text=label).grid(row=i, column=0)
+        fila = i + (1 if es_arbol else 0)
+        ttk.Label(dialogo, text=label).grid(row=fila, column=0)
         if label == 'Material:':
             entry = ttk.Combobox(dialogo, values=list(materiales.keys()))
             entry.set(valor)
         else:
             entry = ttk.Entry(dialogo)
             entry.insert(0, str(valor))
-        entry.grid(row=i, column=1)
+        entry.grid(row=fila, column=1)
         entries[label] = entry
+
+    combo_especie = None
+    if es_arbol:
+        combo_especie = _combo_especie(dialogo, entries, 0)
+        especie_actual = getattr(arbol, "especie", None)
+        if especie_actual in nombres_especies():
+            combo_especie.set(especie_actual)
+            # restaura los valores reales del árbol (el autocompletado
+            # del combo los pisaría con los típicos de la especie)
+            for label, valor in (("Altura (m):", arbol.h),
+                                 ("Densidad Copa:", arbol.rho_copa),
+                                 ("Radio Copa:", arbol.radio_copa)):
+                entries[label].delete(0, "end")
+                entries[label].insert(0, str(valor))
     
     def guardar():
         try:
@@ -221,6 +267,8 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
                 arbol.h = float(entries['Altura (m):'].get())
                 arbol.rho_copa = float(entries['Densidad Copa:'].get())
                 arbol.radio_copa = float(entries['Radio Copa:'].get())
+                if combo_especie is not None:
+                    arbol.especie = combo_especie.get()
             else:
                 estructura.x1 = float(entries['X1:'].get())
                 estructura.y1 = float(entries['Y1:'].get())
@@ -572,7 +620,8 @@ def guardar(vars, app):
             'Y': a.y,
             'Altura (m)': a.h,
             'Densidad_copa (0-1)': a.rho_copa,
-            'Radio_copa (m)': a.radio_copa
+            'Radio_copa (m)': a.radio_copa,
+            'Especie': getattr(a, 'especie', '')
         } for a in  vars['arboles']])
         
         df_estructuras = pd.DataFrame([{
@@ -603,6 +652,9 @@ def abrir_archivo(vars, app, filepath=None):
                 Arbol(row['X'], row['Y'], row['Altura (m)'],row['Densidad_copa (0-1)'], row['Radio_copa (m)']) 
                 for _, row in df_arboles.iterrows()
             ]
+            if 'Especie' in df_arboles.columns:
+                for arbol, row in zip(vars['arboles'], df_arboles.itertuples()):
+                    arbol.especie = row.Especie if getattr(row, "Especie", "") else ""
             
             df_estructuras = pd.read_excel(filepath, sheet_name='Estructuras')
             vars['estructuras'] = []

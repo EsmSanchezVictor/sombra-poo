@@ -299,6 +299,83 @@ viento, ranking de árboles (el grande gana), mapa de estrés, mínimos
 cuadrados que recuperan k exacto, lectura de CSV con errores
 controlados. Suite total: 57/57 verdes.
 
+### 5.6 Ronda 2 — especies en el editor, ranking en UI, incertidumbre y UTCI oficial
+
+Completar las opciones pendientes de la propuesta (aprobadas por el
+usuario) y el refactor de `ui/app_ui.py` (§6, primera etapa).
+
+**Especies aplicables en el editor de diseño** (`diseño.py`):
+
+- `_combo_especie`: dropdown con las 9 especies de `core/species.py` en
+  los diálogos de crear y editar árboles; al elegir una especie se
+  autocompletan Altura, Densidad de copa y Radio con los valores
+  típicos de la biblioteca.
+- El árbol guarda `especie` (atributo dinámico, no rompe serialización
+  existente); la exportación a Excel incluye la columna `Especie` y la
+  importación la restaura.
+
+**Ranking de árboles en la interfaz** (`ui/app_ui.py`,
+`ui/icon_factory.py`, `ui/menu_bar.py`):
+
+- `_dialogo_ranking_arboles`: ranking por ΔTmrt promedio sobre la
+  escena (barh matplotlib) + lista con área de sombra, cobertura y
+  ΔTmrt por árbol, incluyendo la especie; deduplica la escena
+  compartida (vars["arboles"] + vars_modelo["arboles"]).
+- Botón "Ranking" en Panel 4, entrada "Efectividad de árboles
+  (ranking)…" en menú Análisis y botón de ribbon con ícono `arbol`
+  nuevo (árbol + sombra).
+
+**Incertidumbre de calibración** (`_dialogo_escenario_ab`):
+
+- Banda `fill_between` de ±20% de `k_factor` (k_lo/k_hi) alrededor de
+  la curva del escenario B, más línea de resumen con el ancho de banda
+  en el pico y, si el k_factor fue calibrado, la fecha de calibración.
+
+**UTCI oficial** (`core/thermal_comfort.py`, `core/scenario.py`):
+
+- Delegación a `pythermalcomfort` (Bröde et al. 2012, modelo Fiala):
+  `utci()` y `categoria_utci()` con import perezoso
+  (`UTCI_DISPONIBLE`); si la librería falta, la app lo informa en vez
+  de fallar.
+- `escenario_horario` ahora reporta `utci_sol`/`utci_sombra` y
+  `resumen_escenario` los picos con su categoría; se muestran en el
+  diálogo Confort y en el resumen de Escenario A/B.
+- Instalación: `pip install --no-deps pythermalcomfort` (v4.4: pide
+  `numpy<2.3`, pero funciona con numpy 2.4.2; la build de 2.2.6 desde
+  fuente falla en Python 3.14). `requirements.txt`: `numpy>=1.26,<3`
+  y `pythermalcomfort>=4.4` con la nota del `--no-deps`.
+- Se reemplazó la limitación documentada en §5.5: el UTCI ya no se
+  simula, se delega.
+
+**Refactor de `ui/app_ui.py` — primera etapa (§6, ítems 1-2 parciales):**
+
+- `ui/panels.py`: funciones de módulo con `app` explícito para
+  construir Panel 1 y Panel 4 (`setup_panel_1`, `setup_panel_4`),
+  `crear_control` y los helpers de modo/ciudad (`_toggle_modelo_mode`,
+  `_toggle_edicion_mode`, `_toggle_panel2_advanced`,
+  `_update_city_options`, `_filter_city_options`, `_apply_location`,
+  `_build_controles`). De paso se corrigió un bug latente: el binding
+  `<Return>` de `crear_control` llamaba a un `actualizar_dia` global
+  inexistente (NameError al presionar Enter); ahora llama al método
+  real de la app.
+- `ui/dialogs.py`: clase `HerramientasDialogs(app)` con los 6 diálogos
+  de herramientas (calibrador, confort, escenario A/B, validación CSV,
+  especies, ranking) + sus 6 helpers internos.
+- `SombraApp` conserva la API pública: los 6 `_dialogo_*` quedan como
+  bound methods (binding en `__init__` desde `HerramientasDialogs`) y
+  los helpers de panel como delegados de un renglón — los módulos
+  externos (`core/settings_manager.py`, `core/app_state.py`) y los
+  call sites internos no cambian.
+- `SombraApp` quedó en ~2300 líneas de solo orquestación UI. La lógica
+  de negocio (Tmrt, escenarios) ya vive en `core/`; el paso 3 del plan
+  (migrar el resto de paneles, ej. `setup_panel_3`) queda como trabajo
+  futuro del mismo patrón.
+
+**Tests:** 2 casos nuevos en `test/test_herramientas.py` (UTCI delega e
+informa "Estrés de calor fuerte" con 30<v<45; sombra nunca supera al
+sol en UTCI horario) y correcciones de API (ta→tdb, DataFrame→objeto
+UTCI). Suite total: 59/59 verdes.
+
 ## 6. Pendiente — la refactorización grande
 
 `ui/app_ui.py` es una sola clase (`SombraApp`) de 2251 líneas y ~100

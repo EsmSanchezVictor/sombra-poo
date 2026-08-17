@@ -23,15 +23,23 @@ Lo que ofrece (todas fórmulas publicadas, reproducibles):
 
 LIMITACIÓN DOCUMENTADA: el UTCI completo (Universal Thermal Climate
 Index, Bröde et al. 2012) es un polinomio de ~40 términos calibrado
-sobre el modelo fisiológico de Fiala; no se implementa acá (requiere
-el modelo termorregulatorio completo o la librería `pythermalcomfort`).
-Los índices de este módulo son los operativos estándar (NWS/Steadman,
-ISO 7726) y cubren el uso de planeamiento urbano; si se necesita
-reportar UTCI oficial, se agrega la dependencia y se delega en ella.
+sobre el modelo fisiológico de Fiala; NO se reimplementa acá — se
+delega en la librería `pythermalcomfort` (dependencia opcional, la
+misma que usa el clima urbano para reportar UTCI oficial). Si la
+librería no está instalada, `utci()` devuelve None y la UI lo indica
+en lugar de fabricar un valor.
 """
 from __future__ import annotations
 
 import math
+
+UTCI_DISPONIBLE = False
+try:  # dependencia opcional — la app funciona sin ella
+    from pythermalcomfort.models import utci as _utci_pkg  # type: ignore
+
+    UTCI_DISPONIBLE = True
+except ImportError:
+    _utci_pkg = None
 
 # ---------------------------------------------------------------- instrumentos
 
@@ -108,6 +116,44 @@ def temperatura_aparente(ta: float, rh: float, v: float) -> float:
         raise ValueError("La velocidad del viento no puede ser negativa.")
     e = presion_vapor(ta, rh)
     return ta + 0.33 * e - 0.70 * v - 4.00
+
+
+def utci(ta: float, tmrt: float, v: float, rh: float) -> float | None:
+    """UTCI oficial (Bröde et al. 2012, modelo de Fiala) delegado en
+    `pythermalcomfort`. Devuelve None si la librería no está instalada
+    (la app funciona sin ella y la UI lo informa)."""
+    if _utci_pkg is None:
+        return None
+    if v < 0:
+        raise ValueError("La velocidad del viento no puede ser negativa.")
+    if rh < 0 or rh > 100:
+        raise ValueError("RH debe estar entre 0 y 100.")
+    resultado = _utci_pkg(tdb=float(ta), tr=float(tmrt), v=float(v), rh=float(rh))
+    # pythermalcomfort 4.x devuelve un objeto UTCI (atributo `.utci`);
+    # las 3.x devolvían un DataFrame — se aceptan todos para no romper
+    # con ninguna versión instalada.
+    if hasattr(resultado, "utci"):
+        return float(resultado.utci)
+    if hasattr(resultado, "iloc"):
+        return float(resultado["utci"].iloc[0])
+    return float(resultado)
+
+
+def categoria_utci(valor: float | None) -> str:
+    """Banda de estrés del UTCI (Bröde et al. 2012)."""
+    if valor is None:
+        return "UTCI no disponible"
+    if valor <= 9:
+        return "Sin estrés térmico" if valor >= 0 else "Estrés por frío"
+    if valor < 26:
+        return "Sin estrés térmico"
+    if valor < 32:
+        return "Estrés de calor moderado"
+    if valor < 38:
+        return "Estrés de calor fuerte"
+    if valor < 46:
+        return "Estrés de calor muy fuerte"
+    return "Estrés de calor extremo"
 
 
 # ---------------------------------------------------------------- categorías

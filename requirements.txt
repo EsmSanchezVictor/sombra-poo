@@ -1,6 +1,11 @@
 opencv-python>=4.9,<5
-numpy>=1.26,<2
+numpy>=1.26,<3
 pandas>=2.2,<3
 pvlib>=0.10,<1
 openpyxl>=3.1,<4
 reportlab>=4.0,<5
+# UTCI oficial (Bröde 2012). Opcional: si el entorno ya tiene numpy >= 2.3,
+# instalarla con `pip install --no-deps pythermalcomfort` (la dependencia
+# numpy<2.3 del paquete no tiene wheels para Python 3.14 y fallaría la
+# compilación desde fuente; la app funciona igual sin ella).
+pythermalcomfort>=4.4
