@@ -7,7 +7,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 import pandas as pd
 import math
 from core.scene_objects import adaptar_objetos_escena
-from core.species import nombres_especies, propiedades_especie
+from core.species import color_copa, nombres_especies, propiedades_especie
 from plot_style import CMAP_TEMPERATURA
 
 # Constantes físicas
@@ -543,7 +543,7 @@ def generar_3d(vars):
         niveles = np.linspace(nivel_min, nivel_max, 20)
 
     piso = ax.contourf(X, Y, T_display, niveles, zdir='z', offset=0,
-                        cmap=CMAP_TEMPERATURA, alpha=0.95)
+                        cmap=CMAP_TEMPERATURA, alpha=0.2)
     cbar = fig.colorbar(piso, ax=ax, shrink=0.6, aspect=12, pad=0.08)
     cbar.set_label(f"Temperatura ({temp_unit})")
     # Etiquetas de extremos al estilo "Warmest/Coolest" de la referencia,
@@ -559,7 +559,8 @@ def generar_3d(vars):
         ax.scatter(
             [a.x for a in arboles], [a.y for a in arboles], [a.h for a in arboles],
             s=[max(30, (a.radio_copa ** 2) * 25) for a in arboles],
-            c='forestgreen', alpha=0.85, depthshade=True,
+            c=[color_copa(getattr(a, "especie", "")) for a in arboles],
+            alpha=0.85, depthshade=True,
             edgecolors='darkgreen', label='Árboles',
         )
         for a in arboles:

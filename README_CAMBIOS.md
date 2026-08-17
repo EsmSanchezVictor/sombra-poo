@@ -376,6 +376,51 @@ informa "Estrés de calor fuerte" con 30<v<45; sombra nunca supera al
 sol en UTCI horario) y correcciones de API (ta→tdb, DataFrame→objeto
 UTCI). Suite total: 59/59 verdes.
 
+### 5.7 Base de especies editable, especies argentinas y vistas 3D
+
+**Base de especies editable** (`core/species.py`):
+
+- `data/species_db.json` (gitignored) guarda las especies creadas o
+  modificadas por el usuario; `especies_db()` la superpone a la base
+  original de código. Editar una especie original crea un override;
+  eliminarla la restaura a fábrica.
+- `validar_especie` valida la entrada completa (nombre, densidades y
+  albedo en 0-1, alturas y radios > 0, caducifolio sí/no, referencia) —
+  el editor pide todos los campos antes de guardar.
+- Editor nuevo `_dialogo_editar_especies`: lista de especies +
+  formulario completo (Crear/Editar/Eliminar con confirmación), desde
+  el menú Análisis → "Editar base de especies…" y desde el botón
+  "Editar base de especies…" de la Biblioteca. La Biblioteca ahora
+  muestra la base fusionada (originales + del usuario).
+- El dropdown de especies del editor de diseño (`_combo_especie`) y el
+  ranking usan `nombres_especies()`/`propiedades_especie()`, que ya
+  leen la base fusionada — las especies nuevas se reflejan al instante.
+
+**Especies típicas de Argentina y nativas** — 13 entradas nuevas en la
+base original (total 22): Algarrobo blanco (*Prosopis alba*), Quebracho
+colorado (*Schinopsis balansae*), Lapacho rosado (*Handroanthus
+impetiginosus*), Palo borracho (*Ceiba speciosa*), Ombú (*Phytolacca
+dioica*), Ceibo (*Erythrina crista-galli*), Espinillo (*Vachellia
+caven*), Caldén (*Prosopis caldenia*), Tala (*Celtis tala*), Sauce
+criollo (*Salix humboldtiana*), Cina-cina (*Parkinsonia aculeata*),
+Mora (*Morus alba*) y Tilo (*Tilia × moltkei*), con densidades,
+transmitancias y referencias (Cabrera, *Flora arbórea argentina* 1942;
+Cremaschi & Botta 2013; INTA).
+
+**Vistas 3D** (`diseño.py::generar_3d`, `modelo_con_excel.py::generar_3d`):
+
+- Las copas se colorean por especie (`color_copa`): verde oscuro para
+  perennes, verde claro para caducifolias (follaje de verano),
+  `forestgreen` si el árbol no tiene especie — en modo diseño y en el
+  modelo.
+- El plano del suelo ahora es translúcido: `alpha=0.2` (80% de
+  transparencia) para que las curvas de temperatura no tapen los
+  objetos de la escena.
+
+**Tests:** 4 casos nuevos (CRUD con override/restauración de fábrica,
+validación por campo, presencia y rangos de las 13 nativas, colores de
+copa por especie). Suite total: 63/63 verdes.
+
 ## 6. Pendiente — la refactorización grande
 
 `ui/app_ui.py` es una sola clase (`SombraApp`) de 2251 líneas y ~100

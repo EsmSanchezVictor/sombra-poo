@@ -296,3 +296,89 @@ def test_especies_caducifolias_y_perennes():
     assert "Plátano (Platanus × acerifolia)" in nombres
     assert ESPECIES["Plátano (Platanus × acerifolia)"]["caducifolio"] is True
     assert ESPECIES["Pino (Pinus sp.)"]["caducifolio"] is False
+
+
+# ---------------------------------------------------------------- base de especies editable
+
+def test_species_db_crud(monkeypatch, tmp_path):
+    import core.species as species
+    monkeypatch.setattr(species, "_ruta_db", lambda: str(tmp_path / "species_db.json"))
+    props_falsa = {
+        "rho_copa": 0.5, "transmitancia": 0.4, "caducifolio": True,
+        "albedo_copa": 0.2, "altura_tipica": 6.0, "radio_copa_tipico": 2.0,
+        "ref": "test local",
+    }
+    ok, err = species.guardar_especie("Falsa mimosa", props_falsa)
+    assert ok, err
+    assert "Falsa mimosa" in species.nombres_especies()
+    assert species.propiedades_especie("Falsa mimosa")["rho_copa"] == 0.5
+    # override sobre una especie original
+    props_pino = dict(props_falsa, rho_copa=0.9, transmitancia=0.1,
+                      altura_tipica=30.0)
+    ok, err = species.guardar_especie("Pino (Pinus sp.)", props_pino)
+    assert ok, err
+    assert species.propiedades_especie("Pino (Pinus sp.)")["rho_copa"] == 0.9
+    # eliminar el override restaura el valor de fábrica
+    assert species.eliminar_especie("Pino (Pinus sp.)")
+    assert species.propiedades_especie("Pino (Pinus sp.)")["rho_copa"] == \
+        ESPECIES["Pino (Pinus sp.)"]["rho_copa"]
+    # eliminar algo sin override propio devuelve False (nada que quitar)
+    assert not species.eliminar_especie("Plátano (Platanus × acerifolia)")
+    assert species.eliminar_especie("Falsa mimosa")
+    assert "Falsa mimosa" not in species.nombres_especies()
+
+
+def test_species_db_validacion():
+    from core.species import validar_especie
+    base = {
+        "rho_copa": 0.6, "transmitancia": 0.3, "caducifolio": True,
+        "albedo_copa": 0.18, "altura_tipica": 12.0, "radio_copa_tipico": 4.0,
+        "ref": "test",
+    }
+    ok, err = validar_especie("", base)
+    assert not ok and "nombre" in err
+    ok, err = validar_especie("X", dict(base, rho_copa=1.5))
+    assert not ok and "rho_copa" in err
+    ok, err = validar_especie("X", dict(base, altura_tipica=0))
+    assert not ok and "altura_tipica" in err
+    ok, err = validar_especie("X", dict(base, ref=""))
+    assert not ok and "referencia" in err
+    ok, err = validar_especie("X", dict(base, caducifolio="quizás"))
+    assert not ok
+    ok, err = validar_especie("X", base)
+    assert ok and err == ""
+
+
+def test_especies_argentinas_nativas():
+    nombres = set(nombres_especies())
+    nativas = [
+        "Algarrobo blanco (Prosopis alba)",
+        "Quebracho colorado (Schinopsis balansae)",
+        "Lapacho rosado (Handroanthus impetiginosus)",
+        "Palo borracho (Ceiba speciosa)",
+        "Ombú (Phytolacca dioica)",
+        "Ceibo (Erythrina crista-galli)",
+        "Espinillo (Vachellia caven)",
+        "Caldén (Prosopis caldenia)",
+        "Tala (Celtis tala)",
+        "Sauce criollo (Salix humboldtiana)",
+        "Cina-cina (Parkinsonia aculeata)",
+        "Mora (Morus alba)",
+        "Tilo (Tilia × moltkei)",
+    ]
+    for nativa in nativas:
+        assert nativa in nombres, nativa
+        p = ESPECIES[nativa]
+        assert 0 < p["rho_copa"] <= 1
+        assert 0 < p["transmitancia"] <= 1
+        assert 0 < p["albedo_copa"] <= 1
+        assert p["altura_tipica"] > 0
+        assert p["radio_copa_tipico"] > 0
+
+
+def test_color_copa_3d():
+    from core.species import color_copa
+    assert color_copa("") == "forestgreen"
+    assert color_copa("Especie inexistente") == "forestgreen"
+    assert color_copa("Pino (Pinus sp.)") == "#2E7D32"
+    assert color_copa("Plátano (Platanus × acerifolia)") == "#66BB6A"

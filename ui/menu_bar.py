@@ -124,6 +124,10 @@ class MenuBar:
             command=self.app._dialogo_especies,
         )
         analisis_menu.add_command(
+            label="Editar base de especies…",
+            command=self.app._dialogo_editar_especies,
+        )
+        analisis_menu.add_command(
             label="Efectividad de árboles (ranking)…",
             command=self.app._dialogo_ranking_arboles,
         )

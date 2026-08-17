@@ -92,7 +92,8 @@ class SombraApp:
         self._herramientas = HerramientasDialogs(self)
         for _n in ("_dialogo_calibrar_k_factor", "_dialogo_confort",
                    "_dialogo_escenario_ab", "_dialogo_validar_csv",
-                   "_dialogo_especies", "_dialogo_ranking_arboles"):
+                   "_dialogo_especies", "_dialogo_editar_especies",
+                   "_dialogo_ranking_arboles"):
             setattr(self, _n, getattr(self._herramientas, _n))
         self.current_project_path = self.settings.get("last_project_path")
         self.current_location = None        

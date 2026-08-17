@@ -25,5 +25,7 @@ proyectos/
 # rutas absolutas locales (last_project_path) — no hay nada que
 # versionar. Las máscaras son datos de trabajo del usuario.
 data/settings.json
+# Base de especies editada por el usuario (se regenera desde core/species.py)
+data/species_db.json
 mascaras.json
 mascarascoco.json
