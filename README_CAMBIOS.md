@@ -421,6 +421,39 @@ Cremaschi & Botta 2013; INTA).
 validación por campo, presencia y rangos de las 13 nativas, colores de
 copa por especie). Suite total: 63/63 verdes.
 
+### 5.8 Panel 2 — carrusel de elementos analizados en vez de historial de texto
+
+A pedido del usuario: se eliminaron el "Historial de elementos" del
+sidebar del Panel 2 y la caja de resultados del área principal, y se
+los reemplazó por un **carrusel de miniaturas** en la parte inferior
+del Panel 2 (`ui/app_ui.py::carrusel`):
+
+- Cada árbol/elemento analizado aparece como miniatura de su
+  **histograma** (`resultados/histogramas/helementoN.png`); la
+  miniatura se agrega automáticamente cuando el histograma se genera
+  (vía `poblar_lista_snapshots`, que ahora refresca el carrusel además
+  del contador de la barra de estado).
+- Las flechas ◀ ▶ desplazan la franja; cada miniatura lleva la etiqueta
+  del elemento y su % de sombra.
+- Un click en una miniatura recarga **todo** el análisis del elemento:
+  la foto, las áreas dibujadas de sombra (azul) y referencia (rojo),
+  sus cálculos (% de sombra y barra de Tmrt) y el histograma — se
+  regeneran curvas e histograma con `mostrar_curvas_nivel()` sobre la
+  selección restaurada.
+- Para que las áreas dibujadas se puedan redibujar al recargar, el
+  snapshot ahora guarda también `poly_calculo`/`poly_referencia`
+  (polígono/rectángulo/círculo serializado, `services/
+  snapshot_service.py::_serializar_patch`) y `cargar_snapshot` los
+  reconstruye sobre la foto (`_restaurar_patch`), además de restaurar
+  `ref_gray_mean` desde la matriz de referencia.
+- La fila de detalle del carrusel conserva los labels de resultados
+  (dimensiones, promedio de referencia, % de sombra) con los mismos
+  nombres de atributo, para no tocar los call sites existentes.
+
+**Tests:** sin cambios de suite (63/63); validado por smoke completo
+(miniaturas, click con recarga total, desplazamiento y redibujado de
+áreas).
+
 ## 6. Pendiente — la refactorización grande
 
 `ui/app_ui.py` es una sola clase (`SombraApp`) de 2251 líneas y ~100

@@ -428,7 +428,7 @@ class SombraApp:
         self.menu_bar.setup()
         self.setup_ribbon()
         self.setup_status_bar()
-        self.resultados(self.frame4)
+        self.carrusel(self.frame4)
         self.temp_sombra(self.frame5)
         self.imagen(self.frame2)
         self.curva_de_nivel(self.frame3)
@@ -639,9 +639,6 @@ class SombraApp:
             # pero ahora también restaura % de sombra y la barra de Tmrt,
             # y el resto del historial queda disponible para elegir.
             ultimo = len(self.snapshots) - 1
-            self.snapshot_listbox.selection_clear(0, tk.END)
-            self.snapshot_listbox.selection_set(ultimo)
-            self.snapshot_listbox.see(ultimo)
             self.cargar_snapshot(ultimo)
         else:
             # Proyecto sin snapshots todavía: mantener el comportamiento
@@ -696,28 +693,13 @@ class SombraApp:
         return path_value
 
     def poblar_lista_snapshots(self):
-        """Refresca el Listbox de historial con self.snapshots.
-
-        NUEVO. Se llama después de guardar un snapshot y después de abrir
-        un proyecto, para que el historial de elementos analizados quede
-        siempre sincronizado con lo que hay guardado.
-        """
-        if not hasattr(self, "snapshot_listbox"):
-            return
-        self.snapshot_listbox.delete(0, tk.END)
-        for entry in self.snapshots:
-            etiqueta = entry.get("label") or f"elemento{entry.get('n', '?')}"
-            sombra = entry.get("porcentaje_sombra")
-            sombra_txt = f" — {sombra:.0f}% sombra" if isinstance(sombra, (int, float)) else ""
-            self.snapshot_listbox.insert(tk.END, f"{etiqueta}{sombra_txt}")
+        """Sincroniza el contador de la barra de estado y el carrusel de
+        miniaturas del Panel 2 con self.snapshots. Se llama después de
+        guardar un snapshot y después de abrir un proyecto."""
         if hasattr(self, "status_elements_var"):
             self.status_elements_var.set(f"Elementos: {len(self.snapshots)}")
-
-    def _on_snapshot_select(self, _event=None):
-        seleccion = self.snapshot_listbox.curselection()
-        if not seleccion:
-            return
-        self.cargar_snapshot(seleccion[0])
+        if hasattr(self, "carrusel_inner"):
+            self._carrusel_actualizar()
 
     def cargar_snapshot(self, index: int):
         """Recarga TODO lo asociado a un elemento del historial: imagen,
@@ -754,6 +736,14 @@ class SombraApp:
             self._load_curve_from_path(curve_path)
         if reference_path and os.path.exists(reference_path):
             self._load_mask_from_path(reference_path)
+        if self.shape_selector.area_referencia is not None:
+            try:
+                self.ref_gray_mean = float(np.mean(self.shape_selector.area_referencia))
+                if hasattr(self, "lbl_promedio_referencia"):
+                    self.lbl_promedio_referencia.config(
+                        text=f"Promedio Gris Referencia: {self.ref_gray_mean:.2f}")
+            except Exception:
+                pass
         if matrix_path and os.path.exists(matrix_path):
             try:
                 self.shape_selector.area_seleccionada = pd.read_excel(matrix_path).to_numpy()
@@ -762,6 +752,26 @@ class SombraApp:
                 pass
         if histogram_path and os.path.exists(histogram_path):
             self.last_histogram_path = histogram_path
+
+        # Redibujar las áreas dibujadas sobre la foto (área de cálculo
+        # en azul y área de referencia en rojo), guardadas con el
+        # snapshot para que al recargar se vean exactamente como en el
+        # momento del análisis.
+        self.shape_selector.shape_patch_calculo = self._restaurar_patch(
+            entry.get("poly_calculo"), "blue")
+        self.shape_selector.shape_patch_referencia = self._restaurar_patch(
+            entry.get("poly_referencia"), "red")
+        if (self.shape_selector.shape_patch_calculo is not None
+                or self.shape_selector.shape_patch_referencia is not None):
+            if self.ax1 is not None and self.img_rgb is not None:
+                self.ax1.clear()
+                self.ax1.imshow(self.img_rgb)
+                self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
+                if self.shape_selector.shape_patch_calculo is not None:
+                    self.ax1.add_patch(self.shape_selector.shape_patch_calculo)
+                if self.shape_selector.shape_patch_referencia is not None:
+                    self.ax1.add_patch(self.shape_selector.shape_patch_referencia)
+                self.canvas1.draw()
 
         sombra = entry.get("porcentaje_sombra")
         self.porcentaje_sombra = sombra
@@ -792,6 +802,26 @@ class SombraApp:
                 graph.plot_temperature_scale()
 
         self.curve_button.config(state=tk.NORMAL)
+        self._carrusel_marcar(index)
+
+    def _restaurar_patch(self, datos, color):
+        """Reconstruye el patch dibujado (polígono/rectángulo/círculo)
+        a partir de lo serializado en el snapshot."""
+        if not isinstance(datos, dict):
+            return None
+        from matplotlib.patches import Circle, Polygon, Rectangle
+        tipo = datos.get("tipo")
+        pts = datos.get("puntos") or []
+        if tipo == "rectangulo" and len(pts) >= 4:
+            return Rectangle((pts[0], pts[1]), pts[2], pts[3],
+                             edgecolor=color, facecolor="none", linewidth=2)
+        if tipo == "circulo" and len(pts) >= 3:
+            return Circle((pts[0], pts[1]), pts[2],
+                          edgecolor=color, facecolor="none", linewidth=2)
+        if len(pts) >= 3:
+            return Polygon(pts, closed=True, edgecolor=color,
+                           facecolor=color, alpha=0.3, linewidth=2)
+        return None
 
     def _load_image_from_path(self, file_path: str):
         #self.img, self.img_rgb = self.image_processor.load_image(file_path)
@@ -1000,14 +1030,14 @@ class SombraApp:
         self.panel2_advanced_check.pack(fill="x", padx=20, pady=4)
         self.shadow_detector_check = tk.Checkbutton(
             panel,
-            text="Detector sombras reales (experimental)",
+            text="Detector sombras IA",
             variable=self.shadow_detector_enabled,
             bg=panel.cget("bg"),
         )
         self.shadow_detector_check.pack(fill="x", padx=20, pady=2)
 
         # Selección del tamaño de la matriz
-        matrix_label = tk.Label(panel, text="Seleccione el tamaño de la matriz:", bg=panel.cget("bg"), fg="black")
+        matrix_label = tk.Label(panel, text="tamaño de matriz:", bg=panel.cget("bg"), fg="black")
         matrix_label.pack(fill="x", padx=20, pady=10)
 
         self.matrix_size_combo = ttk.Combobox(
@@ -1037,29 +1067,6 @@ class SombraApp:
         
         self.save_dataset_button = tk.Button(panel, text="Guardar Dataset", command=self.save_dataset, state=tk.DISABLED)
         self.save_dataset_button.pack(fill="x", padx=20, pady=10)
-
-        # NUEVO: historial de elementos analizados en este proyecto.
-        # Cada vez que se guarda un snapshot (imagen + sombra + curva +
-        # Tmrt), queda listado acá. Un click carga todo ese análisis de
-        # nuevo: imagen, selección de sombra, área de referencia, curva
-        # de nivel y la barra de temperatura calculada — sin tener que
-        # rehacer el cálculo.
-        historial_label = tk.Label(panel, text="Historial de elementos:", bg=panel.cget("bg"), fg="black")
-        historial_label.pack(fill="x", padx=20, pady=(20, 4))
-
-        historial_frame = tk.Frame(panel, bg=panel.cget("bg"))
-        historial_frame.pack(fill="x", padx=20, pady=(0, 10))
-
-        historial_scroll = tk.Scrollbar(historial_frame, orient=tk.VERTICAL)
-        self.snapshot_listbox = tk.Listbox(
-            historial_frame, height=6,
-            yscrollcommand=historial_scroll.set, exportselection=False,
-        )
-        historial_scroll.config(command=self.snapshot_listbox.yview)
-        self.snapshot_listbox.pack(side=tk.LEFT, fill="x", expand=True)
-        historial_scroll.pack(side=tk.RIGHT, fill="y")
-        self.snapshot_listbox.bind("<<ListboxSelect>>", self._on_snapshot_select)
-        self.poblar_lista_snapshots()
 
         self._toggle_panel2_advanced()
         
@@ -2188,55 +2195,159 @@ class SombraApp:
             padx=12,
             pady=12,
         )
-    def resultados(self, frame):
-        """Configura el área de resultados."""
-        #result_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
+    def carrusel(self, frame):
+        """Carrusel de elementos analizados (Panel 2, parte inferior).
+
+        Reemplaza la caja de resultados y el historial de texto: muestra
+        una miniatura del HISTOGRAMA de cada árbol/elemento analizado
+        (se agrega al generarse el histograma, vía self.snapshots). Un
+        click en una miniatura recarga la foto, las áreas dibujadas de
+        sombra y referencia, sus cálculos (% sombra y Tmrt) y el
+        histograma. La fila de detalle mantiene los labels de resultados
+        que usan el resto de la app.
+        """
         result_frame = self.create_card(frame)
         result_frame.pack(expand=True, fill='both', pady=5)
 
-        #sombra_frame = tk.Frame(result_frame)
-        sombra_frame = tk.Frame(result_frame, bg=self.palette["panel"])
-        sombra_frame.pack(side=tk.LEFT, padx=50, pady=10)
+        detalle = tk.Frame(result_frame, bg=self.palette["panel"])
+        detalle.pack(fill="x", padx=6, pady=(4, 2))
 
         self.lbl_dimensiones_calculo = tk.Label(
-            #sombra_frame, text="Área de Cálculo: N/A", font=("Arial", 12, "bold")
-            sombra_frame,
-            text="Dimensiones del Área de Cálculo: N/A",
-            font=("Arial", 9, "bold"),
-            bg=self.palette["panel"],
-            fg="#2c3e50",
+            detalle, text="Dimensiones del Área de Cálculo: N/A",
+            font=("Arial", 8, "bold"), bg=self.palette["panel"], fg="#2c3e50",
         )
-        self.lbl_dimensiones_calculo.pack(pady=5)
-
+        self.lbl_dimensiones_calculo.pack(side="left", padx=6)
         self.lbl_dimensiones_referencia = tk.Label(
-            #sombra_frame, text="Área de Referencia: N/A", font=("Arial", 12, "bold")
-            sombra_frame,
-            text="Dimensiones del Área de Referencia: N/A",
-            font=("Arial", 9, "bold"),
-            bg=self.palette["panel"],
-            fg="#2c3e50",        
+            detalle, text="Dimensiones del Área de Referencia: N/A",
+            font=("Arial", 8, "bold"), bg=self.palette["panel"], fg="#2c3e50",
         )
-        self.lbl_dimensiones_referencia.pack(pady=5)
-
+        self.lbl_dimensiones_referencia.pack(side="left", padx=6)
         self.lbl_promedio_referencia = tk.Label(
-            #sombra_frame, text="Promedio Gris Referencia: N/A", font=("Arial", 12, "bold")
-            sombra_frame,
-            text="Promedio Gris Referencia: N/A",
-            font=("Arial", 9, "bold"),
-            bg=self.palette["panel"],
-            fg="#2c3e50",
+            detalle, text="Promedio Gris Referencia: N/A",
+            font=("Arial", 8, "bold"), bg=self.palette["panel"], fg="#2c3e50",
         )
-        self.lbl_promedio_referencia.pack(pady=5)
-
+        self.lbl_promedio_referencia.pack(side="left", padx=6)
         self.lbl_porcentaje_sombra = tk.Label(
-            #sombra_frame, text="Porcentaje de sombra: N/A", font=("Arial", 12, "bold")
-            sombra_frame,
-            text="Porcentaje de sombra: N/A",
-            font=("Arial", 9, "bold"),
-            bg=self.palette["panel"],
-            fg="#2c3e50",
+            detalle, text="Porcentaje de sombra: N/A",
+            font=("Arial", 8, "bold"), bg=self.palette["panel"], fg="#2c3e50",
         )
-        self.lbl_porcentaje_sombra.pack(pady=5)
+        self.lbl_porcentaje_sombra.pack(side="left", padx=6)
+
+        # franja del carrusel con flechas de desplazamiento
+        strip = tk.Frame(result_frame, bg=self.palette["panel"])
+        strip.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.carrusel_izq = tk.Button(
+            strip, text="◀", bd=0, bg=self.palette["panel"], fg="#2c3e50",
+            font=("Arial", 10, "bold"), command=lambda: self._carrusel_desplazar(-1),
+        )
+        self.carrusel_izq.pack(side="left", fill="y")
+        self.carrusel_canvas = tk.Canvas(
+            strip, height=118, bg=self.palette["panel"], highlightthickness=0,
+        )
+        self.carrusel_canvas.pack(side="left", fill="both", expand=True)
+        self.carrusel_der = tk.Button(
+            strip, text="▶", bd=0, bg=self.palette["panel"], fg="#2c3e50",
+            font=("Arial", 10, "bold"), command=lambda: self._carrusel_desplazar(1),
+        )
+        self.carrusel_der.pack(side="right", fill="y")
+        self.carrusel_inner = tk.Frame(self.carrusel_canvas, bg=self.palette["panel"])
+        self._carrusel_inner_win = self.carrusel_canvas.create_window(
+            (0, 0), window=self.carrusel_inner, anchor="nw")
+        self.carrusel_inner.bind(
+            "<Configure>",
+            lambda _e: self.carrusel_canvas.configure(
+                scrollregion=self.carrusel_canvas.bbox("all")))
+        self._carrusel_photos = []
+        self._carrusel_frames = []
+        self._carrusel_sel = None
+        self.poblar_lista_snapshots()
+
+    def _carrusel_actualizar(self):
+        """(Re)construye las miniaturas del carrusel desde los snapshots
+        que ya tienen histograma generado."""
+        if not hasattr(self, "carrusel_inner"):
+            return
+        for widget in self.carrusel_inner.winfo_children():
+            widget.destroy()
+        self._carrusel_photos = []
+        self._carrusel_frames = []
+        self._carrusel_sel = None
+        project = self.project_manager.current_project
+        root_path = project.root_path if project else None
+        for idx, entry in enumerate(self.snapshots):
+            hist = entry.get("histogram")
+            if not hist:
+                continue
+            path = hist if os.path.isabs(hist) else (
+                os.path.join(root_path, hist) if root_path else None)
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                img = Image.open(path)
+            except Exception:
+                continue
+            ancho, alto = img.size
+            alto_t = 86
+            ancho_t = max(1, int(ancho * alto_t / alto))
+            photo = ImageTk.PhotoImage(img.resize((ancho_t, alto_t), Image.LANCZOS))
+            self._carrusel_photos.append(photo)
+            marco = tk.Frame(
+                self.carrusel_inner, bg=self.palette["panel"],
+                highlightbackground=self.palette["border"],
+                highlightthickness=1, bd=0,
+            )
+            marco.pack(side="left", padx=3)
+            etiqueta = entry.get("label") or f"elemento{entry.get('n', '?')}"
+            sombra = entry.get("porcentaje_sombra")
+            if isinstance(sombra, (int, float)):
+                etiqueta += f" · {sombra:.0f}%"
+            lbl_img = tk.Label(marco, image=photo, bg=self.palette["panel"], cursor="hand2")
+            lbl_img.pack()
+            lbl_img.bind("<Button-1>", lambda _e, i=idx: self._carrusel_seleccionar(i))
+            tk.Label(marco, text=etiqueta, font=("Arial", 7),
+                     bg=self.palette["panel"]).pack()
+            self._carrusel_frames.append((marco, idx))
+        if self._carrusel_frames:
+            self._carrusel_marcar(len(self.snapshots) - 1)
+
+    def _carrusel_marcar(self, index):
+        """Resalta la miniatura del elemento cargado."""
+        if not hasattr(self, "_carrusel_frames"):
+            return
+        for marco, idx in self._carrusel_frames:
+            if idx == index:
+                marco.config(relief="raised", highlightthickness=2,
+                             highlightbackground="#2196F3")
+                self._carrusel_sel = index
+            else:
+                marco.config(relief="flat", highlightthickness=1,
+                             highlightbackground=self.palette["border"])
+
+    def _carrusel_seleccionar(self, index):
+        """Click en una miniatura: recarga TODO lo asociado al elemento
+        (foto, áreas dibujadas, cálculos, curvas e histograma)."""
+        self.cargar_snapshot(index)
+        # regenera curvas de nivel + histograma desde la selección
+        # restaurada (área de cálculo y de referencia ya cargadas)
+        if self.shape_selector.area_seleccionada is not None:
+            try:
+                self.mostrar_curvas_nivel()
+            except Exception as exc:
+                print(f"[carrusel] no se pudo regenerar curvas/histograma: {exc}")
+        self._carrusel_marcar(index)
+
+    def _carrusel_desplazar(self, direccion):
+        """Desplaza el carrusel una 'página' de ~140 px a izquierda o
+        derecha (botones ◀ ▶)."""
+        canvas = self.carrusel_canvas
+        x0, x1 = canvas.xview()
+        bbox = canvas.bbox("all")
+        total = bbox[2] - bbox[0] if bbox else 0
+        if total <= 0:
+            return
+        paso = 140 / total
+        nuevo = min(max(x0 + direccion * paso, 0.0), max(0.0, 1.0 - (x1 - x0)))
+        canvas.xview_moveto(nuevo)
     def temp_sombra(self, frame):
         """Configura el área de temperatura en sombra."""
         #temp_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)

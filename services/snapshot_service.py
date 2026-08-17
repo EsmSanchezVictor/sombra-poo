@@ -88,6 +88,12 @@ class SnapshotService:
             "reference": _rel(mask_path),
             "histogram": _rel(histogram_path),
             "porcentaje_sombra": getattr(self.app, "porcentaje_sombra", None),
+            "poly_calculo": self._serializar_patch(
+                getattr(getattr(self.app, "shape_selector", None),
+                        "shape_patch_calculo", None)),
+            "poly_referencia": self._serializar_patch(
+                getattr(getattr(self.app, "shape_selector", None),
+                        "shape_patch_referencia", None)),
             "temp_ambient": None,
             "tmrt_sol": None,
             "tmrt_sombra": None,
@@ -121,3 +127,23 @@ class SnapshotService:
             messagebox.showwarning("Snapshot", f"No se encontró {label} para guardar.")
             return
         shutil.copy(source, target)
+
+    def _serializar_patch(self, patch) -> dict | None:
+        """Serializa el área dibujada sobre la foto (polígono, rectángulo
+        o círculo) para poder redibujarla al recargar el snapshot."""
+        if patch is None:
+            return None
+        import matplotlib.patches as mpatches
+        if isinstance(patch, mpatches.Polygon):
+            return {"tipo": "poligono",
+                    "puntos": [list(p) for p in patch.get_xy()]}
+        if isinstance(patch, mpatches.Rectangle):
+            x, y = patch.get_xy()
+            return {"tipo": "rectangulo",
+                    "puntos": [float(x), float(y),
+                               float(patch.get_width()), float(patch.get_height())]}
+        if isinstance(patch, mpatches.Circle):
+            cx, cy = patch.center
+            return {"tipo": "circulo",
+                    "puntos": [float(cx), float(cy), float(patch.radius)]}
+        return None
