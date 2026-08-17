@@ -104,6 +104,27 @@ class MenuBar:
         )
         analisis_menu.add_separator()
         analisis_menu.add_command(
+            label="Asistente de calibración de k_factor…",
+            command=self.app._dialogo_calibrar_k_factor,
+        )
+        analisis_menu.add_command(
+            label="Confort térmico (Heat Index / T. aparente)…",
+            command=self.app._dialogo_confort,
+        )
+        analisis_menu.add_command(
+            label="Escenario A/B horario…",
+            command=self.app._dialogo_escenario_ab,
+        )
+        analisis_menu.add_command(
+            label="Validar contra mediciones (CSV)…",
+            command=self.app._dialogo_validar_csv,
+        )
+        analisis_menu.add_command(
+            label="Biblioteca de especies…",
+            command=self.app._dialogo_especies,
+        )
+        analisis_menu.add_separator()
+        analisis_menu.add_command(
             label="Generar informe completo (PDF)…",
             accelerator="Ctrl+Shift+P",
             command=self.app.generar_informe_completo,

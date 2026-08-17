@@ -243,6 +243,62 @@ re-agregar si alguna vez se quiere tipografía global); y el archivo
 sacaron los imports que quedaron sin uso: `datetime` de `diseño.py` y
 `matplotlib.pyplot` de `plot_style.py`. `pytest test/ -q` sigue 25/25.
 
+### 5.5 Herramientas nuevas (v3.2) — confort, calibración y validación
+
+Implementación del paquete de herramientas propuesto por el agente y
+aprobado por el usuario (comenzando por el asistente de calibración de
+`k_factor`). Todos los cálculos reutilizan el motor existente
+(`Temperatura`, `calcular_sombra_arboles`) — no duplican física.
+
+**Módulos nuevos en `core/`:**
+
+| Módulo | Contenido |
+|---|---|
+| `thermal_comfort.py` | `globo_negro_a_tmrt` (ISO 7726, globo 150 mm), `indice_calor` (Heat Index NWS/Rothfusz 1990 con los 2 ajustes), `temperatura_aparente` (Steadman 1984, versión BoM), `presion_vapor` (Magnus), `categoria_estres` (bandas NWS), `grados_hora` (integral trapecio) |
+| `climate_profile.py` | `velocidad_viento` (perfil logarítmico Stull 1988), `z0_superficie` (rugosidad de Wieringa), `atenuacion_copa`, `viento_categoria_a_ms` (nulo 0.5 / moderado 4.0 / fuerte 10 — coincide con McAdams), `descomponer_radiacion` (GHI→directa/difusa/reflejada, fracción difusa por nubosidad rango Reindl 1990) |
+| `scenario.py` | `temperatura_diurna` (senoidal, mín 6 h / máx 15 h), `escenario_horario` (Tmrt, Heat Index y T. aparente en sol/sombra hora por hora), `resumen_escenario` (picos, grados-hora, categorías), `comparar_escenarios` (A/B), `ranking_arboles` (área de sombra y ΔTmrt promedio por árbol, directo del mapa de transmitancia), `mapa_estres` (clasificación de mapa 2D, % de área por banda) |
+| `validation.py` | `leer_csv_mediciones` (tg/tmrt, ta, rad, v, hora; convierte globo→Tmrt), `metricas` (RMSE, MAE, bias, R²), `k_factor_desde_mediciones` (mínimos cuadrados forzado por el origen) |
+| `species.py` | `ESPECIES` (9 entradas con rho_copa, transmitancia, caducidad, albedo, alturas y referencia bibliográfica), `propiedades_especie`, `nombres_especies` |
+
+**Integración en la interfaz:**
+
+- `k_factor` ahora se persiste en `data/settings.json` (default 0.04,
+  clave nueva en `SettingsManager.default_settings`) y se aplica a las
+  3 instancias de `Temperatura` de `ui/app_ui.py`. El Panel 4 tiene un
+  campo "Humedad relativa (%)" y una sección "Herramientas" con 5
+  botones.
+- Diálogos nuevos (patrón de los existentes, con gráficos matplotlib
+  embebidos donde aportan): **Calibrar k_factor** (lista de mediciones
+  de globo + ajuste por mínimos cuadrados con R²/RMSE + "Aplicar y
+  guardar"), **Confort térmico** (HI y AT en sol/sombra + bandas de
+  estrés + mapa si el modelo ya se ejecutó), **Escenario A/B** (barrido
+  horario con 2 % de sombra, curvas de Heat Index y resumen de
+  grados-hora y ΔTmrt), **Validar CSV** (scatter observado vs. modelo,
+  RMSE/MAE/bias/R², k_factor sugerido aplicable), **Especies**
+  (biblioteca con propiedades y referencias).
+- Menú Análisis: 5 entradas nuevas. Ribbon Análisis: botones
+  "Calibrar" y "Confort" con íconos nuevos en `icon_factory.py`
+  (`calibrar` = medidor, `confort` = termómetro).
+- El item de "geometría 3D de copa" de la propuesta ya estaba cubierto:
+  `calcular_sombra_arboles` modela la copa como elipse elongada según
+  la elevación solar (verificado por tests) — no se reimplementó.
+
+**Limitación documentada (integridad científica):** el UTCI completo
+(polinomio de ~40 términos de Bröde et al. 2012, calibrado sobre el
+modelo fisiológico de Fiala) NO se implementó de memoria — requiere el
+modelo termorregulatorio o la librería `pythermalcomfort`. Los índices
+operativos usados (Heat Index NWS, T. aparente Steadman, ISO 7726) son
+los estándar de planeamiento urbano; si se reporta UTCI oficial se
+agrega la dependencia y se delega. Índice de confort fisiología (PET)
+también queda como trabajo futuro (requiere MEMI).
+
+**Tests:** `test/test_herramientas.py` (28 casos): fórmulas verificadas
+contra valores publicados (ej. Heat Index 90°F/60%RH ≈ 100°F del NWS),
+conservación de energía en la descomposición radiativa, perfil de
+viento, ranking de árboles (el grande gana), mapa de estrés, mínimos
+cuadrados que recuperan k exacto, lectura de CSV con errores
+controlados. Suite total: 57/57 verdes.
+
 ## 6. Pendiente — la refactorización grande
 
 `ui/app_ui.py` es una sola clase (`SombraApp`) de 2251 líneas y ~100

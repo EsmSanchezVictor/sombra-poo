@@ -23,6 +23,8 @@ class SettingsManager:
             "default_city": "Paraná",
             "default_cloudiness": "Despejado",
             "default_wind": "moderado",
+            "k_factor": 0.04,
+            "k_factor_info": None,
             "last_project_path": None,
         }
 

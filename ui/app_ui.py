@@ -17,6 +17,11 @@ from core.app_state import AppState
 from core.settings_manager import SettingsManager
 from core.project_manager import ProjectManager
 from core.file_versioning import safe_path
+from core import scenario as scenario_tools
+from core import thermal_comfort
+from core.climate_profile import viento_categoria_a_ms
+from core.species import ESPECIES as CATALOGO_ESPECIES, nombres_especies
+from core.validation import k_factor_desde_mediciones, leer_csv_mediciones, metricas
 from image_processor import ImageProcessor
 #from mouse_pixel_value import MouseHoverPixelValueWithTooltip
 from save_pdf import PDFReportGenerator
@@ -78,6 +83,8 @@ class SombraApp:
         self.settings_path = os.path.join(base_dir, "data", "settings.json")
         self.settings_manager = SettingsManager(self.settings_path)
         self.settings = self.settings_manager.load()
+        self.k_factor = float(self.settings.get("k_factor", 0.04))
+        self.k_factor_info = self.settings.get("k_factor_info")
         self.current_project_path = self.settings.get("last_project_path")
         self.current_location = None        
         self.is_dirty = False
@@ -920,6 +927,7 @@ class SombraApp:
         self.simple_city = tk.StringVar()
         self.simple_cloudiness = tk.StringVar(value="Despejado")
         self.simple_temp_air_c = tk.DoubleVar(value=25.0)
+        self.simple_rh = tk.DoubleVar(value=60.0)
         self.temp_unit = tk.StringVar(value=self.settings.get("temp_unit", self.settings.get("units", "C")))
         self.distance_unit = tk.StringVar(value=self.settings.get("distance_unit", "m"))
         self.locations_path = os.path.join(self.base_dir, "data", "locations_latam.csv")
@@ -1399,6 +1407,35 @@ class SombraApp:
             textvariable=self.vars_modelo["viento"],
             values=["nulo", "moderado", "fuerte"],
         ).grid(row=10, column=0, sticky="ew", pady=(2,6), padx=0)
+
+        tk.Label(self.simple_frame, text="Humedad relativa (%)", bg=panel.cget("bg")).grid(
+            row=11, column=0, sticky="w", pady=(2, 0)
+        )
+        tk.Entry(self.simple_frame, textvariable=self.simple_rh).grid(
+            row=12, column=0, sticky="ew", pady=(2,6), padx=0
+        )
+
+        # Herramientas de confort y calibración (análisis térmico)
+        herramientas = tk.Frame(contenido, bg=panel.cget("bg"))
+        herramientas.grid(row=3, column=0, sticky="ew", pady=(2, 6))
+        herramientas.grid_columnconfigure(0, weight=1)
+        tk.Label(herramientas, text="Herramientas", bg=panel.cget("bg"),
+                 font=("Arial", 9, "bold"), anchor="w").grid(
+            row=0, column=0, sticky="ew", pady=(0, 4))
+        herramientas_estado = {
+            "Calibrar k_factor": self._dialogo_calibrar_k_factor,
+            "Confort térmico": self._dialogo_confort,
+            "Escenario A/B": self._dialogo_escenario_ab,
+            "Validar CSV": self._dialogo_validar_csv,
+            "Especies": self._dialogo_especies,
+        }
+        fila_btn = 1
+        for texto, comando in herramientas_estado.items():
+            tk.Button(herramientas, text=texto, command=comando,
+                      anchor="w", bg="#2196F3", fg="white",
+                      font=("Arial", 8, "bold")).grid(
+                row=fila_btn, column=0, sticky="ew", pady=2)
+            fila_btn += 1
 
         self.advanced_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         self.advanced_frame.grid(row=2, column=0, sticky="nsew", pady=6)
@@ -2289,7 +2326,7 @@ class SombraApp:
         if not self.require_project("generar curva de sensibilidad"):
             return
         temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
-        calculador = Temperatura(lat, lon)
+        calculador = Temperatura(lat, lon, k_factor=self.k_factor)
 
         project = self.project_manager.current_project
         analisis_dir = os.path.join(project.root_path, "resultados", "analisis")
@@ -2437,6 +2474,8 @@ class SombraApp:
         grupo_analisis = _grupo("Análisis")
         _boton(grupo_analisis, icon_factory.obtener_icono("barras"), "Comparar", self.mostrar_analisis_comparativo)
         _boton(grupo_analisis, icon_factory.obtener_icono("curva"), "Sensib.", self.mostrar_curva_sensibilidad)
+        _boton(grupo_analisis, icon_factory.obtener_icono("calibrar"), "Calibrar", self._dialogo_calibrar_k_factor)
+        _boton(grupo_analisis, icon_factory.obtener_icono("confort"), "Confort", self._dialogo_confort)
         _boton(grupo_analisis, icon_factory.obtener_icono("pdf"), "Informe", self.generar_informe_completo)
 
     def setup_status_bar(self):
@@ -2697,7 +2736,7 @@ class SombraApp:
             fecha_str = self.entry_date.get().replace('\ufeff', '').strip()
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
             
-            self.temp_calculator = Temperatura(latitude, longitude)
+            self.temp_calculator = Temperatura(latitude, longitude, k_factor=self.k_factor)
             self.solar_engine.use_pvlib = bool(self.use_pvlib_engine.get())
             _ = self.solar_engine.get_solar_position(latitude, longitude, datetime.combine(fecha, datetime.min.time()))
             result = self.temp_calculator.calculate_tmrt(
@@ -2805,6 +2844,418 @@ class SombraApp:
             fecha = ahora.date()
         return temp_ambient, hora, fecha, lat, lon
 
+    # ---------------------------------------------------------------- herramientas
+    # Asistente de calibración de k_factor, confort térmico, escenario
+    # A/B horario, validación contra mediciones y biblioteca de especies.
+
+    def _dialogo_calibrar_k_factor(self):
+        """Asistente de calibración: ingresa mediciones de campo
+        (temperatura de globo o Tmrt, temperatura de aire, radiación,
+        viento), ajusta k_factor por mínimos cuadrados y lo persiste en
+        settings.json para que todo el modelo lo use."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Asistente de calibración de k_factor")
+        dlg.geometry("640x520")
+        dlg.transient(self.root)
+
+        intro = ("k_factor convierte la radiación efectiva en elevación de Tmrt "
+                 "(Tmrt = Ta + k·GHI). Ingresá mediciones de campo y el asistente "
+                 "ajusta k por mínimos cuadrados. Los cambios se aplican a todo el modelo.")
+        tk.Label(dlg, text=intro, wraplength=600, justify="left").pack(padx=12, pady=8)
+
+        cuerpo = tk.Frame(dlg)
+        cuerpo.pack(fill="both", expand=True, padx=12)
+        cuerpo.grid_columnconfigure(1, weight=1)
+
+        entradas = {}
+        fila = 0
+        for i, (texto, clave, por_defecto) in enumerate([
+            ("Tg globo (°C)", "tg", ""),
+            ("Ta aire (°C)", "ta", "30.0"),
+            ("Radiación (W/m²)", "rad", "750.0"),
+            ("Viento (m/s)", "v", "0.5"),
+        ]):
+            tk.Label(cuerpo, text=texto).grid(row=fila, column=0, sticky="w", pady=2)
+            var = tk.StringVar(value=por_defecto)
+            entradas[clave] = var
+            tk.Entry(cuerpo, textvariable=var).grid(row=fila, column=1, sticky="ew", pady=2)
+            fila += 1
+
+        botones = tk.Frame(cuerpo)
+        botones.grid(row=fila, column=0, columnspan=2, sticky="ew", pady=6)
+        tk.Button(botones, text="Agregar medición",
+                  command=lambda: self._calibrador_agregar(entradas, lista, error_lbl)).pack(side="left")
+        tk.Button(botones, text="Quitar seleccionada",
+                  command=lambda: self._calibrador_quitar(lista, error_lbl)).pack(side="left", padx=6)
+        tk.Button(botones, text="Calcular",
+                  command=lambda: self._calibrador_calcular(lista, resultado, error_lbl)).pack(side="right")
+        fila += 1
+
+        lista = tk.Listbox(cuerpo, height=6)
+        lista.grid(row=fila, column=0, columnspan=2, sticky="nsew", pady=4)
+        cuerpo.grid_rowconfigure(fila, weight=1)
+        fila += 1
+
+        error_lbl = tk.Label(cuerpo, text="", fg="red", justify="left", anchor="w")
+        error_lbl.grid(row=fila, column=0, columnspan=2, sticky="ew")
+        fila += 1
+
+        resultado = tk.Label(cuerpo, text="", justify="left", anchor="w", fg="#1565C0")
+        resultado.grid(row=fila, column=0, columnspan=2, sticky="ew", pady=4)
+        fila += 1
+
+        pie = tk.Frame(dlg)
+        pie.pack(fill="x", padx=12, pady=8)
+        k_actual = f"k_factor actual: {self.k_factor:.4f}"
+        if self.k_factor_info:
+            k_actual += f"  (calibrado {self.k_factor_info})"
+        tk.Label(pie, text=k_actual).pack(side="left")
+        tk.Button(pie, text="Aplicar y guardar",
+                  command=lambda: self._calibrador_aplicar(resultado, dlg)).pack(side="right")
+        tk.Button(pie, text="Cerrar", command=dlg.destroy).pack(side="right", padx=6)
+
+    def _calibrador_agregar(self, entradas, lista, error_lbl):
+        error_lbl.config(text="")
+        try:
+            fila = {k: float(entradas[k].get().replace(",", ".").strip())
+                    for k in ("tg", "ta", "rad", "v")}
+        except ValueError:
+            error_lbl.config(text="Completá los 4 campos con números válidos.")
+            return
+        if fila["rad"] <= 0:
+            error_lbl.config(text="La radiación debe ser mayor a 0 W/m².")
+            return
+        if fila["tg"] <= fila["ta"]:
+            error_lbl.config(text="Tg debe ser mayor que Ta (el globo se calienta por radiación).")
+            return
+        lista.insert("end",
+                     f"Tg={fila['tg']:.1f}°C  Ta={fila['ta']:.1f}°C  "
+                     f"rad={fila['rad']:.0f} W/m²  v={fila['v']:.1f} m/s")
+
+    def _calibrador_quitar(self, lista, error_lbl):
+        error_lbl.config(text="")
+        sel = lista.curselection()
+        if not sel:
+            error_lbl.config(text="Seleccioná una medición de la lista para quitar.")
+            return
+        lista.delete(sel[0])
+
+    def _calibrador_calcular(self, lista, resultado, error_lbl):
+        error_lbl.config(text="")
+        if lista.size() < 2:
+            error_lbl.config(text="Agregá al menos 2 mediciones para ajustar k_factor.")
+            return
+        import re
+        filas = []
+        for i in range(lista.size()):
+            valores = {k.lower(): float(v) for k, v in
+                       re.findall(r"([A-Za-z]+)=(-?[\d.]+)", lista.get(i))}
+            try:
+                tg, ta, rad, v = valores["tg"], valores["ta"], valores["rad"], valores["v"]
+            except KeyError:
+                error_lbl.config(text="La lista de mediciones está corrupta; quitá y volvé a agregar.")
+                return
+            tmrt = thermal_comfort.globo_negro_a_tmrt(tg, ta, v)
+            filas.append({"tmrt_medido": tmrt, "ta": ta, "rad": rad, "v": v, "tg": tg})
+        ajuste = k_factor_desde_mediciones(filas)
+        texto = (f"k_factor ajustado: {ajuste['k_factor']:.5f}  "
+                 f"R²: {ajuste['r2']:.3f}  RMSE: {ajuste['rmse']:.2f} °C  "
+                 f"(n={ajuste['n']})")
+        texto += "\nTmrt del globo por medición: " + ", ".join(
+            f"{f['tmrt_medido']:.1f}" for f in filas)
+        resultado.config(text=texto)
+        # el dict se guarda en el propio widget para aplicarlo después
+        resultado.ajuste = ajuste
+
+    def _calibrador_aplicar(self, resultado, dlg):
+        ajuste = getattr(resultado, "ajuste", None)
+        if not ajuste:
+            messagebox.showwarning("Sin resultados", "Calculá primero el ajuste.")
+            return
+        self.k_factor = ajuste["k_factor"]
+        self.settings["k_factor"] = ajuste["k_factor"]
+        self.settings["k_factor_info"] = f"{datetime.now().strftime('%Y-%m-%d %H:%M')}, n={ajuste['n']}"
+        self.settings_manager.write(self.settings)
+        messagebox.showinfo(
+            "Calibrado",
+            f"k_factor = {ajuste['k_factor']:.5f}\n"
+            f"R² = {ajuste['r2']:.3f} · RMSE = {ajuste['rmse']:.2f} °C\n\n"
+            "Se guardó en settings.json y se aplicó a todo el modelo.\n"
+            "Ejecutá el modelo de nuevo (F5) para ver el efecto.")
+        dlg.destroy()
+
+    def _dialogo_confort(self):
+        """Índices de confort para las condiciones actuales: Heat Index
+        (NWS/Rothfusz) y Temperatura Aparente (Steadman) en sol y en
+        sombra, más la clasificación de estrés del mapa de Tmrt si el
+        modelo ya se ejecutó."""
+        temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
+        rh = float(self.simple_rh.get() or 60.0)
+        if rh < 0 or rh > 100:
+            messagebox.showwarning("Humedad", "La humedad relativa debe estar entre 0 y 100.")
+            return
+        v_ms = viento_categoria_a_ms(self.vars_modelo["viento"].get())
+        calculador = Temperatura(lat, lon, k_factor=self.k_factor)
+        doy = fecha.timetuple().tm_yday
+        elev = calculador.solar_altitude(doy, hora)
+        ghi = calculador.clear_sky_radiation(elev)
+        sombra_pct = 50.0
+        if self.last_shadow is not None:
+            sombra_pct = (1 - np.asarray(self.last_shadow, dtype=float)).mean() * 100
+
+        tau = calculador.shadow_transmittance(sombra_pct, "tree")
+        tmrt_sol = temp_ambient + self.k_factor * ghi
+        tmrt_sombra = temp_ambient + self.k_factor * ghi * tau
+        hi_sol = thermal_comfort.indice_calor(max(tmrt_sol, temp_ambient), rh)
+        hi_sombra = thermal_comfort.indice_calor(max(tmrt_sombra, temp_ambient), rh)
+        at_sol = thermal_comfort.temperatura_aparente(tmrt_sol, rh, v_ms)
+        at_sombra = thermal_comfort.temperatura_aparente(tmrt_sombra, rh, v_ms)
+
+        lineas = [
+            f"Condiciones: Ta={temp_ambient:.1f}°C · RH={rh:.0f}% · viento={v_ms:.1f} m/s "
+            f"· GHI={ghi:.0f} W/m² · % sombra={sombra_pct:.0f}%",
+            "",
+            f"Tmrt sol = {tmrt_sol:.1f} °C     Tmrt sombra = {tmrt_sombra:.1f} °C",
+            f"Heat Index sol = {hi_sol:.1f} °C ({thermal_comfort.categoria_estres(hi_sol, 'heat')})",
+            f"Heat Index sombra = {hi_sombra:.1f} °C ({thermal_comfort.categoria_estres(hi_sombra, 'heat')})",
+            f"T. aparente sol = {at_sol:.1f} °C ({thermal_comfort.categoria_estres(at_sol, 'at')})",
+            f"T. aparente sombra = {at_sombra:.1f} °C ({thermal_comfort.categoria_estres(at_sombra, 'at')})",
+        ]
+        if self.last_T is not None:
+            try:
+                mapa = scenario_tools.mapa_estres(
+                    np.asarray(self.last_T, dtype=float), temp_ambient, rh)
+                por_area = ", ".join(f"{k}: {v}%" for k, v in mapa["por_area"].items())
+                lineas += ["", f"Mapa de Tmrt (modelo ya ejecutado): {por_area}"]
+            except ValueError:
+                pass
+        lineas += [
+            "",
+            "Heat Index: índice operativo del NWS (Rothfusz 1990), válido "
+            "para Ta ≥ 26.7 °C. Temperatura Aparente: Steadman (1984). "
+            "El UTCI completo requiere el modelo de Fiala (pythermalcomfort).",
+        ]
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Confort térmico")
+        dlg.geometry("560x420")
+        dlg.transient(self.root)
+        tk.Label(dlg, text="\n".join(lineas), justify="left", anchor="w").pack(
+            fill="both", expand=True, padx=14, pady=12)
+        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=8)
+
+    def _dialogo_escenario_ab(self):
+        """Escenario A/B horario: comparar dos % de sombra (p. ej. línea
+        base vs. propuesta de arbolado) a lo largo del día, con curvas de
+        Heat Index, Tmrt y resumen de grados-hora de estrés."""
+        temp_ambient, _hora, fecha, lat, lon = self._leer_parametros_tmrt()
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Escenario A/B horario (sombra vs. propuesta)")
+        dlg.geometry("720x640")
+        dlg.transient(self.root)
+
+        form = tk.Frame(dlg)
+        form.pack(fill="x", padx=12, pady=8)
+        form.grid_columnconfigure(1, weight=1)
+        defaults = {
+            "hora_ini": "8", "hora_fin": "18",
+            "ta_min": "20", "ta_max": str(round(temp_ambient, 1)),
+            "rh": str(self.simple_rh.get() or 60),
+            "sombra_a": "20", "sombra_b": "60",
+        }
+        vars_ab = {}
+        fila = 0
+        for texto, clave, ancho in [
+            ("Hora inicio", "hora_ini", 8), ("Hora fin", "hora_fin", 8),
+            ("Ta mín (°C)", "ta_min", 8), ("Ta máx (°C)", "ta_max", 8),
+            ("Humedad (%)", "rh", 8), ("Sombra A (%)", "sombra_a", 8),
+            ("Sombra B (%)", "sombra_b", 8),
+        ]:
+            tk.Label(form, text=texto).grid(row=fila // 2, column=(fila % 2) * 2, sticky="w", padx=(0, 4), pady=2)
+            var = tk.StringVar(value=defaults[clave])
+            vars_ab[clave] = var
+            tk.Entry(form, textvariable=var, width=ancho).grid(
+                row=fila // 2, column=(fila % 2) * 2 + 1, sticky="ew", pady=2)
+            fila += 1
+
+        tk.Label(form, text="Viento:", justify="left").grid(row=4, column=0, sticky="w", padx=(0, 4))
+        viento_var = tk.StringVar(value=self.vars_modelo["viento"].get())
+        ttk.Combobox(form, textvariable=viento_var, values=["nulo", "moderado", "fuerte"],
+                     width=8, state="readonly").grid(row=4, column=1, sticky="w")
+
+        fig = plt.Figure(figsize=(6.6, 3.6), dpi=100)
+        ax = fig.add_subplot(111)
+        canvas = FigureCanvasTkAgg(fig, master=dlg)
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=12)
+
+        resumen_txt = tk.Label(dlg, text="", justify="left", anchor="w", font=("Consolas", 8))
+        resumen_txt.pack(fill="x", padx=12)
+
+        def calcular():
+            try:
+                datos = {k: float(v.get().replace(",", ".").strip()) for k, v in vars_ab.items()}
+                datos["viento"] = viento_categoria_a_ms(viento_var.get())
+            except ValueError:
+                messagebox.showwarning("Entrada", "Revisá los valores numéricos.", parent=dlg)
+                return
+            horas = [float(h) for h in
+                     np.arange(datos["hora_ini"], datos["hora_fin"] + 1)]
+            calc = Temperatura(lat, lon, k_factor=self.k_factor)
+            esc_a = scenario_tools.escenario_horario(
+                calc, fecha, horas, datos["ta_min"], datos["ta_max"],
+                datos["rh"], datos["viento"], datos["sombra_a"])
+            esc_b = scenario_tools.escenario_horario(
+                calc, fecha, horas, datos["ta_min"], datos["ta_max"],
+                datos["rh"], datos["viento"], datos["sombra_b"])
+            cmp = scenario_tools.comparar_escenarios(esc_a, esc_b)
+            ax.clear()
+            ax.plot(horas, [r["hi_sombra"] for r in esc_a], "o-", color="#E53935",
+                    label=f"HI sombra A ({datos['sombra_a']:.0f}%)")
+            ax.plot(horas, [r["hi_sombra"] for r in esc_b], "s-", color="#1E88E5",
+                    label=f"HI sombra B ({datos['sombra_b']:.0f}%)")
+            ax.plot(horas, [r["hi_sol"] for r in esc_a], "--", color="#FB8C00",
+                    label="HI pleno sol")
+            ax.axhline(scenario_tools.UMBRAL_HI, color="gray", linestyle=":")
+            ax.text(horas[0], scenario_tools.UMBRAL_HI + 0.3,
+                    f"umbral estrés {scenario_tools.UMBRAL_HI:.1f} °C", fontsize=7)
+            ax.set_xlabel("Hora")
+            ax.set_ylabel("Heat Index (°C)")
+            ax.legend(fontsize=8)
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+            canvas.draw()
+            r = cmp["propuesto"]
+            resumen_txt.config(text=(
+                f"A: pico HI {r['hi_max_sombra']:.1f} °C · grados-hora (HI>{scenario_tools.UMBRAL_HI:.0f}) "
+                f"{r['grados_hora_hi_sombra']:.1f} °C·h · categoría: {r['categoria_pico_sombra']}\n"
+                f"Δ al pasar de A a B: HI pico {cmp['delta_hi_max']:+.1f} °C · "
+                f"grados-hora {cmp['delta_grados_hora_hi']:+.1f} °C·h · "
+                f"ΔTmrt máx {r['delta_tmrt_max']:.1f} °C"))
+
+        botones = tk.Frame(dlg)
+        botones.pack(fill="x", padx=12, pady=8)
+        tk.Button(botones, text="Calcular", command=calcular, bg="#4CAF50", fg="white",
+                  font=("Arial", 9, "bold")).pack(side="left")
+        tk.Button(botones, text="Cerrar", command=dlg.destroy).pack(side="right")
+        calcular()
+
+    def _dialogo_validar_csv(self):
+        """Valida el modelo contra mediciones de campo en CSV (tg o tmrt,
+        ta, rad, v) y opcionalmente recalibra k_factor desde el archivo."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Validación contra mediciones (CSV)")
+        dlg.geometry("640x560")
+        dlg.transient(self.root)
+
+        top = tk.Frame(dlg)
+        top.pack(fill="x", padx=12, pady=8)
+        tk.Label(top, text="Archivo:").pack(side="left")
+        archivo_lbl = tk.Label(top, text="(ninguno)", fg="gray")
+        archivo_lbl.pack(side="left", padx=6)
+        tk.Button(top, text="Seleccionar CSV…",
+                  command=lambda: self._validar_cargar(archivo_lbl, resumen_txt, fig, canvas,
+                                                       aplicar_btn, dlg)).pack(side="right")
+
+        fig = plt.Figure(figsize=(6.4, 3.2), dpi=100)
+        ax = fig.add_subplot(111)
+        canvas = FigureCanvasTkAgg(fig, master=dlg)
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=12)
+
+        resumen_txt = tk.Label(dlg, text="", justify="left", anchor="w", font=("Consolas", 8))
+        resumen_txt.pack(fill="x", padx=12)
+
+        aplicar_btn = tk.Button(dlg, text="Aplicar k_factor sugerido",
+                                state="disabled", bg="#2196F3", fg="white")
+        aplicar_btn.pack(pady=6)
+        aplicar_btn.config(command=lambda: self._validar_aplicar_k(aplicar_btn, dlg))
+        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=4)
+
+    def _validar_cargar(self, archivo_lbl, resumen_txt, fig, canvas, aplicar_btn, dlg):
+        path = filedialog.askopenfilename(
+            parent=dlg,
+            filetypes=[("CSV", "*.csv"), ("Todos", "*.*")],
+            title="Seleccionar mediciones de campo")
+        if not path:
+            return
+        try:
+            filas = leer_csv_mediciones(path)
+        except (ValueError, FileNotFoundError) as e:
+            messagebox.showerror("CSV inválido",
+                                 f"{e}\n\nColumnas esperadas: tg (o tmrt), ta, rad, "
+                                 "v (opcional), hora (opcional).", parent=dlg)
+            return
+        obs = np.array([f["tmrt_medido"] for f in filas], dtype=float)
+        pred = np.array([f["ta"] + self.k_factor * f["rad"] for f in filas], dtype=float)
+        met = metricas(obs, pred)
+        archivo_lbl.config(text=os.path.basename(path), fg="black")
+        resumen_txt.config(text=(
+            f"n={met['n']} · RMSE={met['rmse']:.2f} °C · MAE={met['mae']:.2f} °C · "
+            f"bias={met['bias']:+.2f} °C · R²={met['r2']:.3f}  (k_factor actual {self.k_factor:.4f})"))
+        try:
+            ajuste = k_factor_desde_mediciones(filas)
+            resumen_txt.config(text=resumen_txt.cget("text") +
+                               f"\nk_factor sugerido por el CSV: {ajuste['k_factor']:.5f} "
+                               f"(R²={ajuste['r2']:.3f}, RMSE={ajuste['rmse']:.2f} °C)")
+            aplicar_btn.config(state="normal")
+            aplicar_btn.sugerido = ajuste["k_factor"]
+        except ValueError as e:
+            aplicar_btn.config(state="disabled")
+            messagebox.showwarning("Calibración", str(e), parent=dlg)
+        ax = fig.axes[0]
+        ax.clear()
+        ax.scatter(obs, pred, alpha=0.7, s=28)
+        lim = [min(float(obs.min()), float(pred.min())) - 1,
+               max(float(obs.max()), float(pred.max())) + 1]
+        ax.plot(lim, lim, "--", color="gray", label="1:1")
+        ax.set_xlabel("Tmrt medida (°C)")
+        ax.set_ylabel("Tmrt modelo (°C)")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        canvas.draw()
+
+    def _validar_aplicar_k(self, aplicar_btn, dlg):
+        k = getattr(aplicar_btn, "sugerido", None)
+        if k is None:
+            return
+        self.k_factor = k
+        self.settings["k_factor"] = k
+        self.settings["k_factor_info"] = "CSV de validación"
+        self.settings_manager.write(self.settings)
+        messagebox.showinfo("Calibrado", f"k_factor = {k:.5f} aplicado y guardado.", parent=dlg)
+
+    def _dialogo_especies(self):
+        """Biblioteca de especies con propiedades térmicas (transmitancia
+        de copa, densidad, caducidad) y su referencia bibliográfica."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Biblioteca de especies")
+        dlg.geometry("560x520")
+        dlg.transient(self.root)
+        tk.Label(dlg, text="Propiedades térmicas por especie (literatura de biometeorología urbana):",
+                 anchor="w").pack(fill="x", padx=12, pady=(10, 4))
+        contenedor = tk.Frame(dlg)
+        contenedor.pack(fill="both", expand=True, padx=12)
+        canvas = tk.Canvas(contenedor, highlightthickness=0)
+        scroll = ttk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
+        interior = tk.Frame(canvas)
+        interior.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        fila = 0
+        for nombre in nombres_especies():
+            p = CATALOGO_ESPECIES[nombre]
+            frame = tk.LabelFrame(interior, text=nombre, padx=8, pady=4)
+            frame.grid(row=fila, column=0, sticky="ew", pady=3)
+            interior.grid_columnconfigure(0, weight=1)
+            tk.Label(frame, justify="left", anchor="w", font=("Consolas", 8), text=(
+                f"Densidad de copa: {p['rho_copa']:.2f}  Transmitancia: {p['transmitancia']:.2f}\n"
+                f"Caducifolio: {'sí' if p['caducifolio'] else 'no'}  Albedo copa: {p['albedo_copa']:.2f}\n"
+                f"Altura típica: {p['altura_tipica']:.0f} m  Radio copa: {p['radio_copa_tipico']:.0f} m\n"
+                f"Ref.: {p['ref']}")).pack(anchor="w")
+            fila += 1
+        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=8)
+
     def mostrar_curvas_nivel(self):
         if not self.require_project("generar curvas de nivel"):
             return
@@ -2829,7 +3280,7 @@ class SombraApp:
                 self.shape_selector.area_referencia,
             )
             mapa_sombra_volteado = np.flipud(mapa_sombra)
-            calculador = Temperatura(lat, lon)
+            calculador = Temperatura(lat, lon, k_factor=self.k_factor)
             resultado_mapa = calculador.calculate_tmrt_map(
                 temp_ambient, mapa_sombra_volteado,
                 shadow_type="tree", date_value=fecha, time_value=hora,

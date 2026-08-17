@@ -111,6 +111,32 @@ def _logo(size, color):
     return img
 
 
+def _calibrar(size, color):
+    """Ícono del asistente de calibración: un medidor (reloj/gauge)."""
+    img = _lienzo(size)
+    d = ImageDraw.Draw(img)
+    cx, cy, r = size / 2, size * 0.55, size * 0.34
+    d.arc([cx - r, cy - r, cx + r, cy + r], start=45, end=315, fill=color, width=2)
+    d.line([cx, cy, cx + r * 0.85, cy - r * 0.35], fill=color, width=2)
+    d.ellipse([cx - size * 0.05, cy - size * 0.05, cx + size * 0.05, cy + size * 0.05],
+              fill=color)
+    return img
+
+
+def _confort(size, color):
+    """Ícono de confort térmico: termómetro con gota de humedad."""
+    img = _lienzo(size)
+    d = ImageDraw.Draw(img)
+    x = size * 0.38
+    d.rounded_rectangle([x, size * 0.12, x + size * 0.1, size * 0.68],
+                        radius=size * 0.05, outline=color, width=2)
+    d.ellipse([x - size * 0.07, size * 0.62, x + size * 0.17, size * 0.86],
+              outline=color, width=2)
+    d.line([x, size * 0.24, x, size * 0.4], fill=color, width=2)
+    d.ellipse([size * 0.6, size * 0.6, size * 0.88, size * 0.88], outline=color, width=2)
+    return img
+
+
 _GENERADORES = {
     "nuevo": _nuevo,
     "abrir": _abrir,
@@ -118,6 +144,8 @@ _GENERADORES = {
     "play": _play,
     "barras": _barras,
     "curva": _curva,
+    "calibrar": _calibrar,
+    "confort": _confort,
     "pdf": _pdf,
     "logo": _logo,
 }

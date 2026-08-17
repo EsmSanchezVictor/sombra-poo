@@ -19,3 +19,11 @@ __pycache__/
 # Proyectos de usuario (imágenes, máscaras, resultados, .sombra) —
 # datos de trabajo locales, no código
 proyectos/
+
+# Configuración y datos locales del usuario. settings.json se regenera
+# con valores por defecto si no existe (SettingsManager.load) y guarda
+# rutas absolutas locales (last_project_path) — no hay nada que
+# versionar. Las máscaras son datos de trabajo del usuario.
+data/settings.json
+mascaras.json
+mascarascoco.json
