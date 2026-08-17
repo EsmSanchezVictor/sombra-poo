@@ -128,7 +128,44 @@ conocida) antes de confiar en los números que produce el modelo para
 uso profesional. Sin esa calibración, el ΔTmrt que muestra la app es
 una estimación relativa razonable, pero no un valor validado.
 
-## 5. Pendiente — la refactorización grande
+## 5. Fix posterior (v3.1) — controles del Panel 4 "ocultos" y cambio de paneles
+
+Reportado tras la integración: al abrir el Panel 4 (Modelo) se veían el
+título y los radiobuttons Simple/Avanzado, pero los botones y el resto
+de los controles no aparecían. Y los íconos de la barra lateral no
+manejaban bien el cambio entre paneles. Causas y correcciones en
+`ui/app_ui.py`:
+
+| Problema | Antes | Después |
+|---|---|---|
+| Canvas anidado en `setup_panel_4()` | Se creaba un SEGUNDO canvas scrolleable (`_build_scrollable_content`) dentro del frame que ya vive en un canvas con scrollbar; quedaba con altura chica (solo título+radios) y sin rueda del mouse | Los widgets se empacan directo sobre el frame de contenido (igual que Paneles 1/2), con scroll + rueda ya funcionando |
+| `panel_width` calculado antes de mapear | `min(1/6 pantalla, frame1.winfo_width())` → `winfo_width()` devuelve 1 sin dibujar → ancho de animación inválido | `min(1/6 pantalla, 400)` → 227px en pantallas 1366px |
+| Superposición del panel sobre la escena | El panel crecía al ancho de su contenido (~400px) y `frame1` no se agrandaba (grid ignora `config(width)`); quedaba tapando el área de escena | `place()` lleva `width=` explícito en cada paso (panel = exactamente `panel_width`); `frame1` se ajusta al ancho del panel antes de animar |
+| Salto del panel al cambiar de ícono | `close_panel` volteaba los íconos a vertical en cada cambio (y el panel saltaba de y=30 a y=120) | Solo se vuelve a vertical cuando se cierra el ÚLTIMO panel; el alto de botones se mide con `winfo_reqheight()` (estable) |
+| Animaciones que se cortaban solas (bug latente profundo) | Cada paso se encolaba con `widget.after(10, callable, ...)`; tkinter registra el callable con un nombre basado en `id()`, que se recicla por GC y se auto-borra al dispararse → con cadenas de ~23 pasos, dos timers compartían nombre y la animación moría en un paso al azar (panel congelado a medio abrir o cambio que nunca llegaba). Invisible antes porque `panel_width=1` hacía las animaciones de 2 pasos | Un ÚNICO comando Tcl persistente (`_panel_anim_step`, registrado una vez en `__init__`) maneja todos los pasos; se encola con `tk.call("after", ...)` sobre ese nombre estable — sin re-registros ni colisiones; los tokens siguen abortando cadenas viejas |
+
+Verificado: panel 4 abre con contenido completo (542px) y todos los
+controles mapeados; secuencias completas de cambio de paneles
+(0→2→3→1→cerrar→reabrir) finalizan siempre en el panel correcto, sin
+cuelgues; `pytest test/ -q` sigue 25/25 verde.
+
+### 5.1 Fix posterior (v3.1.1) — el toggle de los íconos "no respondía"
+
+Reportado tras el fix anterior: al tocar un ícono no pasaba nada (ni
+abría, ni cambiaba, ni avisaba). Diagnóstico en dos capas:
+
+| Problema | Antes | Después |
+|---|---|---|
+| Botones deshabilitados sin proyecto | `show_startup_screen()` llama `set_project_ui_enabled(False)` y los 4 íconos quedan `state="disabled"` — un clic sobre un botón deshabilitado se ignora en silencio (ni siquiera llega al `require_project` que mostraría el aviso) | Comportamiento de diseño (los paneles requieren proyecto); se re-habilitan en `on_project_loaded()`. No se tocó la lógica: el síntoma real era el bug de abajo |
+| Cambio de panel encadenado reabría el MISMO panel | El paso final de la cadena de cierre hacía `self.open_panel(index)` — con el index del panel que se cerró, ignorando el `on_complete` recibido por `close_panel` (el callback se perdía en el refactor a `_panel_anim_step`, que recibe args vía Tcl y no puede llevar callables). Resultado: clic en ícono B → se cerraba y REABRÍA el panel A → parecía que el clic no hacía nada, y el primer clic (sin panel abierto) sí funcionaba | `animate_panel_close` guarda el callback en `self._close_callbacks[index]`; el paso final del cierre lo invoca (`callback()` en vez de `open_panel(index)`). El dict se limpia junto con `_open_after_close` |
+
+Verificado con clics reales (`button.invoke()`) sobre los 4 íconos,
+con proyecto cargado: abrir 0 → cambiar a 2 → cerrar 2 → abrir 3 →
+cambiar a 1 → cerrar 1; cada paso termina en el estado correcto
+(active, panel mapeado, íconos HOR/VERT); `pytest test/ -q` sigue
+25/25 verde.
+
+## 6. Pendiente — la refactorización grande
 
 `ui/app_ui.py` es una sola clase (`SombraApp`) de 2251 líneas y ~100
 métodos: mezcla construcción de UI, lógica de negocio (cálculo de

@@ -289,14 +289,13 @@ class SombraApp:
         #self.frame1 = frame1
 
         # --- Ancho del panel desplegable -----------------------------
-        # panel_width se calcula UNA sola vez acá: el menor entre 1/6
-        # del ancho de pantalla y el ancho actual de frame1. En este
-        # punto de __init__ frame1 todavía no se dibujó en pantalla, así
-        # que frame1.winfo_width() puede devolver un valor chico/no
-        # definitivo — si el panel se ve angosto o ancho de más al
-        # ajustarlo, este es el número a tocar (o reemplazarlo por una
-        # constante fija en píxeles, ej. 260).
-        self.panel_width = min(int(self.frame1.winfo_screenwidth() / 6), self.frame1.winfo_width())
+        # BUG CORREGIDO: antes se hacía min(1/6 del ancho de pantalla,
+        # frame1.winfo_width()) — pero en __init__ la ventana todavía
+        # no se dibujó y winfo_width() devuelve 1, así que panel_width
+        # quedaba en 1 y la animación de apertura/cierre operaba sobre
+        # un ancho inválido (el panel quedaba a merced del ancho que le
+        # imponía su contenido). Ahora: 1/6 de la pantalla, tope 400px.
+        self.panel_width = min(int(self.frame1.winfo_screenwidth() / 6), 400)
 
         # --- Barra de íconos lateral (columna 0 de frame1) -----------
         # Se queda siempre en column=0 de frame1; los paneles se abren
@@ -388,6 +387,28 @@ class SombraApp:
         # seguir escribiendo sobre frame1/el panel al mismo tiempo que
         # la animación nueva. Ver toggle_panel/animate_panel_open/close.
         self._panel_anim_token = 0
+        # BUG CORREGIDO ("los íconos no manejan bien el cambio de
+        # paneles"): las animaciones se encolaban con
+        # widget.after(10, callable, ...). Tkinter registra ese
+        # callable bajo un nombre generado con id() que puede reciclarse
+        # (y el comando se auto-borra al dispararse) — con cadenas de
+        # ~23 pasos, dos timers terminaban con el mismo nombre y la
+        # animación se cortaba en un paso al azar (panel congelado a
+        # medio abrir, o cambio de panel que nunca llegaba). Ahora se
+        # registra UN único comando Tcl persistente (_anim_cmd) y cada
+        # paso se encola con tk.call("after", ...) sobre ese nombre
+        # estable — sin re-registros, sin colisiones.
+        self._anim_cmd = self.root.register(self._panel_anim_step)
+        # Si un cierre va encadenado a una apertura (open_panel(index)
+        # apenas termina de cerrar), se guarda el token acá — ver
+        # animate_panel_close/_panel_anim_step.
+        self._open_after_close = {}
+        # Callback de cierre encadenado (on_complete de close_panel).
+        # _panel_anim_step recibe los args vía Tcl y no puede recibir
+        # callables Python — por eso el callback se guarda acá y el
+        # paso final del cierre lo invoca (BUG CORREGIDO: antes el paso
+        # final reabría el MISMO panel en vez de llamar a on_complete).
+        self._close_callbacks = {}
 
         # Inicializar componentes
         self.menu_bar.setup()
@@ -1251,14 +1272,20 @@ class SombraApp:
         """Configura el contenido del Panel 4"""
         panel = self.panel_frames[3]
         
-        
+        # BUG CORREGIDO ("controles del Panel 4 ocultos"): antes acá se
+        # creaba un SEGUNDO canvas scrolleable anidado (vía
+        # _build_scrollable_content) dentro del frame de contenido que
+        # YA vive en un canvas con scrollbar. El canvas anidado quedaba
+        # con altura propia chica (solo alcanzaba a mostrar el título y
+        # los radiobuttons) y SIN rueda del mouse — los botones y
+        # controles de abajo quedaban fuera de vista, "ocultos". Ahora
+        # se usan los widgets directamente sobre `panel` (igual que los
+        # paneles 1/2), que ya tiene scroll + rueda funcionando.
         for widget in panel.winfo_children():
             widget.destroy()        
 
         panel.grid_columnconfigure(0, weight=1)
-        panel.grid_rowconfigure(0, weight=1)
-        contenido = self._build_scrollable_content(panel)
-        contenido.grid_columnconfigure(0, weight=1)
+        contenido = panel
 
         diseno_label = tk.Label(contenido, text="Modelo", bg=panel.cget("bg"), fg="black")
         diseno_label.grid(row=0, column=0, sticky="w", pady=(0, 6))
@@ -1707,8 +1734,16 @@ class SombraApp:
         token = self._panel_anim_token
         self.active_panel = index
         self.is_animating = True
-        icon_width = max(self.icon_frame.winfo_width(), 40)
-        self.frame1.config(width=icon_width + self.panel_width)
+        # BUG CORREGIDO ("los íconos no manejan bien el cambio de
+        # paneles"): antes la barra de íconos se pasaba a horizontal
+        # DESPUÉS de arrancar la animación y frame1 se agrandaba a
+        # iconos+panel — pero grid ignora ese config(width) y el panel,
+        # que crece al ancho que le pide su contenido (~400px), quedaba
+        # superpuesto sobre el área de escena. Ahora: íconos
+        # horizontales primero, frame1 = ancho del panel, y la
+        # animación fuerza el ancho exacto del panel (place width).
+        self.switch_buttons_to_horizontal()
+        self.frame1.config(width=self.panel_width)
         self.animate_panel_open(index, 0, token)
         if index == 1:
             self.show_panel2_frames()
@@ -1736,28 +1771,89 @@ class SombraApp:
         libre debajo de la barra de íconos, y el sobrante quedaba por
         debajo del borde inferior real de la ventana, invisible. Con
         height=-button_height, place() resta esa franja del alto total.
+
+        ANCHO: place() lleva width= explícito en cada paso, así el
+        panel mide EXACTAMENTE self.panel_width (antes, sin width,
+        place usaba el ancho pedido por el contenido y el panel quedaba
+        superpuesto al área de escena). button_height se toma con
+        winfo_reqheight() para no depender de si los íconos ya se
+        redibujaron en horizontal.
+
+        Cada paso se encola vía _panel_anim_step (comando Tcl
+        persistente — ver __init__) en vez de re-registrar callables
+        con widget.after(), que colisionaba por reuso de id().
         """
-        if token is not None and token != self._panel_anim_token:
+        self._panel_anim_step("open", index, current_width, token)
+
+    def _panel_anim_step(self, op, index, width, token):
+        """Un único handler Tcl persistente para los pasos de las
+        animaciones de panel (op = "open" | "close"). Se registró UNA
+        vez en __init__ (_anim_cmd); cada paso se encola con
+        tk.call("after", 10, _anim_cmd, ...) sobre ese nombre estable.
+
+        Recibe los argumentos como strings (los pasa Tcl) — acá se
+        convierten. Primero se valida el token: si la animación que
+        encoló este paso ya no es la actual, el paso se descarta sin
+        re-encolar (así las corridas viejas se abortan solas)."""
+        index = int(index)
+        width = int(width)
+        token = int(token)
+        if token != self._panel_anim_token:
             return
-        button_height = self.icon_frame.winfo_height()
-        if current_width <= self.panel_width:
-            self.panel_outer_frames[index].config(width=current_width)
-            self.panel_outer_frames[index].place(
-                x=0, y=button_height, relheight=1, height=-button_height,
-            )
-            self.frame1.after(10, self.animate_panel_open, index, current_width + 10, token)
+        button_height = max(self.buttons[0].winfo_reqheight(), 30)
+        outer = self.panel_outer_frames[index]
+        if op == "open":
+            if width < self.panel_width:
+                outer.config(width=width)
+                outer.place(
+                    x=0, y=button_height, relheight=1, height=-button_height,
+                    width=width,
+                )
+                self.root.tk.call("after", 10, self._anim_cmd, "open", index, width + 10, token)
+            else:
+                outer.config(width=self.panel_width)
+                outer.place(
+                    x=0, y=button_height, relheight=1, height=-button_height,
+                    width=self.panel_width,
+                )
+                self.is_animating = False
         else:
-            self.is_animating = False
+            if width > 0:
+                outer.config(width=width)
+                outer.place(
+                    x=0, y=button_height, relheight=1, height=-button_height,
+                    width=width,
+                )
+                self.root.tk.call("after", 10, self._anim_cmd, "close", index, width - 10, token)
+            else:
+                outer.place_forget()
+                if self._open_after_close.get(index) == token:
+                    del self._open_after_close[index]
+                    callback = self._close_callbacks.pop(index, None)
+                    if callback is not None:
+                        callback()
+                    else:
+                        self.open_panel(index)
+                else:
+                    icon_width = max(self.icon_frame.winfo_width(), 40)
+                    self.frame1.config(width=icon_width)
+                    self.is_animating = False
 
     def close_panel(self, index, on_complete=None):
         """Cierra el panel 'index'. Si se pasa on_complete, se llama
         recién cuando la animación de cierre TERMINÓ de verdad — así
-        se encadena una apertura sin adivinar tiempos (ver toggle_panel)."""
+        se encadena una apertura sin adivinar tiempos (ver toggle_panel).
+
+        BUG CORREGIDO: cuando el cierre va encadenado a una apertura
+        (on_complete != None) ya no se vuelve a vertical la barra de
+        íconos — antes la volteaba y al toque open_panel la volvía
+        horizontal, y el panel saltaba de lugar durante el cambio."""
         token = self._panel_anim_token
         self.is_animating = True
         self.animate_panel_close(index, self.panel_width, token, on_complete)
         self.reset_button(index)
-        self.switch_buttons_to_vertical()
+        if on_complete is None:
+            self.switch_buttons_to_vertical()
 
     def animate_panel_close(self, index, current_width, token=None, on_complete=None):
         """Igual que animate_panel_open pero decreciendo el ancho.
@@ -1771,24 +1867,19 @@ class SombraApp:
         achica frame1 acá — el open_panel que sigue va a fijar el ancho
         que corresponda; achicarlo acá de paso sería trabajo perdido y,
         peor, un parpadeo visual (achica y al toque vuelve a agrandar).
+
+        Igual que animate_panel_open: width explícito en place() y
+        button_height con winfo_reqheight() (ver docstring de open).
+        Los pasos se encolan vía _panel_anim_step (comando Tcl
+        persistente). Si viene on_complete, se guarda el token en
+        self._open_after_close (y el callback en _close_callbacks) y
+        _panel_anim_step recién encadena la apertura cuando el cierre
+        terminó de verdad.
         """
-        if token is not None and token != self._panel_anim_token:
-            return
-        button_height = self.icon_frame.winfo_height()
-        if current_width > 0:
-            self.panel_outer_frames[index].config(width=current_width)
-            self.panel_outer_frames[index].place(
-                x=0, y=button_height, relheight=1, height=-button_height,
-            )
-            self.frame1.after(10, self.animate_panel_close, index, current_width - 10, token, on_complete)
-        else:
-            self.panel_outer_frames[index].place_forget()
-            if on_complete is None:
-                icon_width = max(self.icon_frame.winfo_width(), 40)
-                self.frame1.config(width=icon_width)
-                self.is_animating = False
-            else:
-                on_complete()
+        if on_complete is not None:
+            self._open_after_close[index] = token
+            self._close_callbacks[index] = on_complete
+        self._panel_anim_step("close", index, current_width, token)
 
     def hide_all_frames(self):
         """Oculta todos los paneles desplegables. Actúa sobre los
