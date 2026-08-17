@@ -63,7 +63,7 @@ def setup_panel_1(app):
     # acá?") o cuando no se tiene una foto todavía. Si se deja vacío,
     # se sigue usando el % calculado desde la imagen, como antes.
     manual_label = tk.Label(
-        panel, text="Porcentaje de sombra manual (%, opcional):",
+        panel, text="Porcentaje de sombra manual:",
         bg=panel.cget("bg"), fg="black",
     )
     manual_label.pack(fill="x", padx=20, pady=(15, 5))
@@ -71,7 +71,7 @@ def setup_panel_1(app):
     app.entry_porcentaje_manual.pack(fill="x", padx=20, pady=5)
     manual_hint = tk.Label(
         panel,
-        text="Si se completa, se usa en vez del % calculado en el Panel 2.",
+        text="Si se completa,\n se usa en vez del % calculado \n en el Panel 2.",
         bg=panel.cget("bg"), fg="#666666", font=("Arial", 8),
     )
     manual_hint.pack(fill="x", padx=20, pady=(0, 5))
@@ -224,7 +224,7 @@ def setup_panel_4(app):
         values=app.locations_data["countries"] if app.locations_data else [],
         state="readonly" if app.locations_data else "disabled",
     )
-    app.country_combo.grid(row=2, column=0, sticky="ew", pady=(2, 6), padx=0)
+    app.country_combo.grid(row=2, column=0, sticky="ew", pady=(2, 6), padx=5)
     app.country_combo.bind("<<ComboboxSelected>>",
                            lambda _e: app._update_city_options())
 
@@ -236,7 +236,7 @@ def setup_panel_4(app):
         values=[],
         state="normal" if app.locations_data else "disabled",
     )
-    app.city_combo.grid(row=4, column=0, sticky="ew", pady=(2, 6), padx=0)
+    app.city_combo.grid(row=4, column=0, sticky="ew", pady=(2, 6), padx=5)
     app.city_combo.bind("<<ComboboxSelected>>",
                         lambda _e: app._apply_location(False))
     app.city_combo.bind("<KeyRelease>", app._filter_city_options)
@@ -248,7 +248,7 @@ def setup_panel_4(app):
         textvariable=app.simple_cloudiness,
         values=["Despejado", "Parcial", "Nublado"],
         state="readonly",
-    ).grid(row=6, column=0, sticky="ew", pady=(2, 6), padx=0)
+    ).grid(row=6, column=0, sticky="ew", pady=(2, 6), padx=5)
 
     tk.Label(app.simple_frame, text="Temperatura aire (°C)", bg=panel.cget("bg")).grid(
         row=7, column=0, sticky="w", pady=(2, 0))
@@ -261,13 +261,13 @@ def setup_panel_4(app):
         app.simple_frame,
         textvariable=app.vars_modelo["viento"],
         values=["nulo", "moderado", "fuerte"],
-    ).grid(row=10, column=0, sticky="ew", pady=(2, 6), padx=0)
+    ).grid(row=10, column=0, sticky="ew", pady=(2, 6), padx=5)
 
     tk.Label(app.simple_frame, text="Humedad relativa (%)", bg=panel.cget("bg")).grid(
         row=11, column=0, sticky="w", pady=(2, 0)
     )
     tk.Entry(app.simple_frame, textvariable=app.simple_rh).grid(
-        row=12, column=0, sticky="ew", pady=(2, 6), padx=0
+        row=12, column=0, sticky="ew", pady=(2, 6), padx=5
     )
 
     # Herramientas de confort y calibración (análisis térmico)
@@ -303,7 +303,7 @@ def setup_panel_4(app):
         app.advanced_frame,
         textvariable=app.vars_modelo["viento"],
         values=["nulo", "moderado", "fuerte"],
-    ).grid(row=0, column=1, sticky="ew", pady=2, padx=(8, 0))
+    ).grid(row=0, column=1, sticky="ew", pady=2, padx=(8, 5))
 
     tk.Label(app.advanced_frame, text="Configuraciones rápidas", bg=panel.cget("bg")).grid(
         row=1, column=0, sticky="w", pady=6
