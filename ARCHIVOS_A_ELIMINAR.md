@@ -15,6 +15,23 @@ vigente.
 | `sombra-poo.zip`, `sombra-poo2.zip` | Snapshots manuales — el historial de git ya cumple esa función. |
 | `debug.log` | Log de ejecución, no debería versionarse. |
 | `users.db` | Base de datos con datos de usuarios reales — nunca debería estar en el repo (ver también el fix de `database_manager.py`). |
+| `image_processor copy.py` | **ELIMINADO** (era un duplicado de `image_processor.py`, no lo importa nadie). |
+| `modelo_con_excel copy.py` | **ELIMINADO** (duplicado de `modelo_con_excel.py`, con bugs que el original ya no tenía). |
+| `services/borrar procesamiento_imagen.py` | **ELIMINADO** (versión vieja de `services/shadow_detector.py`, nadie lo importa). |
+| `test/test/test/test_detector_sombras.py` | **ELIMINADO** (testeaba `detector_sombras.py`, código muerto que ya no existe). |
+| `ver` | **ELIMINADO** (basura suelta: "123456789\n987654321"). |
+
+## Ya aplicado
+
+- `test/test/test_image_processor.py` y `test/test_physics.py` se movieron
+  a `test/` (se aplanó el anidamiento `test/test/`).
+- `users.db`, `__pycache__/` y `proyectos/` se sacaron del control de
+  versiones (`git rm --cached`) y quedaron cubiertos por `.gitignore`.
+  Los archivos siguen en disco donde la app los necesita; solo dejaron
+  de versionarse. OJO: como ya estuvieron commiteados, siguen vivos en
+  el historial de git — si querés purgarlos de verdad (users.db con
+  contraseñas viejas), hay que reescribir el historial (BFG repo-cleaner
+  o `git filter-branch`).
 
 ## Antes de borrar `database_manager.py`, `add_user_window.py`, `admin_panel.py`, `login_window.py`, `main.py`/`main_app.py`/`app.py`
 
@@ -30,3 +47,7 @@ Si el login con `database_manager.py` sigue en uso, el fix de hash de
 contraseñas que te dejo abajo sigue siendo necesario. Si no, ese flujo
 entero también es candidato a borrado — pero eso lo tenés que confirmar
 vos, porque no tengo forma de saber cuál corre en producción.
+
+> NOTA: `main.py` SÍ arranca el flujo de login (`MainApp`) que abre
+> `SombraApp` — así que el flujo de login está vivo, y `main_app.py` y
+> `login_window.py` ya usan `db.authenticate()` (ver README_CAMBIOS).

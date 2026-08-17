@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Base de datos y backups locales — nunca versionar datos de usuarios reales
 *.db
@@ -14,3 +15,7 @@ __pycache__/
 # Archivos de trabajo tipo "copy" que no deberían llegar a main
 *copy*.py
 * copy.py
+
+# Proyectos de usuario (imágenes, máscaras, resultados, .sombra) —
+# datos de trabajo locales, no código
+proyectos/

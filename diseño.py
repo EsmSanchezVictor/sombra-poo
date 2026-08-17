@@ -18,75 +18,28 @@ elemento_temporal = None
 modo=None
 archivo_actual = None 
 
-# Clases de datos
-class Material:
-    def __init__(self,  alpha, epsilon):
-        self.alpha = alpha
-        self.epsilon = epsilon
-class Arbol:
-    def __init__(self,  x, y, h, rho_copa, radio_copa):
-        self.x = x
-        self.y = y
-        self.h = h
-        self.rho_copa = rho_copa
-        self.radio_copa = radio_copa
-class Estructura:
-    def __init__( self, tipo, x1, y1, x2, y2, altura=0, opacidad=1, material=None):
-        self.tipo = tipo
-        self.x1 = min(x1, x2)
-        self.y1 = min(y1, y2)
-        self.x2 = max(x1, x2)
-        self.y2 = max(y1, y2)
-        self.altura = altura
-        self.opacidad = opacidad
-        self.material = material
-# Materiales predefinidos
-materiales = {
-    "acero inoxidable": Material(alpha=0.3, epsilon=0.2),
-    "aluminio": Material(alpha=0.2, epsilon=0.125),
-    "madera tratada": Material(alpha=0.7, epsilon=0.85),
-    "policarbonato": Material(alpha=0.85, epsilon=0.9),
-    "Policarbonato (paneles)": Material(alpha=0.85, epsilon=0.9),
-    "Hormigón": Material(alpha=0.9, epsilon=0.9),
-    "PVC (estructuras ligeras)": Material(alpha=0.8, epsilon=0.925),
-    "Fibra de vidrio": Material(alpha=0.85, epsilon=0.89),
-    "Lámina de polietileno (HDPE)": Material(alpha=0.35, epsilon=0.925),
-    "Vidrio templado": Material(alpha=0.85, epsilon=0.9),
-    "Ladrillo cerámico": Material(alpha=0.88, epsilon=0.875),
-    "Corrugado de hierro": Material(alpha=0.8, epsilon=0.25),
-    "ETFE": Material(alpha=0.3, epsilon=0.9),
-    "CLT (Madera laminada natural)": Material(alpha=0.7, epsilon=0.85),
-    "Aerogel": Material(alpha=0.25, epsilon=0.925),
-    "Tierra apisonada": Material(alpha=0.4, epsilon=0.9),
-    "Paca de paja": Material(alpha=0.5, epsilon=0.9),
-    "Corcho": Material(alpha=0.3, epsilon=0.9),
-    "Fibra de carbono": Material(alpha=0.8, epsilon=0.75),
-    "Chapa de Zinc": Material(alpha=0.7, epsilon=0.25),
-    "Terracota": Material(alpha=0.7, epsilon=0.875),
-    "Micelio (hongos)": Material(alpha=0.5, epsilon=0.9),
-    "Plástico reciclado": Material(alpha=0.7, epsilon=0.925),
-    "Lana de vidrio": Material(alpha=0.3, epsilon=0.9),
-    "Caucho": Material(alpha=0.8, epsilon=0.925),
-    "Malla de acero": Material(alpha=0.7, epsilon=0.2),
-    "Geotextil": Material(alpha=0.4, epsilon=0.9),
-    "Tablero de óxido de magnesio": Material(alpha=0.5, epsilon=0.9),
-    "Ferrocemento": Material(alpha=0.7, epsilon=0.9),
-    "Hempcrete": Material(alpha=0.4, epsilon=0.9),
-    "Fotocerámica (Vidrio Fotovoltaico)": Material(alpha=0.3, epsilon=0.9),
-    "Concreto Translúcido": Material(alpha=0.5, epsilon=0.9),
-    "Materiales de Cambio de Fase (PCMs)": Material(alpha=0.45, epsilon=0.925),
-    "Acero Corten": Material(alpha=0.7 , epsilon=0.7),
-    "Composite Madera-Plástico": Material(alpha=1.0e-7, epsilon=0.9),
-    "Pinturas Intumescentes": Material(alpha=0.4, epsilon=0.925),
-    "Cobre (superficies antibacterianas)": Material(alpha=0.8, epsilon=0.315),
-    "Espuma de Poliuretano": Material(alpha=0.3, epsilon=0.9),
-    "Concreto Autocurativo": Material(alpha=0.6, epsilon=0.9),
-    "Ladrillos de PET reciclado": Material(alpha=8.0e-8, epsilon=0.925),
-    "concreto translucido": Material(alpha=0.5, epsilon=0.9),
-    "asfalto": Material(alpha=0.95, epsilon=0.95),
-    "cemento": Material(alpha=0.6, epsilon=0.9),
-    "suelo":Material(alpha=0.4, epsilon=0.9)
-}
+# CAMBIO: las clases Arbol/Estructura/Material, el diccionario de
+# materiales y TODAS las funciones físicas se importan de
+# modelo_con_excel.py — diseño.py tenía copias propias con los bugs
+# ya corregidos allá (alpha=1e-7 para composites, ángulo horario con
+# (lon/15), seno sin desfase térmico, convección por categoría fija,
+# sombras circulares sin elongación, bounding box de paredes, lookup
+# de materiales que fallaba con mayúsculas). Una sola fuente de verdad.
+from modelo_con_excel import (
+    Arbol, Estructura, Material, materiales, MATERIALES_LOWER,
+    asignar_materiales_grilla,
+    angulo_solar as _angulo_solar,
+    azimut_solar as _azimut_solar,
+    temperatura_ambiente as _temperatura_ambiente,
+    calcular_coeficiente_conveccion as _calcular_coeficiente_conveccion,
+    calcular_sombra_arboles as _calcular_sombra_arboles,
+    sombra_estructuras as _sombra_estructuras,
+)
+
+
+def _huso_horas(vars):
+    huso = vars.get("huso_horas")
+    return huso.get() if hasattr(huso, "get") else huso
 
 
 def crear_area_grafico(vars,frame,app):
@@ -333,23 +286,11 @@ def actualizar_grafico(vars, frame):
     sombra_total = np.clip(sombra_arboles * (1 - sombra_estruct), 0, 1)
     
     # Configuración de materiales
-    alpha = np.full_like(X, materiales["suelo"].alpha)
-    epsilon = np.full_like(X, materiales["suelo"].epsilon)
-    
-    for estructura in  vars['estructuras']:
-        # CORRECCIÓN: estructura.material puede ser None — por ejemplo,
-        # una celda "Material" vacía en el Excel de edición (abrir_archivo
-        # la lee tal cual con pandas), o un objeto de escena restaurado
-        # desde un proyecto guardado antes de que se le asignara material.
-        # Antes esto rompía TODA la vista de edición con
-        # AttributeError: 'NoneType' object has no attribute 'lower'.
-        material_nombre = (estructura.material or "").strip().lower()
-        if material_nombre in materiales:
-            mat = materiales[material_nombre]
-            mask = (X >= estructura.x1) & (X <= estructura.x2) & \
-                (Y >= estructura.y1) & (Y <= estructura.y2)
-            alpha[mask] = mat.alpha
-            epsilon[mask] = mat.epsilon
+    # CORRECCIÓN: antes el material se comparaba en minúsculas contra un
+    # dict con claves en mayúsculas ("Hormigón") y casi nunca matcheaba,
+    # cayendo en 'suelo' en silencio. asignar_materiales_grilla usa el
+    # índice normalizado MATERIALES_LOWER y avisa si no reconoce el nombre.
+    alpha, epsilon = asignar_materiales_grilla(X, Y, vars.get('estructuras', []))
     
     # Balance energético
     T_amb = temperatura_ambiente(vars)
@@ -485,58 +426,30 @@ def actualizar_grafico(vars, frame):
     vars["Y"] = Y
     vars["T"] = T
 def angulo_solar(vars):
-    delta = np.radians(23.45 * np.sin(np.radians((360/365)*(vars["dia"].get()-81))))
-    phi = np.radians(vars["lat"].get())
-    h = np.radians(15*(vars["hora"].get()-12) + (vars["lon"].get()/15))
-    return np.arcsin(np.sin(phi)*np.sin(delta) + np.cos(phi)*np.cos(delta)*np.cos(h))
+    return _angulo_solar(
+        vars["lat"].get(), vars["lon"].get(), vars["dia"].get(),
+        vars["hora"].get(), _huso_horas(vars),
+    )
+
 def azimut_solar(vars, theta_sol):
-    delta = np.radians(23.45 * np.sin(np.radians((360/365)*(vars["dia"].get()-81))))
-    phi = np.radians(vars["lat"].get())
-    h = np.radians(15*(vars["hora"].get()-12) + (vars["lon"].get()/15))
-    cos_theta = np.cos(theta_sol)
-    if cos_theta == 0:
-        return 0.0
-    sin_az = -np.sin(h) * np.cos(delta) / cos_theta
-    cos_az = (np.sin(delta) - np.sin(theta_sol) * np.sin(phi)) / (cos_theta * np.cos(phi))
-    return np.arctan2(sin_az, cos_az)
+    return _azimut_solar(
+        vars["lat"].get(), vars["lon"].get(), vars["dia"].get(),
+        vars["hora"].get(), theta_sol, _huso_horas(vars),
+    )
+
 def temperatura_ambiente(vars):
-    return  vars["T_min"].get() + ( vars["T_max"].get() -  vars["T_min"].get()) * np.sin(np.pi* vars["hora"].get()/24)
+    return _temperatura_ambiente(
+        vars["hora"].get(), vars["T_min"].get(), vars["T_max"].get(),
+    )
+
 def coeficiente_conveccion(vars):
-    return {"nulo":5, "moderado":15, "fuerte":25}.get( vars["viento"].get(), 10)
+    return _calcular_coeficiente_conveccion(vars["viento"].get())
+
 def calcular_sombra_arboles(vars, X, Y, theta_sol, azimut_sol):
-    sombra = np.ones_like(X)
-    if theta_sol <= 0:
-        return sombra
-    tan_theta = np.tan(max(theta_sol, np.radians(2)))
-    for arbol in vars['arboles']:
-        longitud_sombra = arbol.h / tan_theta
-        dx = -longitud_sombra * np.sin(azimut_sol)
-        dy = -longitud_sombra * np.cos(azimut_sol)
-        cx = arbol.x + dx
-        cy = arbol.y + dy
-        distancia = np.sqrt((X - cx)**2 + (Y - cy)**2)
-        sombra[distancia < arbol.radio_copa] *= (1 - arbol.rho_copa)
-    return sombra
+    return _calcular_sombra_arboles(X, Y, vars.get('arboles', []), theta_sol, azimut_sol)
+
 def calcular_sombra_estructuras(vars, X, Y, theta_sol, azimut_sol):
-    sombra_total = np.zeros_like(X)
-    if theta_sol <= 0:
-        return sombra_total
-    tan_theta = np.tan(max(theta_sol, np.radians(2)))
-    for estructura in  vars['estructuras']:
-        if estructura.tipo == 'Pared' and theta_sol > 0:
-            longitud_sombra = estructura.altura / tan_theta
-            dx = -longitud_sombra * np.sin(azimut_sol)
-            dy = -longitud_sombra * np.cos(azimut_sol)
-            x_min = min(estructura.x1, estructura.x2, estructura.x1 + dx, estructura.x2 + dx)
-            x_max = max(estructura.x1, estructura.x2, estructura.x1 + dx, estructura.x2 + dx)
-            y_min = min(estructura.y1, estructura.y2, estructura.y1 + dy, estructura.y2 + dy)
-            y_max = max(estructura.y1, estructura.y2, estructura.y1 + dy, estructura.y2 + dy)
-            mask = (X >= x_min) & (X <= x_max) & (Y >= y_min) & (Y <= y_max)
-            sombra_total[mask] += float(estructura.opacidad)
-        elif estructura.tipo == 'Galeria':
-            mask = (X >= estructura.x1) & (X <= estructura.x2) & (Y >= estructura.y1) & (Y <= estructura.y2)
-            sombra_total[mask] += float(estructura.opacidad)
-    return np.clip(sombra_total, 0, 1)
+    return _sombra_estructuras(X, Y, vars.get('estructuras', []), theta_sol, azimut_sol)
 def generar_3d(vars):
     """Vista 3D simplificada de la escena: temperatura como mapa de color
     sobre el plano del suelo + árboles/estructuras como objetos con su

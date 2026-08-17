@@ -117,12 +117,15 @@ class MainApp:
     def login(self):
         username = self.username_entry.get()
         password = self.password_entry.get()
-        user = self.db_manager.get_user(username)
 
-        if user and user[2] == password:
+        # FIX (seguridad): antes se comparaba user[2] == password en texto
+        # plano, y con el esquema nuevo de hash (PBKDF2+salt) el índice [2]
+        # ya no es la contraseña. authenticate() verifica el hash.
+        if self.db_manager.authenticate(username, password):
+            user = self.db_manager.get_user(username)
             self.current_user = username
             self.connection_start = datetime.now()
-            if user[3] == 1:  # Admin user
+            if user[4] == 1:  # Columna is_admin del esquema con hash
                 self.admin_options()
             else:  # Regular user
                 self.open_main_app()

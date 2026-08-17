@@ -1,4 +1,77 @@
-# Cambios aplicados — guía de integración (v2, con core/services/ui)
+# Cambios aplicados — guía de integración (v3, con fixes de física y limpieza)
+
+## 0. Qué se hizo en esta vuelta (v3)
+
+### Física — geometría solar corregida y unificada
+
+El ángulo horario solar estaba mal en TODOS los módulos, con tres
+formulaciones distintas conviviendo:
+
+| Módulo | Antes | Después |
+|---|---|---|
+| `modelo_con_excel.py` | `H = 15·(t−12) + longitud` | `H = 15·(t−12) + (longitud − meridiano_estándar) + EoT` |
+| `shadow_temp.py` | `H = 15·(t−12)` (ignoraba longitud) | idem, con `tz_offset_hours` (huso real o heurística `round(lon/15)`) |
+| `diseño.py` | `H = 15·(t−12) + longitud/15` (bug original) | delega en `modelo_con_excel` |
+
+Derivación: `hora_solar = UTC + longitud/15 + EoT` y el reloj local vale
+`UTC + meridiano/15`, así que `H = 15·(t_local − 12) + (L − M) + EoT`.
+Se agregó la **ecuación del tiempo** (aprox. Spencer, ±4°) en ambos
+módulos. Verificado contra pvlib: antes Buenos Aires se desviaba ~27° en
+H; ahora el fallback coincide con pvlib dentro de ±0.5° de elevación
+(hay tests que lo fijan, ver abajo).
+
+`SolarEngine` le pasa ahora el huso real de su `tz` al fallback
+(`_tz_offset_hours`), así el camino pvlib y el camino interno usan la
+misma física.
+
+### Física — `diseño.py` dejó de tener su propia física (con bugs)
+
+`diseño.py` (vista de edición) tenía copias propias de todo: ángulo
+solar con `(lon/15)`, ciclo diurno sin desfase térmico
+(`sin(π·h/24)` con mínimo a medianoche), convección por categoría fija
+(5/15/25), sombras circulares sin elongación, paredes con bounding box,
+lookup de materiales que fallaba con mayúsculas y `alpha=1e-7` para
+composites. Ahora importa `Arbol`, `Estructura`, `Material`,
+`materiales` y todas las funciones físicas de `modelo_con_excel.py` —
+una sola fuente de verdad, y la vista 2D/3D de edición y del modelo
+dan exactamente el mismo resultado para los mismos datos.
+
+### Seguridad — login con hash
+
+`main_app.py` y `login_window.py` comparaban `user[2] == password` en
+texto plano (además con índices del esquema viejo). Ahora usan
+`db.authenticate()` (PBKDF2+SHA256, ya estaba en `database_manager.py`)
+y `is_admin` se lee de la columna correcta (`user[4]`). También se
+corrigió `login_window.recover_password()`, que le pasaba el username a
+`update_password()` cuando espera el id.
+
+### Tests — de 3 rotos a 25 verdes
+
+- `test/test_physics.py` se reescribió: usa `SolarEngine` (no el
+  `motor_solar.py` muerto), testea el meridiano estándar, la ecuación
+  del tiempo, el mediodía solar local de Buenos Aires, transmitancia de
+  sombra, radiación de cielo despejado, `calibrate_k_factor`, la
+  consistencia entre `modelo_con_excel` y `shadow_temp`, valores golden
+  de regresión y una comparación contra pvlib real (5 ubicaciones).
+- Se agregó `asignar_materiales_grilla()` a `modelo_con_excel.py`
+  (extraído del loop de `generar_grafico`, testable).
+- Se borró el test que importaba `detector_sombras.py` (muerto).
+
+### Limpieza
+
+- Borrados: `image_processor copy.py`, `modelo_con_excel copy.py`,
+  `services/borrar procesamiento_imagen.py`, `test/test/test/`, `ver`.
+- `users.db`, `__pycache__/` y `proyectos/` salieron del control de
+  versiones (`git rm --cached`) y quedaron en `.gitignore`.
+- Validación de Kelvin extendida a T_min/T_max en `ui/app_ui.py`
+  (`_validate_kelvin_input`).
+
+### Cómo correr los tests
+
+```
+pip install -r requirements.txt pytest
+python -m pytest test/ -v
+```
 
 ## 1. Qué pasó entre la v1 y esta versión
 

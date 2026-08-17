@@ -53,17 +53,56 @@ class Temperatura:
     medición certificada sin calibrar `k_factor` contra datos reales.
     """
 
-    def __init__(self, latitude=0.0, longitude=0.0, k_factor=0.04):
+    def __init__(self, latitude=0.0, longitude=0.0, k_factor=0.04, tz_offset_hours=None):
         self.latitude = latitude
         self.longitude = longitude
         self.k_factor = k_factor
+        # Desvío del huso horario respecto de UTC (h). None => se estima
+        # desde la longitud (cada 15° ≈ 1 h), porque el tiempo que entra
+        # al modelo es hora LOCAL de reloj y el ángulo horario solar se
+        # mide contra el meridiano estándar del huso, no contra la
+        # longitud absoluta. Si el huso real difiere de la heurística
+        # (p. ej. Argentina: UTC-3 con lon ~ -58° => heurística -4 h),
+        # pasalo explícito.
+        self.tz_offset_hours = tz_offset_hours
+
+    def _meridiano_estandar(self):
+        if self.tz_offset_hours is not None:
+            return float(self.tz_offset_hours) * 15.0
+        return float(np.clip(np.round(self.longitude / 15), -12, 14)) * 15.0
+
+    def _ecuacion_del_tiempo(self, day_of_year):
+        """Ecuación del tiempo en minutos (analítica, aproximación de
+        Spencer). Compensa la diferencia entre el tiempo solar verdadero
+        y el tiempo solar medio por la excentricidad de la órbita y la
+        oblicuidad de la eclíptica (±16 min ≈ ±4° en el ángulo horario).
+        """
+        b = 360 * (day_of_year - 81) / 365
+        return (9.87 * math.sin(math.radians(2 * b))
+                - 7.53 * math.cos(math.radians(b))
+                - 1.5 * math.sin(math.radians(b)))
+
+    def _hour_angle(self, time_of_day, day_of_year=None):
+        """Ángulo horario solar:
+            H = 15·(t_local − 12) + (longitud − meridiano_estándar) + EoT
+
+        Derivación: hora_solar = UTC + longitud/15 + EoT, y como el reloj
+        local vale UTC + meridiano/15, hora_solar = hora_local + (L−M)/15
+        + EoT. Antes este módulo ignoraba la longitud y la ecuación del
+        tiempo por completo; `modelo_con_excel.py` sumaba la longitud
+        absoluta (válido solo para UTC). Verificado contra pvlib: el signo
+        (L−M) es el físicamente correcto — con (M−L) Buenos Aires se
+        desviaba ~27° en H.
+        """
+        eot_deg = self._ecuacion_del_tiempo(day_of_year) / 4 if day_of_year is not None else 0.0
+        return 15 * (time_of_day - 12) + (self.longitude - self._meridiano_estandar()) + eot_deg
 
     def solar_declination(self, day_of_year):
         return 23.45 * math.sin(math.radians((360 / 365) * (day_of_year - 81)))
 
     def solar_altitude(self, day_of_year, time_of_day):
         declination = self.solar_declination(day_of_year)
-        hour_angle = 15 * (time_of_day - 12)
+        hour_angle = self._hour_angle(time_of_day, day_of_year)
         latitude_rad = math.radians(self.latitude)
         declination_rad = math.radians(declination)
         altitude = math.degrees(
@@ -81,7 +120,7 @@ class Temperatura:
         sentido horario), reemplaza la aproximación lineal que vivía
         suelta en solar_engine.py."""
         declination = self.solar_declination(day_of_year)
-        hour_angle = 15 * (time_of_day - 12)
+        hour_angle = self._hour_angle(time_of_day, day_of_year)
         lat_rad = math.radians(self.latitude)
         dec_rad = math.radians(declination)
         altitude_rad = math.radians(self.solar_altitude(day_of_year, time_of_day))

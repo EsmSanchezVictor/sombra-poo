@@ -23,6 +23,18 @@ except ImportError:  # pragma: no cover
     pd = None
 
 
+def _tz_offset_hours(tz: str) -> float | None:
+    """Convierte un nombre de zona (p. ej. 'America/Argentina/Buenos_Aires')
+    a su desvío en horas respecto de UTC. Si no se puede resolver,
+    devuelve None (el modelo estima el huso desde la longitud)."""
+    try:
+        from datetime import timezone
+        import zoneinfo
+        return float(datetime(2026, 1, 1, tzinfo=zoneinfo.ZoneInfo(tz)).utcoffset().total_seconds() / 3600)
+    except Exception:
+        return None
+
+
 class SolarEngine:
     def __init__(self, use_pvlib: bool = False, tz: str = "America/Argentina/Buenos_Aires"):
         self.use_pvlib = bool(use_pvlib and pvlib is not None and pd is not None)
@@ -35,7 +47,7 @@ class SolarEngine:
             sol = location.get_solarposition(ts)
             return float(sol["azimuth"].iloc[0]), float(sol["elevation"].iloc[0])
 
-        calc = Temperatura(latitude=lat, longitude=lon)
+        calc = Temperatura(latitude=lat, longitude=lon, tz_offset_hours=_tz_offset_hours(self.tz))
         day = dt.timetuple().tm_yday
         hour = dt.hour + dt.minute / 60
         elev = calc.solar_altitude(day, hour)
@@ -54,7 +66,7 @@ class SolarEngine:
                 "source": "pvlib",
             }
 
-        calc = Temperatura(latitude=lat, longitude=lon)
+        calc = Temperatura(latitude=lat, longitude=lon, tz_offset_hours=_tz_offset_hours(self.tz))
         day = dt.timetuple().tm_yday
         hour = dt.hour + dt.minute / 60
         elev = max(0.0, calc.solar_altitude(day, hour))

@@ -105,25 +105,55 @@ def declinacion_solar(dia_del_año):
     return 23.45 * np.sin(np.radians((360 / 365) * (dia_del_año - 81)))
 
 
-def angulo_solar(latitud, longitud, dia_del_año, hora_local):
+def ecuacion_del_tiempo(dia_del_año):
+    """Ecuación del tiempo en GRADOS (minutos/4). Misma aproximación
+    analítica (Spencer) que usa shadow_temp.py — así ambos módulos
+    calculan el mismo ángulo horario para los mismos datos."""
+    b = 360 * (dia_del_año - 81) / 365
+    minutos = (9.87 * np.sin(np.radians(2 * b))
+               - 7.53 * np.cos(np.radians(b))
+               - 1.5 * np.sin(np.radians(b)))
+    return minutos / 4
+
+
+def _meridiano_estandar(longitud, huso_horas=None):
+    """Devuelve el meridiano estándar (grados, oeste negativo) del huso.
+
+    Si `huso_horas` es None se estima desde la longitud: `round(longitud/15)`
+    (cada 15° de longitud ≈ 1 hora de huso). Es una heurística razonable
+    cuando no se conoce el huso real del sitio; la mayoría de las ciudades
+    quedan dentro de ±0.5 h de su huso por longitud, aunque hay excepciones
+    políticas (p. ej. Argentina es UTC-3 con longitud ~-58° => -3.9 h).
+    Si se conoce el huso real, pasalo explícito.
+    """
+    if huso_horas is None:
+        huso_horas = float(np.clip(np.round(longitud / 15), -12, 14))
+    return float(huso_horas) * 15.0
+
+
+def angulo_solar(latitud, longitud, dia_del_año, hora_local, huso_horas=None):
     delta = np.radians(declinacion_solar(dia_del_año))
     phi = np.radians(latitud)
-    # FIX (bug #3): antes era `15 * (hora_local - 12) + (longitud / 15)`.
-    # (longitud / 15) da la corrección en HORAS, no en grados, y se estaba
-    # sumando directo dentro de una expresión en grados. Se corrige sumando
-    # `longitud` sin dividir. Sigue siendo una aproximación simplificada
-    # (no incluye ecuación del tiempo ni huso horario estándar).
-    h = np.radians(15 * (hora_local - 12) + longitud)
+    # FIX (bug #3, v2): el ángulo horario se mide contra el MERIDIANO
+    # ESTÁNDAR del huso, no contra la longitud absoluta del sitio, e
+    # incluye la ecuación del tiempo:
+    #     H = 15·(hora_local − 12) + (longitud − meridiano_estándar) + EoT
+    # Derivación: hora_solar = UTC + longitud/15 + EoT, y como el reloj
+    # local vale UTC + meridiano/15, hora_solar = hora_local + (L−M)/15 + EoT.
+    # Verificado contra pvlib para Buenos Aires (era un error de ~27° en H).
+    h = np.radians(15 * (hora_local - 12) + (longitud - _meridiano_estandar(longitud, huso_horas))
+                   + ecuacion_del_tiempo(dia_del_año))
     sin_theta = np.sin(phi) * np.sin(delta) + np.cos(phi) * np.cos(delta) * np.cos(h)
     return np.arcsin(sin_theta)
 
 
-def azimut_solar(latitud, longitud, dia_del_año, hora_local, theta_sol):
+def azimut_solar(latitud, longitud, dia_del_año, hora_local, theta_sol, huso_horas=None):
     delta = np.radians(declinacion_solar(dia_del_año))
     phi = np.radians(latitud)
     # Mismo fix que en angulo_solar, para que ambas funciones sigan siendo
     # consistentes entre sí.
-    h = np.radians(15 * (hora_local - 12) + longitud)
+    h = np.radians(15 * (hora_local - 12) + (longitud - _meridiano_estandar(longitud, huso_horas))
+                   + ecuacion_del_tiempo(dia_del_año))
     cos_theta = np.cos(theta_sol)
     if cos_theta == 0:
         return 0.0
@@ -244,6 +274,31 @@ def calcular_coeficiente_conveccion(viento):
     return 5.7 + 3.8 * v
 
 
+def asignar_materiales_grilla(X, Y, estructuras, debug=False):
+    """Asigna alpha/epsilon a cada celda de la grilla según el material
+    de las estructuras que la cubren. Devuelve (alpha, epsilon).
+
+    Extraído de generar_grafico() para poder testearlo: el material se
+    busca con el índice normalizado MATERIALES_LOWER (FIX bug #1) y si no
+    se reconoce se avisa y se usa 'suelo' por defecto, en vez de fallar
+    en silencio con propiedades equivocadas.
+    """
+    alpha = np.full_like(X, materiales["suelo"].alpha, dtype=float)
+    epsilon = np.full_like(X, materiales["suelo"].epsilon, dtype=float)
+    for estructura in estructuras:
+        mat = MATERIALES_LOWER.get(estructura.material.lower()) if getattr(estructura, "material", None) else None
+        if mat is None:
+            if debug:
+                print(f"[aviso] material no reconocido: {getattr(estructura, 'material', None)!r} "
+                      f"— se usan propiedades de 'suelo' por defecto")
+            continue
+        mask = (X >= estructura.x1) & (X <= estructura.x2) & \
+               (Y >= estructura.y1) & (Y <= estructura.y2)
+        alpha[mask] = mat.alpha
+        epsilon[mask] = mat.epsilon
+    return alpha, epsilon
+
+
 def cargar_excel(vars, filepath=None):
     if filepath is None:
         filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
@@ -312,8 +367,10 @@ def generar_grafico(vars, frame):
     X, Y = np.meshgrid(x, y)
 
     # Cálculos principales
-    theta_sol = angulo_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get())
-    azimut_sol = azimut_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), theta_sol)
+    huso_var = vars.get("huso_horas")
+    huso_horas = huso_var.get() if hasattr(huso_var, "get") else huso_var
+    theta_sol = angulo_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), huso_horas)
+    azimut_sol = azimut_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), theta_sol, huso_horas)
     I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
 
     # Cálculo de sombras
@@ -328,23 +385,7 @@ def generar_grafico(vars, frame):
         print("Sombra estructuras min/max:", np.min(sombra_estruct), np.max(sombra_estruct))
 
     # Configuración de materiales
-    alpha = np.full_like(X, materiales["suelo"].alpha)
-    epsilon = np.full_like(X, materiales["suelo"].epsilon)
-    for estructura in vars.get('estructuras', []):
-        # FIX (bug #1): se usa el índice normalizado MATERIALES_LOWER en vez
-        # de comparar contra `materiales` (que tiene claves con mayúsculas).
-        # Si el material no se reconoce, se avisa en vez de fallar en
-        # silencio con las propiedades de "suelo".
-        mat = MATERIALES_LOWER.get(estructura.material.lower()) if estructura.material else None
-        if mat is None:
-            if debug:
-                print(f"[aviso] material no reconocido: {estructura.material!r} "
-                      f"— se usan propiedades de 'suelo' por defecto")
-            continue
-        mask = (X >= estructura.x1) & (X <= estructura.x2) & \
-               (Y >= estructura.y1) & (Y <= estructura.y2)
-        alpha[mask] = mat.alpha
-        epsilon[mask] = mat.epsilon
+    alpha, epsilon = asignar_materiales_grilla(X, Y, vars.get('estructuras', []), debug=debug)
 
     # Balance energético
     T_amb = temperatura_ambiente(vars["hora"].get(), vars["T_min"].get(), vars["T_max"].get())

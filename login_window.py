@@ -59,10 +59,13 @@ class LoginWindow:
     def login(self):
         username = self.username_entry.get()
         password = self.password_entry.get()
-        user = self.db_manager.get_user(username)
 
-        if user and user[2] == password:
-            if user[3] == 1:
+        # FIX (seguridad): comparación en texto plano reemplazada por la
+        # verificación del hash PBKDF2, e índice corregido al esquema con
+        # hash (is_admin está en la columna 4).
+        if self.db_manager.authenticate(username, password):
+            user = self.db_manager.get_user(username)
+            if user[4] == 1:
                 self.open_admin_panel()
             else:
                 self.open_main_app()
@@ -76,7 +79,9 @@ class LoginWindow:
         if user:
             new_password = tk.simpledialog.askstring("Recuperar contraseña", "Introduce una nueva contraseña:")
             if new_password:
-                self.db_manager.update_password(username, new_password)
+                # FIX: update_password espera el id (columna 0), antes se le
+                # pasaba el username y el UPDATE no encontraba la fila.
+                self.db_manager.update_password(user[0], new_password)
                 messagebox.showinfo("Exito", "Contraseña actualizada correctamente.")
         else:
             messagebox.showerror("Error", "Usuario no encontrado.")

@@ -1551,13 +1551,23 @@ class SombraApp:
             messagebox.showinfo("Ubicación aplicada", f"Lat/Lon: {location['lat']}, {location['lon']}")
 
     def _validate_kelvin_input(self):
-        temp_k = self.vars_modelo["T_amb_base"].get()
-        if temp_k < 260 or temp_k > 330:
-            temp_c = temp_k - 273.15
-            return messagebox.askyesno(
-                "Temperatura en Kelvin",
-                f"Temp Base está en Kelvin. Equivale a {temp_c:.1f} °C. ¿Es correcto?",
-            )
+        """Valida que los campos de temperatura del modo modelo estén en
+        Kelvin (el modelo trabaja internamente en K y la UI lo dice
+        explícitamente en los labels). Antes solo se validaba T_amb_base;
+        ahora también T_min y T_max."""
+        for var, nombre in (
+            (self.vars_modelo["T_amb_base"], "Temp Base"),
+            (self.vars_modelo["T_min"], "Temp. Mín"),
+            (self.vars_modelo["T_max"], "Temp. Máx"),
+        ):
+            temp_k = var.get()
+            if temp_k < 260 or temp_k > 330:
+                temp_c = temp_k - 273.15
+                if not messagebox.askyesno(
+                    "Temperatura en Kelvin",
+                    f"{nombre} está en Kelvin. Equivale a {temp_c:.1f} °C. ¿Es correcto?",
+                ):
+                    return False
         return True
 
     def generar_grafico_modelo(self):
