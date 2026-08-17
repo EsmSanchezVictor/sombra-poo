@@ -275,9 +275,6 @@ class SombraApp:
         self.ref_gray_mean = None
         self.tmrt_map = None
         self.original_rgb = None
-        self._tmrt_hover_cid = None
-        self._tmrt_hover_canvas = None
-        self._tmrt_hover_annotation = None
         self._shadow_hover_cid = None
         self._shadow_hover_canvas = None
         self._shadow_hover_annotation = None
@@ -778,8 +775,6 @@ class SombraApp:
                 graph.plot_temperature_scale()
 
         self.curve_button.config(state=tk.NORMAL)
-        self.excel_button.config(state=tk.NORMAL)
-        self.pdf_button.config(state=tk.NORMAL)
 
     def _load_image_from_path(self, file_path: str):
         #self.img, self.img_rgb = self.image_processor.load_image(file_path)
@@ -825,9 +820,6 @@ class SombraApp:
         self.last_image_path = destination_str
         return destination_str
 
-    def _copy_image_to_project(self, source_path: str) -> str:
-        return self.save_loaded_image_to_project(source_path)
-
     def _copy_excel_to_project(self, source_path: str, folder: str) -> str:
         project = self.project_manager.current_project
         if project is None:
@@ -853,8 +845,6 @@ class SombraApp:
         self.lbl_promedio_referencia.config(text="Promedio Gris Referencia: N/A")
         self.confirm_button.config(state=tk.DISABLED)
         self.curve_button.config(state=tk.DISABLED)
-        self.excel_button.config(state=tk.DISABLED)
-        self.pdf_button.config(state=tk.DISABLED)
         self.area_ref_button.config(state=tk.DISABLED)
         self.shape_selector.enable_calculo_button()
         if self.curva_label is not None:
@@ -993,9 +983,9 @@ class SombraApp:
 
         for label_text in labels:
             label = tk.Label(panel, text=label_text, bg=panel.cget("bg"), fg="black")
-            label.pack(anchor="w", padx=20, pady=5)
+            label.pack(fill="x", padx=20, pady=5)
             entry = tk.Entry(panel)
-            entry.pack(anchor="w", padx=20, pady=5)
+            entry.pack(fill="x", padx=20, pady=5)
             self.entries.append(entry)
         
         self.entry_temp = self.entries[0]
@@ -1016,22 +1006,22 @@ class SombraApp:
             panel, text="Porcentaje de sombra manual (%, opcional):",
             bg=panel.cget("bg"), fg="black",
         )
-        manual_label.pack(anchor="w", padx=20, pady=(15, 5))
+        manual_label.pack(fill="x", padx=20, pady=(15, 5))
         self.entry_porcentaje_manual = tk.Entry(panel)
-        self.entry_porcentaje_manual.pack(anchor="w", padx=20, pady=5)
+        self.entry_porcentaje_manual.pack(fill="x", padx=20, pady=5)
         manual_hint = tk.Label(
             panel,
             text="Si se completa, se usa en vez del % calculado en el Panel 2.",
             bg=panel.cget("bg"), fg="#666666", font=("Arial", 8),
         )
-        manual_hint.pack(anchor="w", padx=20, pady=(0, 5))
+        manual_hint.pack(fill="x", padx=20, pady=(0, 5))
 
         self.calculate_temp_button = tk.Button(
             panel,
             text="Calcular temperatura en sombra",
             command=self.calculate_temperature_in_shade,
         )
-        self.calculate_temp_button.pack(padx=20, pady=20)
+        self.calculate_temp_button.pack(fill="x", padx=20, pady=20)
     def setup_panel_2(self):
         """Configura el contenido del Panel 2"""
         panel = self.panel_frames[1]
@@ -1045,7 +1035,7 @@ class SombraApp:
             fg="white",
             font=("Arial", 10, "bold"),
         )
-        self.cargar_imagen_button.pack(anchor="w", padx=20, pady=10)
+        self.cargar_imagen_button.pack(fill="x", padx=20, pady=10)
         self.panel2_advanced_check = tk.Checkbutton(
             panel,
             text="Modo avanzado\n(tamaño de matriz)",
@@ -1054,18 +1044,18 @@ class SombraApp:
             bg=panel.cget("bg"),
             command=self._toggle_panel2_advanced,
         )
-        self.panel2_advanced_check.pack(anchor="w", padx=20, pady=4)
+        self.panel2_advanced_check.pack(fill="x", padx=20, pady=4)
         self.shadow_detector_check = tk.Checkbutton(
             panel,
             text="Detector sombras reales (experimental)",
             variable=self.shadow_detector_enabled,
             bg=panel.cget("bg"),
         )
-        self.shadow_detector_check.pack(anchor="w", padx=20, pady=2)
+        self.shadow_detector_check.pack(fill="x", padx=20, pady=2)
 
         # Selección del tamaño de la matriz
         matrix_label = tk.Label(panel, text="Seleccione el tamaño de la matriz:", bg=panel.cget("bg"), fg="black")
-        matrix_label.pack(anchor="w", padx=20, pady=10)
+        matrix_label.pack(fill="x", padx=20, pady=10)
 
         self.matrix_size_combo = ttk.Combobox(
             panel,
@@ -1073,37 +1063,27 @@ class SombraApp:
             values=[480, 640, 800, 1024],
             state="readonly",
         )
-        self.matrix_size_combo.pack(anchor="w", padx=20, pady=5)
+        self.matrix_size_combo.pack(fill="x", padx=20, pady=5)
 
         # Botones de selección de área
         self.area_calc_button = tk.Button(panel, text="Seleccione área de cálculo",bg='blue',fg='white', command=self.shape_selector.select_area_calculo, state=tk.DISABLED)
-        self.area_calc_button.pack(anchor="w",padx=20, pady=10)
+        self.area_calc_button.pack(fill="x",padx=20, pady=10)
 
         self.area_ref_button = tk.Button(panel, text="Seleccione área de referencia",bg='red',fg='white', command=self.shape_selector.select_area_referencia, state=tk.DISABLED)
-        self.area_ref_button.pack(anchor="w",padx=20, pady=10)
+        self.area_ref_button.pack(fill="x",padx=20, pady=10)
 
         # Botones de confirmación y cálculo
         process_label = tk.Label(panel, text="Calcular y procesar:", bg=panel.cget("bg"), fg="black")
-        process_label.pack(anchor="w", padx=20, pady=10)
+        process_label.pack(fill="x", padx=20, pady=10)
 
         self.confirm_button = tk.Button(panel, text="Confirmar selección y calcular", command=self.confirmar_seleccion, state=tk.DISABLED)
-        self.confirm_button.pack(anchor="w",padx=20, pady=10)
+        self.confirm_button.pack(fill="x",padx=20, pady=10)
 
         self.curve_button = tk.Button(panel, text="Generar curva de nivel", command=self.mostrar_curvas_nivel, state=tk.DISABLED)
-        self.curve_button.pack(anchor="w",padx=20, pady=10)
-        
-        # Botones de confirmación y cálculo
-        process_label = tk.Label(panel, text="Exportar resultados:", bg=panel.cget("bg"), fg="black")
-        process_label.pack(anchor="w", padx=20, pady=10)
-
-        self.excel_button = tk.Button(panel, text="Exportar matriz a excel", command=self.exportar_a_excel, state=tk.DISABLED)
-        self.excel_button.pack(anchor="w", padx=20, pady=10)
-
-        self.pdf_button = tk.Button(panel, text="Exportar a informe PDF", command=self.exportar_a_pdf, state=tk.DISABLED)
-        self.pdf_button.pack(anchor="w", padx=20, pady=10)
+        self.curve_button.pack(fill="x",padx=20, pady=10)
         
         self.save_dataset_button = tk.Button(panel, text="Guardar Dataset", command=self.save_dataset, state=tk.DISABLED)
-        self.save_dataset_button.pack(anchor="w", padx=20, pady=10)
+        self.save_dataset_button.pack(fill="x", padx=20, pady=10)
 
         # NUEVO: historial de elementos analizados en este proyecto.
         # Cada vez que se guarda un snapshot (imagen + sombra + curva +
@@ -1112,14 +1092,14 @@ class SombraApp:
         # de nivel y la barra de temperatura calculada — sin tener que
         # rehacer el cálculo.
         historial_label = tk.Label(panel, text="Historial de elementos:", bg=panel.cget("bg"), fg="black")
-        historial_label.pack(anchor="w", padx=20, pady=(20, 4))
+        historial_label.pack(fill="x", padx=20, pady=(20, 4))
 
         historial_frame = tk.Frame(panel, bg=panel.cget("bg"))
-        historial_frame.pack(anchor="w", padx=20, pady=(0, 10), fill="x")
+        historial_frame.pack(fill="x", padx=20, pady=(0, 10))
 
         historial_scroll = tk.Scrollbar(historial_frame, orient=tk.VERTICAL)
         self.snapshot_listbox = tk.Listbox(
-            historial_frame, height=6, width=32,
+            historial_frame, height=6,
             yscrollcommand=historial_scroll.set, exportselection=False,
         )
         historial_scroll.config(command=self.snapshot_listbox.yview)
@@ -1159,7 +1139,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        add_arbol.grid(row=0, column=0, sticky="w", padx=0, pady=3)
+        add_arbol.grid(row=0, column=0, sticky="ew", padx=0, pady=3)
 
         add_estructura = tk.Button(
             acciones,
@@ -1169,7 +1149,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        add_estructura.grid(row=1, column=0, sticky="w", padx=0, pady=3)
+        add_estructura.grid(row=1, column=0, sticky="ew", padx=0, pady=3)
 
         seleccionar = tk.Button(
             acciones,
@@ -1179,7 +1159,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        seleccionar.grid(row=2, column=0, sticky="w", pady=3)
+        seleccionar.grid(row=2, column=0, sticky="ew", pady=3)
 
         guardar = tk.Button(
             acciones,
@@ -1189,7 +1169,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        guardar.grid(row=3, column=0, sticky="w", padx=0, pady=6)
+        guardar.grid(row=3, column=0, sticky="ew", padx=0, pady=6)
 
         abrir = tk.Button(
             acciones,
@@ -1199,7 +1179,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        abrir.grid(row=4, column=0, sticky="w", padx=0, pady=6)
+        abrir.grid(row=4, column=0, sticky="ew", padx=0, pady=6)
 
         grafico = tk.Button(
             acciones,
@@ -1209,7 +1189,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        grafico.grid(row=5, column=0, sticky="w", padx=0, pady=4)
+        grafico.grid(row=5, column=0, sticky="ew", padx=0, pady=4)
 
         vista_3d = tk.Button(
             acciones,
@@ -1219,7 +1199,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        vista_3d.grid(row=6, column=0, sticky="w", padx=0, pady=4)
+        vista_3d.grid(row=6, column=0, sticky="ew", padx=0, pady=4)
 
         modo_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         modo_frame.grid(row=2, column=0, sticky="w", pady=4)
@@ -1312,7 +1292,8 @@ class SombraApp:
         self.advanced_mode_radio.grid(row=1, column=0, sticky="w", pady=(2, 0))
 
         acciones_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        acciones_frame.grid(row=4, column=0, sticky="w", pady=(6, 0))
+        acciones_frame.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        acciones_frame.grid_columnconfigure(0, weight=1)
         self.apply_location_button = tk.Button(
             acciones_frame,
             text="Aplicar ubicación",
@@ -1322,7 +1303,7 @@ class SombraApp:
             font=("Arial", 8, "bold"),
             state="normal" if self.locations_data else "disabled",
         )
-        self.apply_location_button.grid(row=0, column=0, sticky="w", padx=0, pady=3)
+        self.apply_location_button.grid(row=0, column=0, sticky="ew", padx=0, pady=3)
         tk.Button(
             acciones_frame,
             text="Cargar Excel",
@@ -1330,7 +1311,7 @@ class SombraApp:
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
-        ).grid(row=1, column=0, sticky="w", padx=0, pady=3)
+        ).grid(row=1, column=0, sticky="ew", padx=0, pady=3)
         tk.Button(
             acciones_frame,
             text="Guardar Excel",
@@ -1338,7 +1319,7 @@ class SombraApp:
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
-        ).grid(row=2, column=0, sticky="w", padx=0, pady=3)        
+        ).grid(row=2, column=0, sticky="ew", padx=0, pady=3)        
         tk.Button(
             acciones_frame,
             text="Generar Gráfico",
@@ -1346,7 +1327,7 @@ class SombraApp:
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
-        ).grid(row=3, column=0, sticky="w", padx=0, pady=3)
+        ).grid(row=3, column=0, sticky="ew", padx=0, pady=3)
         tk.Button(
             acciones_frame,
             text="Vista 3D",
@@ -1354,21 +1335,30 @@ class SombraApp:
             bg="#4CAF50",
             fg="white",
             font=("Arial", 8, "bold"),
-        ).grid(row=4, column=0, sticky="w", padx=0, pady=3)
+        ).grid(row=4, column=0, sticky="ew", padx=0, pady=3)
 
         self.simple_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         self.simple_frame.grid(row=2, column=0, sticky="nsew", pady=6)
         self.simple_frame.grid_columnconfigure(0, weight=1)
 
         if self.locations_error:
-            tk.Label(
+            self._locations_error_label = tk.Label(
                 self.simple_frame,
                 text=self.locations_error,
                 fg="red",
                 bg=panel.cget("bg"),
-                wraplength=260,
+                wraplength=max(120, self.simple_frame.winfo_width() - 40),
                 justify="left",
-            ).grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
+            )
+            self._locations_error_label.grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
+            # Ajuste dinámico: el texto de error se re-envuelve al ancho
+            # real del frame (el ancho del panel puede variar) en vez de
+            # quedar fijo en 260px y desbordar el contenedor.
+            self.simple_frame.bind(
+                "<Configure>",
+                lambda e: self._locations_error_label.config(
+                    wraplength=max(120, e.width - 40)),
+            )
 
         tk.Label(self.simple_frame, text="País", bg=panel.cget("bg")).grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.country_combo = ttk.Combobox(
@@ -1376,7 +1366,6 @@ class SombraApp:
             textvariable=self.simple_country,
             values=self.locations_data["countries"] if self.locations_data else [],
             state="readonly" if self.locations_data else "disabled",
-            width=22,
         )
         self.country_combo.grid(row=2, column=0, sticky="ew", pady=(2, 6), padx=0)
         self.country_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_city_options())
@@ -1386,7 +1375,6 @@ class SombraApp:
             self.simple_frame,
             textvariable=self.simple_city,
             values=[],
-            width=22,
             state="normal" if self.locations_data else "disabled",
         )
         self.city_combo.grid(row=4, column=0, sticky="ew", pady=(2, 6), padx=0)
@@ -1399,19 +1387,17 @@ class SombraApp:
             textvariable=self.simple_cloudiness,
             values=["Despejado", "Parcial", "Nublado"],
             state="readonly",
-            width=22,
         ).grid(row=6, column=0, sticky="ew", pady=(2,6), padx=0)
 
         tk.Label(self.simple_frame, text="Temperatura aire (°C)", bg=panel.cget("bg")).grid(row=7, column=0, sticky="w", pady=(2, 0))
-        tk.Entry(self.simple_frame, textvariable=self.simple_temp_air_c, width=10).grid(
-            row=8, column=0, sticky="w", pady=(2,6), padx=0
+        tk.Entry(self.simple_frame, textvariable=self.simple_temp_air_c).grid(
+            row=8, column=0, sticky="ew", pady=(2,6), padx=0
         )
         tk.Label(self.simple_frame, text="Viento", bg=panel.cget("bg")).grid(row=9, column=0, sticky="w", pady=(2, 0))
         ttk.Combobox(
             self.simple_frame,
             textvariable=self.vars_modelo["viento"],
             values=["nulo", "moderado", "fuerte"],
-            width=22,
         ).grid(row=10, column=0, sticky="ew", pady=(2,6), padx=0)
 
         self.advanced_frame = tk.Frame(contenido, bg=panel.cget("bg"))
@@ -1423,7 +1409,6 @@ class SombraApp:
             self.advanced_frame,
             textvariable=self.vars_modelo["viento"],
             values=["nulo", "moderado", "fuerte"],
-            width=22,
         ).grid(row=0, column=1, sticky="ew", pady=2, padx=(8, 0))
 
         tk.Label(self.advanced_frame, text="Configuraciones rápidas", bg=panel.cget("bg")).grid(
@@ -1473,9 +1458,13 @@ class SombraApp:
             self.simple_mode_radio.config(state="disabled")
         self._toggle_modelo_mode()  
     def crear_control(self, panel, texto, var, fila, rango=None, es_fecha=False):
-        tk.Label(panel, text=texto, anchor="w",font=("Arial", 8),width=20).grid(row=fila, column=0, sticky="ew", padx=0, pady=10)
+        # Columna del control con peso: el entry/scale se estira hasta
+        # el ancho disponible del panel (antes quedaba fijo al tamaño
+        # pedido y el panel avanzado desbordaba el contenedor).
+        panel.grid_columnconfigure(1, weight=1)
+        tk.Label(panel, text=texto, anchor="w",font=("Arial", 8),width=18).grid(row=fila, column=0, sticky="ew", padx=0, pady=10)
         if es_fecha:
-            entry = tk.Entry(panel,width=15)
+            entry = tk.Entry(panel,width=12)
             entry.grid(row=fila, column=1, sticky="ew", padx=0)
             entry.bind("<Return>", lambda e: actualizar_dia(entry.get(), var))
         elif rango:
@@ -2430,10 +2419,15 @@ class SombraApp:
         _separador()
 
         grupo_escena = _grupo("Escena")
-        _boton(grupo_escena, self.images[0], "Temp.", lambda: self.open_panel(0))
-        _boton(grupo_escena, self.images[1], "Sombra", lambda: self.open_panel(1))
-        _boton(grupo_escena, self.images[2], "Edición", lambda: self.open_panel(2))
-        _boton(grupo_escena, self.images[3], "Modelo", lambda: self.open_panel(3))
+        # Los botones de la banda usan toggle_panel (igual que los
+        # íconos laterales), no open_panel: si ya hay un panel abierto,
+        # open_panel directo lo dejaba abierto y desincronizaba el
+        # estado (dos paneles mapeados a la vez, active_panel apuntando
+        # al último) — BUG CORREGIDO en v3.1.1.
+        _boton(grupo_escena, self.images[0], "Temp.", lambda: self.toggle_panel(0))
+        _boton(grupo_escena, self.images[1], "Sombra", lambda: self.toggle_panel(1))
+        _boton(grupo_escena, self.images[2], "Edición", lambda: self.toggle_panel(2))
+        _boton(grupo_escena, self.images[3], "Modelo", lambda: self.toggle_panel(3))
         _separador()
 
         grupo_modelo = _grupo("Modelo")
@@ -2757,10 +2751,8 @@ class SombraApp:
                 quality_meta = self.shadow_detector.compute_shadow_quality(detected, roi_mask=roi)
                 self.shadow_quality = quality_meta.get("shadow_quality")
                 
-            # Habilitar los botones para curvas de nivel y exportar
-            self.curve_button.config(state=tk.NORMAL)  # Habilitar el botón de curvas de nivel
-            self.excel_button.config(state=tk.NORMAL)  # Habilitar el botón para exportar a Excel
-            self.pdf_button.config(state=tk.NORMAL) # Habilita el botón para guardan el pdf
+            # Habilitar el botón para curvas de nivel
+            self.curve_button.config(state=tk.NORMAL)
             if not self.current_image_path or not os.path.exists(self.current_image_path):
                 print(f"[confirmar] Ruta de imagen inexistente: {self.current_image_path}")
                 messagebox.showerror("Error", "La imagen del proyecto no existe. Cargá la imagen nuevamente.")
@@ -3020,51 +3012,6 @@ class SombraApp:
             messagebox.showinfo("Éxito", "Dataset guardado correctamente")
         except Exception as e:
                         messagebox.showerror("Error", f"No se pudo guardar el dataset: {str(e)}")
-
-    def _setup_hover_tmrt_map(self, ax, canvas, data_2d):
-        if self._tmrt_hover_canvas is not None and self._tmrt_hover_cid is not None:
-            self._tmrt_hover_canvas.mpl_disconnect(self._tmrt_hover_cid)
-        self._tmrt_hover_canvas = canvas
-        if self._tmrt_hover_annotation is None or self._tmrt_hover_annotation.axes != ax:
-            self._tmrt_hover_annotation = ax.annotate(
-                "",
-                xy=(0, 0),
-                xytext=(10, 10),
-                textcoords="offset points",
-                fontsize=8,
-                bbox=dict(boxstyle="round", fc="white", alpha=0.7),
-            )
-            self._tmrt_hover_annotation.set_visible(False)
-
-        def on_move(event):
-            if event.inaxes != ax or event.xdata is None or event.ydata is None:
-                if self._tmrt_hover_annotation.get_visible():
-                    self._tmrt_hover_annotation.set_visible(False)
-                    canvas.draw_idle()
-                return
-
-            x, y = int(event.xdata), int(event.ydata)
-            if y < 0 or x < 0 or y >= data_2d.shape[0] or x >= data_2d.shape[1]:
-                if self._tmrt_hover_annotation.get_visible():
-                    self._tmrt_hover_annotation.set_visible(False)
-                    canvas.draw_idle()
-                return
-
-            tmrt_value = float(data_2d[y, x])
-            try:
-                temp_air = float(self.entry_temp.get().replace('\ufeff', '').strip())
-                temp_air_text = f"{temp_air:.2f} °C"
-            except (ValueError, AttributeError):
-                temp_air_text = "N/A"
-
-            self._tmrt_hover_annotation.xy = (event.xdata, event.ydata)
-            self._tmrt_hover_annotation.set_text(
-                f"Tmrt: {tmrt_value:.2f} °C\nTemp aire: {temp_air_text}"
-            )
-            self._tmrt_hover_annotation.set_visible(True)
-            canvas.draw_idle()
-
-        self._tmrt_hover_cid = canvas.mpl_connect("motion_notify_event", on_move)
 
     def _setup_hover_shadow_percent_photo(self, ax, canvas, rgb_img):
         if self._shadow_hover_canvas is not None and self._shadow_hover_cid is not None:

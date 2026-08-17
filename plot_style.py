@@ -25,7 +25,6 @@ el gráfico.
 """
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 # --- Paletas por tipo de dato ------------------------------------------
@@ -38,18 +37,6 @@ CMAP_CURVAS_NIVEL = "RdYlBu_r"
 FONT_TITULO = 12
 FONT_EJES = 10
 FONT_ANOTACION = 9
-
-
-def aplicar_estilo_base():
-    """Tamaños y tipografía consistentes en toda la app. Llamar una vez
-    al arrancar (por ejemplo, en el punto de entrada de la UI)."""
-    plt.rcParams.update({
-        "font.size": FONT_EJES,
-        "axes.titlesize": FONT_TITULO,
-        "axes.labelsize": FONT_EJES,
-        "figure.autolayout": False,
-        "axes.grid": False,
-    })
 
 
 def agregar_colorbar_temperatura(fig, ax, mappable, unidad: str = "°C"):

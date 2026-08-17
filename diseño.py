@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from datetime import datetime
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import pandas as pd
 import math
@@ -64,13 +63,6 @@ def crear_area_grafico(vars,frame,app):
 def establecer_modo(modos, app):
     app.modo = modos
     elemento_temporal = None
-def actualizar_fecha(var,frame, fecha_str): #ojo con el frame
-    try:
-        fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
-        var.set(fecha.timetuple().tm_yday)
-        actualizar_grafico(vars, frame)
-    except ValueError:
-        messagebox.showerror("Error", "Formato de fecha inválido. Use AAAA-MM-DD")
 def manejar_click(event, app):
     if not event.inaxes:
         return

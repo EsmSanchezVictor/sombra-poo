@@ -165,6 +165,84 @@ cambiar a 1 → cerrar 1; cada paso termina en el estado correcto
 (active, panel mapeado, íconos HOR/VERT); `pytest test/ -q` sigue
 25/25 verde.
 
+### 5.2 Fix posterior (v3.1.2) — la banda "Escena" del ribbon rompía el toggle
+
+Reportado tras el fix anterior: los íconos laterales funcionaban, pero
+los botones de la banda "Escena" del ribbon (Temp. / Sombra / Edición /
+Modelo) desincronizaban el estado de los paneles. Causa: en
+`setup_ribbon()` los botones de Escena llamaban `self.open_panel(i)`
+directo en vez de `toggle_panel(i)` — con un panel ya abierto, abrían
+el nuevo encima sin cerrar el viejo (dos paneles mapeados a la vez y
+`active_panel` apuntando al último). Corregido: ahora llaman a
+`toggle_panel(i)`, exactamente el mismo camino que los íconos
+laterales (como prometía el docstring del método).
+
+### 5.3 Fix posterior (v3.1.3) — widgets de los paneles ajustados al contenedor
+
+Reportado tras el fix anterior: los elementos dentro de los paneles
+desplegables no se ajustaban al ancho del contenedor (quedaban cortos
+con espacio vacío a la derecha, o desbordaban el panel — que no tiene
+scroll horizontal). Cambios en `ui/app_ui.py`:
+
+- **Panel 1**: labels, entries y el botón "Calcular..." pasan a
+  `pack(fill="x")` — se estiran al ancho del panel (antes quedaban a su
+  tamaño natural).
+- **Panel 2**: todos los botones, checkbox y el combobox de matriz a
+  `fill="x"`; el listbox del historial perdió el `width=32` fijo
+  (~250px, más ancho que el panel de 227px) y ahora llena el frame.
+- **Panel 3**: botones de "Acciones" pasan de `sticky="w"` a
+  `sticky="ew"` (la columna ya tenía peso) — ancho completo.
+- **Panel 4**: `acciones_frame` ganó `grid_columnconfigure(0, weight=1)`
+  y sus botones se estiran; combos del modo simple/avanzado sin `width`
+  fijo; entry de temperatura a `sticky="ew"`; el `wraplength` del
+  mensaje de error de ubicaciones era fijo (260px, desbordaba) y ahora
+  se re-envuelve dinámicamente al ancho del frame.
+- **`crear_control`** (controles avanzados de los paneles 3 y 4): el
+  label y el entry con anchos fijos (20 y 15 chars) pedían ~250px y
+  desbordaban el panel; se redujeron (18 y 12) y la columna del control
+  ganó peso para que entry/scale se estiren.
+
+Verificado midiendo cada widget abierto: los 4 paneles con contenido
+de 225px y 0 widgets que desborden; entries/botones/combos miden
+185px (= ancho del panel − padding). `pytest test/ -q` sigue 25/25.
+
+### 5.4 Fix posterior (v3.1.4) — fuera los botones "Exportar resultados" del Panel 2
+
+Se eliminó la sección "Exportar resultados:" del Panel 2 (el label y los
+botones "Exportar matriz a excel" y "Exportar a informe PDF", y sus
+referencias de habilitación/deshabilitación en el flujo de
+procesamiento). Las funciones `exportar_a_excel` y `exportar_a_pdf`
+**no se purgaron**: siguen en uso desde el menú "Exportar…" (Ctrl+E y
+Ctrl+P), el menú Modelo ("Exportar matriz a PDF" / "Exportar matriz del
+modelo") y el ribbon — los botones del panel eran solo un acceso más.
+
+**Estudio de código muerto** (referencias en todo el repo, sin contar
+la línea `def`): funciones sin ningún uso:
+
+| Función | Ubicación | Qué es |
+|---|---|---|
+| `_copy_image_to_project` | `ui/app_ui.py:826` | Delegado de `save_loaded_image_to_project` (que sí se usa) — nunca llamado |
+| `_setup_hover_tmrt_map` | `ui/app_ui.py:3022` | Hover del mapa Tmrt — superado por `_setup_hover_shadow_percent_photo` |
+| `actualizar_fecha` | `diseño.py:67` | Asistente de fecha — nunca llamada |
+| `aplicar_estilo_base` | `plot_style.py:43` | Aplicación de estilo matplotlib — nunca llamada (los módulos importan solo las constantes) |
+| `reset` (y todo `reset_value.py`) | `reset_value.py` | Archivo huérfano: nadie importa `reset_value` (clase con `btn_exportar` y demás del esquema viejo) |
+
+Resto verificado: las ~120 funciones de módulo de `core/`, `services/`,
+`ui/` y la raíz tienen al menos una referencia; los métodos de
+`SombraApp` no listados arriba se usan (directo, vía menú/ribbon/binds
+o desde otros módulos con `getattr`).
+
+**Los 5 candidatos se ELIMINARON** (confirmado por el usuario):
+`_copy_image_to_project` y `_setup_hover_tmrt_map` (con sus atributos
+`_tmrt_hover_*` que quedaban huérfanos) de `ui/app_ui.py`;
+`actualizar_fecha` de `diseño.py` (además, estaba rota: referenciaba
+`vars`/`actualizar_grafico` inexistentes — habría dado NameError);
+`aplicar_estilo_base` de `plot_style.py` (eran 4 rcParams triviales de
+re-agregar si alguna vez se quiere tipografía global); y el archivo
+`reset_value.py` completo (huérfano del esquema viejo). De paso se
+sacaron los imports que quedaron sin uso: `datetime` de `diseño.py` y
+`matplotlib.pyplot` de `plot_style.py`. `pytest test/ -q` sigue 25/25.
+
 ## 6. Pendiente — la refactorización grande
 
 `ui/app_ui.py` es una sola clase (`SombraApp`) de 2251 líneas y ~100
