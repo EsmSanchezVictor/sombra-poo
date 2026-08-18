@@ -382,3 +382,12 @@ def test_color_copa_3d():
     assert color_copa("Especie inexistente") == "forestgreen"
     assert color_copa("Pino (Pinus sp.)") == "#2E7D32"
     assert color_copa("Plátano (Platanus × acerifolia)") == "#66BB6A"
+
+
+def test_dialogs_crear_proyecto_exportan():
+    """Regresión: `core/project_manager.new_project` llama
+    `dialogs.ask_project_name` / `dialogs.ask_project_location`
+    (ronda 2 los perdió al refactorizar ui/dialogs.py)."""
+    from ui import dialogs
+    assert callable(dialogs.ask_project_name)
+    assert callable(dialogs.ask_project_location)

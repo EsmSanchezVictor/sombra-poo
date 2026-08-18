@@ -467,6 +467,17 @@ con los labels de % de sombra):
 (miniaturas, click con recarga total, desplazamiento, redibujado de
 áreas y ocultamiento por modo).
 
+### 5.9 Fix — "Nuevo proyecto" roto tras el refactor de dialogs
+
+El refactor de la ronda 2 (`9465352`) había perdido las funciones de
+módulo `dialogs.ask_project_name` y `dialogs.ask_project_location` de
+`ui/dialogs.py`, que `core/project_manager.py::new_project` sigue
+llamando (`from ui import dialogs`) → AttributeError al crear un
+proyecto nuevo. Se restauraron las dos funciones originales (nombre
+con `simpledialog.askstring` y ubicación país/ciudad con combobox +
+búsqueda) y se agregó el test de regresión `test_dialogs_crear_
+proyecto_exportan`. Suite: 64/64.
+
 ## 6. Pendiente — la refactorización grande
 
 `ui/app_ui.py` es una sola clase (`SombraApp`) de 2251 líneas y ~100
