@@ -432,10 +432,13 @@ que conservan su grilla original, filas 1 y 2, y su caja de resultados
 con los labels de % de sombra):
 
 - Cada árbol/elemento analizado aparece como miniatura de su
-  **histograma** (`resultados/histogramas/helementoN.png`); la
-  miniatura se agrega automáticamente cuando el histograma se genera
-  (vía `poblar_lista_snapshots`, que ahora refresca el carrusel además
-  del contador de la barra de estado).
+  **histograma** (`resultados/histogramas/helementoN.png`). La
+  miniatura se agrega **apenas se genera el histograma** (`mostrar_
+  curvas_nivel` → `_registrar_histograma_en_carrusel`, entrada
+  provisional sin esperar a guardar) y se formaliza al guardar el
+  snapshot (`save_snapshot` reemplaza la provisional del mismo
+  elemento, evitando duplicados). El contador de la barra de estado
+  se sincroniza vía `poblar_lista_snapshots`.
 - Las flechas ◀ ▶ desplazan la franja; cada miniatura lleva la etiqueta
   del elemento y su % de sombra.
 - Un click en una miniatura recarga **todo** el análisis del elemento:
@@ -451,6 +454,11 @@ con los labels de % de sombra):
   `ref_gray_mean` desde la matriz de referencia.
 - El carrusel se oculta junto con las demás secciones al cambiar de
   modo (Diseño/Modelo) y vuelve a aparecer en el Panel 2.
+- **Tamaños dominantes**: la fila 1 (foto y curva) tiene `weight=1` y
+  absorbe todo el espacio extra al redimensionar la ventana; la fila
+  del carrusel (`frame15`) tiene `weight=0` con altura contenida
+  (~110 px, miniaturas de 58 px de alto), por lo que nunca compite con
+  el tamaño de las secciones de imagen e histograma.
 
 **Tests:** sin cambios de suite (63/63); validado por smoke completo
 (miniaturas, click con recarga total, desplazamiento, redibujado de

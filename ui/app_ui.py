@@ -234,11 +234,13 @@ class SombraApp:
         )
         # Área propia del carrusel del Panel 2 (fila fija debajo de las
         # 4 secciones, sin peso de grilla: no afecta sus tamaños).
+        # Altura contenida a propósito: la fila 1 (foto/curva) tiene
+        # weight=1 y es la dominante al redimensionar la ventana.
         self.frame15 = tk.Frame(
             root,
             bg=self.palette["panel"],
             width=100,
-            height=130,
+            height=110,
             highlightbackground=self.palette["border"],
             highlightthickness=1,
         )
@@ -714,6 +716,27 @@ class SombraApp:
             self.status_elements_var.set(f"Elementos: {len(self.snapshots)}")
         if hasattr(self, "carrusel_inner"):
             self._carrusel_actualizar()
+
+    def _registrar_histograma_en_carrusel(self):
+        """Agrega una ENTRADA PROVISIONAL al carrusel apenas se genera el
+        histograma (mostrar_curvas_nivel), sin esperar a guardar el
+        snapshot. save_snapshot reemplaza la provisional del mismo
+        elemento por la entrada formal al guardar."""
+        hist = getattr(self, "last_histogram_path", None)
+        if not hist or not os.path.exists(str(hist)):
+            return
+        hist = str(hist)
+        if any(e.get("histogram") == hist for e in self.snapshots):
+            return
+        self.snapshots.append({
+            "n": len(self.snapshots) + 1,
+            "timestamp": pd.Timestamp.now().isoformat(),
+            "label": getattr(self, "current_image_stem", None) or f"elemento{len(self.snapshots) + 1}",
+            "histogram": hist,
+            "porcentaje_sombra": getattr(self, "porcentaje_sombra", None),
+            "provisional": True,
+        })
+        self.poblar_lista_snapshots()
 
     def cargar_snapshot(self, index: int):
         """Recarga TODO lo asociado a un elemento del historial: imagen,
@@ -2274,7 +2297,7 @@ class SombraApp:
         )
         self.carrusel_izq.pack(side="left", fill="y")
         self.carrusel_canvas = tk.Canvas(
-            strip, height=110, bg=self.palette["panel"], highlightthickness=0,
+            strip, height=72, bg=self.palette["panel"], highlightthickness=0,
         )
         self.carrusel_canvas.pack(side="left", fill="both", expand=True)
         self.carrusel_der = tk.Button(
@@ -2319,7 +2342,7 @@ class SombraApp:
             except Exception:
                 continue
             ancho, alto = img.size
-            alto_t = 86
+            alto_t = 58
             ancho_t = max(1, int(ancho * alto_t / alto))
             photo = ImageTk.PhotoImage(img.resize((ancho_t, alto_t), Image.LANCZOS))
             self._carrusel_photos.append(photo)
@@ -2781,6 +2804,7 @@ class SombraApp:
             plt.close(hist_fig)
             
             self.last_histogram_path = str(hist_path)
+            self._registrar_histograma_en_carrusel()
 
             excel_path = safe_path(excel_dir, f"{self.current_image_stem}.xlsx")
             pd.DataFrame(self.shape_selector.area_seleccionada).to_excel(excel_path, index=False)

@@ -112,6 +112,13 @@ class SnapshotService:
 
         if not hasattr(self.app, "snapshots") or self.app.snapshots is None:
             self.app.snapshots = []
+        # La entrada provisional del carrusel (creada al generar el
+        # histograma, ver _registrar_histograma_en_carrusel) se
+        # reemplaza por la formal del mismo elemento al guardar.
+        label = entry["label"]
+        self.app.snapshots = [
+            e for e in self.app.snapshots
+            if not (e.get("provisional") and e.get("label") == label)]
         self.app.snapshots.append(entry)
         if hasattr(self.app, "poblar_lista_snapshots"):
             self.app.poblar_lista_snapshots()
