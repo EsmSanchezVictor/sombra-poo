@@ -252,7 +252,7 @@ class SombraApp:
         self.frame3.grid(row=1, column=2, sticky="nsew")
         self.frame4.grid(row=2, column=1, sticky="nsew")
         self.frame5.grid(row=2, column=2, sticky="nsew")
-        self.frame6.grid(row=3, column=1, columnspan=2, sticky="nsew")
+        self.frame6.grid(row=5, column=1, columnspan=2, sticky="nsew")
         self.frame7.grid(row=1, column=1, sticky="nsew")
         self.frame8.grid(row=1, column=2, sticky="nsew")
         self.frame9.grid(row=2, column=1, sticky="nsew")
@@ -283,6 +283,7 @@ class SombraApp:
         root.grid_rowconfigure(1, weight=1)
         root.grid_rowconfigure(3, weight=0)
         root.grid_rowconfigure(4, weight=0)  # carrusel: alto fijo, no crece
+        root.grid_rowconfigure(5, weight=0)  # separador inferior
         root.grid_columnconfigure(0, weight=0)
         root.grid_columnconfigure(1, weight=1)
         root.grid_columnconfigure(2, weight=1)
@@ -732,6 +733,7 @@ class SombraApp:
             "n": len(self.snapshots) + 1,
             "timestamp": pd.Timestamp.now().isoformat(),
             "label": getattr(self, "current_image_stem", None) or f"elemento{len(self.snapshots) + 1}",
+            "image": getattr(self, "last_image_path", None),
             "histogram": hist,
             "porcentaje_sombra": getattr(self, "porcentaje_sombra", None),
             "provisional": True,
@@ -2238,49 +2240,49 @@ class SombraApp:
         result_frame.pack(expand=True, fill='both', pady=5)
 
         sombra_frame = tk.Frame(result_frame, bg=self.palette["panel"])
-        sombra_frame.pack(side=tk.LEFT, padx=50, pady=10)
+        sombra_frame.pack(side=tk.LEFT, padx=20, pady=4)
 
         self.lbl_dimensiones_calculo = tk.Label(
             sombra_frame,
             text="Dimensiones del Área de Cálculo: N/A",
-            font=("Arial", 9, "bold"),
+            font=("Arial", 8, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_dimensiones_calculo.pack(pady=5)
+        self.lbl_dimensiones_calculo.pack(pady=2)
 
         self.lbl_dimensiones_referencia = tk.Label(
             sombra_frame,
             text="Dimensiones del Área de Referencia: N/A",
-            font=("Arial", 9, "bold"),
+            font=("Arial", 8, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_dimensiones_referencia.pack(pady=5)
+        self.lbl_dimensiones_referencia.pack(pady=2)
 
         self.lbl_promedio_referencia = tk.Label(
             sombra_frame,
             text="Promedio Gris Referencia: N/A",
-            font=("Arial", 9, "bold"),
+            font=("Arial", 8, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_promedio_referencia.pack(pady=5)
+        self.lbl_promedio_referencia.pack(pady=2)
 
         self.lbl_porcentaje_sombra = tk.Label(
             sombra_frame,
             text="Porcentaje de sombra: N/A",
-            font=("Arial", 9, "bold"),
+            font=("Arial", 8, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_porcentaje_sombra.pack(pady=5)
+        self.lbl_porcentaje_sombra.pack(pady=2)
 
     def carrusel(self, frame):
         """Carrusel de elementos analizados — ÁREA PROPIA del Panel 2
         (fila fija debajo de las 4 secciones; no modifica sus tamaños).
 
-        Muestra una miniatura del HISTOGRAMA de cada árbol/elemento
+        Muestra una miniatura de la FOTO de cada árbol/elemento
         analizado (se agrega al generarse el histograma, vía
         self.snapshots). Un click en una miniatura recarga la foto, las
         áreas dibujadas de sombra y referencia, sus cálculos (% sombra
@@ -2319,7 +2321,8 @@ class SombraApp:
 
     def _carrusel_actualizar(self):
         """(Re)construye las miniaturas del carrusel desde los snapshots
-        que ya tienen histograma generado."""
+        que ya tienen imagen cargada (la FOTO del elemento, no el
+        histograma)."""
         if not hasattr(self, "carrusel_inner"):
             return
         for widget in self.carrusel_inner.winfo_children():
@@ -2330,11 +2333,11 @@ class SombraApp:
         project = self.project_manager.current_project
         root_path = project.root_path if project else None
         for idx, entry in enumerate(self.snapshots):
-            hist = entry.get("histogram")
-            if not hist:
+            img = entry.get("image")
+            if not img:
                 continue
-            path = hist if os.path.isabs(hist) else (
-                os.path.join(root_path, hist) if root_path else None)
+            path = img if os.path.isabs(img) else (
+                os.path.join(root_path, img) if root_path else None)
             if not path or not os.path.exists(path):
                 continue
             try:
@@ -2413,33 +2416,33 @@ class SombraApp:
         self.lbl_tmrt_sol = tk.Label(
             temp_frame,
             text="Tmrt al sol: N/A",
-            font=("Arial", 9, "bold"),
+            font=("Arial", 8, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_tmrt_sol.pack(pady=5)
+        self.lbl_tmrt_sol.pack(pady=2)
 
         self.lbl_tmrt_sombra = tk.Label(
             temp_frame,
             text="Tmrt en sombra: N/A",
-            font=("Arial", 9, "bold"),
+            font=("Arial", 8, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_tmrt_sombra.pack(pady=5)
+        self.lbl_tmrt_sombra.pack(pady=2)
 
         self.lbl_delta_tmrt = tk.Label(
             temp_frame,
             text="ΔTmrt (impacto sombra): N/A",
-            font=("Arial", 9, "bold"),
+            font=("Arial", 8, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_delta_tmrt.pack(pady=5)    
+        self.lbl_delta_tmrt.pack(pady=2)    
 
         #self.graph_frame = tk.Frame(temp_frame)
         self.graph_frame = tk.Frame(temp_frame, bg=self.palette["panel"])
-        self.graph_frame.pack(side=tk.RIGHT, padx=10)
+        self.graph_frame.pack(side=tk.RIGHT, padx=6)
     def imagen(self, frame):
         """Configura el área de visualización de imágenes."""
         img_frame = self.create_card(frame)

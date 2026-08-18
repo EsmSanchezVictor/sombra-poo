@@ -431,11 +431,11 @@ tamaños fijos de las 4 secciones** (foto, curva, resultados y Tmrt —
 que conservan su grilla original, filas 1 y 2, y su caja de resultados
 con los labels de % de sombra):
 
-- Cada árbol/elemento analizado aparece como miniatura de su
-  **histograma** (`resultados/histogramas/helementoN.png`). La
-  miniatura se agrega **apenas se genera el histograma** (`mostrar_
-  curvas_nivel` → `_registrar_histograma_en_carrusel`, entrada
-  provisional sin esperar a guardar) y se formaliza al guardar el
+- Cada árbol/elemento analizado aparece como miniatura de su **foto**
+  (la imagen cargada del elemento — no el histograma). La miniatura se
+  agrega **apenas se genera el histograma** (`mostrar_curvas_nivel` →
+  `_registrar_histograma_en_carrusel`, entrada provisional con la
+  imagen actual, sin esperar a guardar) y se formaliza al guardar el
   snapshot (`save_snapshot` reemplaza la provisional del mismo
   elemento, evitando duplicados). El contador de la barra de estado
   se sincroniza vía `poblar_lista_snapshots`.
@@ -455,10 +455,13 @@ con los labels de % de sombra):
 - El carrusel se oculta junto con las demás secciones al cambiar de
   modo (Diseño/Modelo) y vuelve a aparecer en el Panel 2.
 - **Tamaños dominantes**: la fila 1 (foto y curva) tiene `weight=1` y
-  absorbe todo el espacio extra al redimensionar la ventana; la fila
-  del carrusel (`frame15`) tiene `weight=0` con altura contenida
-  (~110 px, miniaturas de 58 px de alto), por lo que nunca compite con
-  el tamaño de las secciones de imagen e histograma.
+  absorbe todo el espacio extra al redimensionar la ventana (la foto y
+  la curva quedan en ~80% del alto); la fila del carrusel (`frame15`)
+  tiene `weight=0` con altura contenida (~110 px, miniaturas de 58 px
+  de alto). Las secciones 4 y 5 (resultados y Tmrt) se achicaron en
+  consecuencia (labels en fuente 8, menor padding), de modo que todo
+  se ve completo y más chico. El separador `frame6` se movió al final
+  de todo (fila 5, debajo del carrusel).
 
 **Tests:** sin cambios de suite (63/63); validado por smoke completo
 (miniaturas, click con recarga total, desplazamiento, redibujado de
