@@ -3,7 +3,7 @@ from database_manager import DatabaseManager
 from main_app import MainApp
 
 def main():
-    root = tk.Tk()
+    root = tk.Tk() 
     db_manager = DatabaseManager()
     # Crear usuario administrador inicial si no existe
     if not db_manager.get_user("admin"):
