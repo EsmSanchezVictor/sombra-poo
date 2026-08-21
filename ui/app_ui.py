@@ -1116,9 +1116,17 @@ class SombraApp:
         for widget in panel.winfo_children():
             widget.destroy()        
 
+        # MISMO BUG QUE EL PANEL 4 (ver docstring de setup_panel_4 en
+        # ui/panels.py): acá se creaba un SEGUNDO canvas scrolleable
+        # anidado vía _build_scrollable_content dentro del frame de
+        # contenido que YA vive en un canvas con scrollbar + rueda del
+        # mouse. El canvas anidado quedaba con altura propia chica y
+        # sin rueda propia — los controles de abajo (radios de modo,
+        # ubicación del proyecto, viento, fecha/hora) quedaban cortados
+        # e inalcanzables ("ocultos"). Ahora los widgets van directo
+        # sobre `panel`, igual que en los paneles 1/2/4.
         panel.grid_columnconfigure(0, weight=1)
-        panel.grid_rowconfigure(0, weight=1)
-        contenido = self._build_scrollable_content(panel)
+        contenido = panel
         contenido.grid_columnconfigure(0, weight=1)
 
         diseno_label = tk.Label(contenido, text="Modo de Edición:", bg=panel.cget("bg"), fg="black")
@@ -1247,19 +1255,6 @@ class SombraApp:
         for texto, var, fila, rango, es_fecha in self.controles:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
         self._toggle_edicion_mode()    
-    def _build_scrollable_content(self, parent):
-        canvas = tk.Canvas(parent, bg=parent.cget("bg"), highlightthickness=0, bd=0)
-        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-
-        content = tk.Frame(canvas, bg=parent.cget("bg"))
-        window_id = canvas.create_window((0, 0), window=content, anchor="nw")
-        content.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window_id, width=event.width))
-        return content
-
     def _save_unit_settings(self):
         self.settings["units"] = self.temp_unit.get()
         self.settings["temp_unit"] = self.temp_unit.get()

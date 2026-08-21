@@ -482,6 +482,25 @@ con `simpledialog.askstring` y ubicación país/ciudad con combobox +
 búsqueda) y se agregó el test de regresión `test_dialogs_crear_
 proyecto_exportan`. Suite: 64/64.
 
+### 5.10 Fix — elementos del Panel 3 (Modo de Edición) cortados/ocultos
+
+El Panel 3 de la barra lateral seguía usando el patrón del canvas
+anidado (`_build_scrollable_content`) que ya había sido la causa del
+bug "controles del Panel 4 ocultos" (§5): un SEGUNDO canvas scrolleable
+dentro del frame que ya vive en un canvas con scrollbar + rueda del
+mouse. El canvas anidado quedaba con altura propia chica y sin rueda
+propia, así que los controles de abajo del panel (radios Simple/
+Avanzado, ubicación del proyecto, viento, fecha/hora) quedaban cortados
+e inalcanzables. Corrección idéntica a la del Panel 4: los widgets van
+directo sobre el frame de contenido (`panel_frames[2]`), heredando el
+scroll y la rueda del mouse; se eliminó `_build_scrollable_content`
+(código muerto) para que el patrón no vuelva a usarse.
+
+Verificado con smoke headless: los 4 paneles abiertos muestran todo su
+contenido al scrollear al fondo (último widget dentro del viewport),
+incluidos el modo avanzado del Panel 2 (edición), el avanzado y simple
+del Panel 4 (modelo). Suite: 64/64.
+
 ## 6. Pendiente — la refactorización grande
 
 `ui/app_ui.py` es una sola clase (`SombraApp`) de 2251 líneas y ~100
