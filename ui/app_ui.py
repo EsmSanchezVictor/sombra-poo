@@ -240,7 +240,7 @@ class SombraApp:
             root,
             bg=self.palette["panel"],
             width=100,
-            height=110,
+            height=100,
             highlightbackground=self.palette["border"],
             highlightthickness=1,
         )
@@ -2237,10 +2237,11 @@ class SombraApp:
     def resultados(self, frame):
         """Configura el área de resultados (sección fija del Panel 2)."""
         result_frame = self.create_card(frame)
+        result_frame.config(padx=8, pady=6)
         result_frame.pack(expand=True, fill='both', pady=5)
 
         sombra_frame = tk.Frame(result_frame, bg=self.palette["panel"])
-        sombra_frame.pack(side=tk.LEFT, padx=20, pady=4)
+        sombra_frame.pack(side=tk.LEFT, padx=12, pady=2)
 
         self.lbl_dimensiones_calculo = tk.Label(
             sombra_frame,
@@ -2249,7 +2250,7 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_dimensiones_calculo.pack(pady=2)
+        self.lbl_dimensiones_calculo.pack(pady=1)
 
         self.lbl_dimensiones_referencia = tk.Label(
             sombra_frame,
@@ -2258,7 +2259,7 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_dimensiones_referencia.pack(pady=2)
+        self.lbl_dimensiones_referencia.pack(pady=1)
 
         self.lbl_promedio_referencia = tk.Label(
             sombra_frame,
@@ -2267,7 +2268,7 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_promedio_referencia.pack(pady=2)
+        self.lbl_promedio_referencia.pack(pady=1)
 
         self.lbl_porcentaje_sombra = tk.Label(
             sombra_frame,
@@ -2276,7 +2277,7 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_porcentaje_sombra.pack(pady=2)
+        self.lbl_porcentaje_sombra.pack(pady=1)
 
     def carrusel(self, frame):
         """Carrusel de elementos analizados — ÁREA PROPIA del Panel 2
@@ -2299,7 +2300,7 @@ class SombraApp:
         )
         self.carrusel_izq.pack(side="left", fill="y")
         self.carrusel_canvas = tk.Canvas(
-            strip, height=72, bg=self.palette["panel"], highlightthickness=0,
+            strip, height=62, bg=self.palette["panel"], highlightthickness=0,
         )
         self.carrusel_canvas.pack(side="left", fill="both", expand=True)
         self.carrusel_der = tk.Button(
@@ -2345,7 +2346,7 @@ class SombraApp:
             except Exception:
                 continue
             ancho, alto = img.size
-            alto_t = 58
+            alto_t = 50
             ancho_t = max(1, int(ancho * alto_t / alto))
             photo = ImageTk.PhotoImage(img.resize((ancho_t, alto_t), Image.LANCZOS))
             self._carrusel_photos.append(photo)
@@ -2410,6 +2411,7 @@ class SombraApp:
         """Configura el área de temperatura en sombra."""
         #temp_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
         temp_frame = self.create_card(frame)
+        temp_frame.config(padx=8, pady=6)
         temp_frame.pack(expand=True, fill='both', pady=5)
 
         #self.lbl_temp_shade = tk.Label(temp_frame, text="Temperatura en Sombra: N/A", font=("Arial", 12, "bold"))
@@ -2420,7 +2422,7 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_tmrt_sol.pack(pady=2)
+        self.lbl_tmrt_sol.pack(pady=1)
 
         self.lbl_tmrt_sombra = tk.Label(
             temp_frame,
@@ -2429,7 +2431,7 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_tmrt_sombra.pack(pady=2)
+        self.lbl_tmrt_sombra.pack(pady=1)
 
         self.lbl_delta_tmrt = tk.Label(
             temp_frame,
@@ -2438,18 +2440,21 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_delta_tmrt.pack(pady=2)    
+        self.lbl_delta_tmrt.pack(pady=1)    
 
         #self.graph_frame = tk.Frame(temp_frame)
         self.graph_frame = tk.Frame(temp_frame, bg=self.palette["panel"])
-        self.graph_frame.pack(side=tk.RIGHT, padx=6)
+        self.graph_frame.pack(side=tk.RIGHT, padx=4)
     def imagen(self, frame):
         """Configura el área de visualización de imágenes."""
         img_frame = self.create_card(frame)
         img_frame.pack(expand=True, fill='both', pady=5)
         self.fig1, self.ax1 = plt.subplots() 
         self.canvas1 = FigureCanvasTkAgg(self.fig1, master=img_frame)
-        self.canvas1.get_tk_widget().pack(side=tk.LEFT)
+        # fill+expand: la foto ocupa TODO el frame (que mantiene su
+        # tamaño fijo de ~2/3 del alto de la ventana) y se ve grande
+        # para trabajar — antes quedaba chica a la izquierda.
+        self.canvas1.get_tk_widget().pack(fill="both", expand=True)
     def curva_de_nivel(self, frame):
         """Configura el área de curvas de nivel."""
         nivel_frame = self.create_card(frame)
@@ -2459,7 +2464,7 @@ class SombraApp:
 
         self.fig2, self.ax2 = plt.subplots()
         self.canvas2 = FigureCanvasTkAgg(self.fig2, master=nivel_frame)
-        self.canvas2.get_tk_widget().pack(side=tk.RIGHT)
+        self.canvas2.get_tk_widget().pack(fill="both", expand=True)
     def cargar_imagen(self):
         if not self.require_project("cargar una imagen"):
             return  

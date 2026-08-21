@@ -455,13 +455,17 @@ con los labels de % de sombra):
 - El carrusel se oculta junto con las demás secciones al cambiar de
   modo (Diseño/Modelo) y vuelve a aparecer en el Panel 2.
 - **Tamaños dominantes**: la fila 1 (foto y curva) tiene `weight=1` y
-  absorbe todo el espacio extra al redimensionar la ventana (la foto y
-  la curva quedan en ~80% del alto); la fila del carrusel (`frame15`)
-  tiene `weight=0` con altura contenida (~110 px, miniaturas de 58 px
-  de alto). Las secciones 4 y 5 (resultados y Tmrt) se achicaron en
-  consecuencia (labels en fuente 8, menor padding), de modo que todo
-  se ve completo y más chico. El separador `frame6` se movió al final
-  de todo (fila 5, debajo del carrusel).
+  absorbe todo el espacio extra al redimensionar la ventana — en una
+  ventana típica la foto y la curva quedan en **~2/3 del alto total**,
+  manteniendo esa proporción fija (no se ajustan al cargar imágenes:
+  el canvas de la foto y el de curvas ahora se empaquetan con
+  `fill="both", expand=True`, así la imagen y la curva ocupan TODO el
+  frame y se ven grandes para trabajar, en vez de quedar chicas a un
+  costado). Las secciones 4 y 5 (resultados y Tmrt) se achicaron en
+  consecuencia (fuente 8, menor padding y tarjeta compacta) y el
+  carrusel quedó contenido (~100 px, miniaturas de 50 px de alto).
+  El separador `frame6` se movió al final de todo (fila 5, debajo del
+  carrusel).
 
 **Tests:** sin cambios de suite (63/63); validado por smoke completo
 (miniaturas, click con recarga total, desplazamiento, redibujado de
