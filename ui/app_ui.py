@@ -325,7 +325,7 @@ class SombraApp:
         # quedaba en 1 y la animación de apertura/cierre operaba sobre
         # un ancho inválido (el panel quedaba a merced del ancho que le
         # imponía su contenido). Ahora: 1/6 de la pantalla, tope 400px.
-        self.panel_width = min(int(self.frame1.winfo_screenwidth() / 6), 400)
+        self.panel_width = max(260, min(int(self.frame1.winfo_screenwidth() / 6), 400))
 
         # --- Barra de íconos lateral (columna 0 de frame1) -----------
         # Se queda siempre en column=0 de frame1; los paneles se abren
@@ -1339,14 +1339,28 @@ class SombraApp:
 
         Devuelve el FRAME INTERNO donde hay que empacar los widgets del
         panel — setup_panel_1/2/3/4 ya hacen exactamente eso
-        (`panel = self.panel_frames[i]` + `.pack(...)`), sin ningún
-        cambio en esas funciones.
+        (`panel = self.panel_frames[i]` + `.pack(...)`/`.grid(...)`),
+        sin ningún cambio en esas funciones.
 
-        AJUSTE DE ANCHO: el bind de "<Configure>" del canvas fuerza al
-        frame interno a medir lo mismo que el canvas visible — así los
-        widgets empacados con `fill="x"` (comboboxes, entries anchos)
-        se ajustan al ancho real del panel en vez de quedarse cortados
-        o sobrar espacio vacío a la derecha.
+        AJUSTE DE ANCHO (widgets): el bind de "<Configure>" del canvas
+        fuerza al frame interno a medir lo mismo que el canvas visible
+        — así los widgets empacados con `fill="x"` o `sticky="ew"`
+        (comboboxes, entries, botones) se ajustan al ancho real del
+        panel en vez de quedarse cortados o sobrar espacio vacío a la
+        derecha.
+
+        AJUSTE DE ANCHO (texto): eso NO alcanza para las Label con
+        texto largo — un tk.Label no hace salto de línea solo porque
+        su contenedor sea angosto, sigue pidiendo el ancho que necesita
+        su texto en una sola línea. Como este Canvas solo tiene scroll
+        VERTICAL (a propósito, para no mezclar dos barras de scroll),
+        cualquier Label más ancha que el panel queda directamente
+        recortada por el viewport del Canvas — invisible, sin forma de
+        llegar a leerla. _ajustar_wraplength recorre todos los hijos
+        (recursivo, incluye Labels dentro de sub-frames) y les fija
+        wraplength = ancho actual del panel cada vez que este cambia
+        (incluso durante la animación de apertura/cierre), así el texto
+        largo se acomoda en 2-3 líneas en vez de perderse.
         """
         canvas = tk.Canvas(contenedor, bg=self.palette["panel"], highlightthickness=0)
         scrollbar = tk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
@@ -1359,12 +1373,22 @@ class SombraApp:
             lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
         )
         ventana_id = canvas.create_window((0, 0), window=contenido, anchor="nw")
-        # Ajuste de ancho (ver docstring): el frame interno copia el
-        # ancho del canvas cada vez que este cambia.
-        canvas.bind(
-            "<Configure>",
-            lambda e: canvas.itemconfig(ventana_id, width=e.width),
-        )
+
+        def _ajustar_wraplength(widget, ancho):
+            for hijo in widget.winfo_children():
+                if isinstance(hijo, tk.Label):
+                    hijo.config(wraplength=max(80, ancho - 30))
+                _ajustar_wraplength(hijo, ancho)
+
+        def _on_canvas_resize(event):
+            # Ancho: el frame interno copia el ancho del canvas.
+            canvas.itemconfig(ventana_id, width=event.width)
+            # Texto: todas las Labels del panel (recursivo) se ajustan
+            # al mismo ancho, para que el texto largo haga salto de
+            # línea en vez de quedar recortado por el Canvas.
+            _ajustar_wraplength(contenido, event.width)
+
+        canvas.bind("<Configure>", _on_canvas_resize)
         canvas.configure(yscrollcommand=scrollbar.set)
 
         canvas.pack(side="left", fill="both", expand=True)
