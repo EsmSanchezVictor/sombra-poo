@@ -822,7 +822,17 @@ class SombraApp:
         # imagen exportada, y consistente con calculate_temperature_in_shade).
         tmrt_sombra = entry.get("tmrt_sombra")
         temp_ambient = entry.get("temp_ambient")
-        if tmrt_sombra is not None and temp_ambient is not None:
+        # FIX: el extremo "Sol" del gráfico debe ser Tmrt_sol (temperatura
+        # radiante al sol, con el aporte de radiación ya sumado) — el
+        # mismo valor que muestra el label "Tmrt al sol" — y NO
+        # temp_ambient (temperatura de aire cruda ingresada, sin ese
+        # aporte). Antes ambos números convivían con nombres parecidos
+        # pero representaban cosas distintas. Se mantiene temp_ambient
+        # como fallback solo para snapshots viejos guardados antes de
+        # que se empezara a persistir tmrt_sol.
+        tmrt_sol = entry.get("tmrt_sol")
+        valor_sol_grafico = tmrt_sol if tmrt_sol is not None else temp_ambient
+        if tmrt_sombra is not None and valor_sol_grafico is not None:
             self.tmrt_result = {
                 "Tmrt_sol": entry.get("tmrt_sol"),
                 "Tmrt_sombra": tmrt_sombra,
@@ -837,7 +847,7 @@ class SombraApp:
             if hasattr(self, "graph_frame"):
                 for widget in self.graph_frame.winfo_children():
                     widget.destroy()
-                graph = TemperatureGraph(temp_ambient, tmrt_sombra, self.graph_frame)
+                graph = TemperatureGraph(valor_sol_grafico, tmrt_sombra, self.graph_frame)
                 graph.plot_temperature_scale()
 
         self.curve_button.config(state=tk.NORMAL)
@@ -926,8 +936,8 @@ class SombraApp:
         self.tmrt_map = None
         self.curvas_nivel_creadas = False
         self.lbl_porcentaje_sombra.config(text="Porcentaje de sombra: N/A")
-        self.lbl_dimensiones_calculo.config(text="Dimensiones del Área de Cálculo: N/A")
-        self.lbl_dimensiones_referencia.config(text="Dimensiones del Área de Referencia: N/A")
+        self.lbl_dimensiones_calculo.config(text="Área de Cálculo: N/A")
+        self.lbl_dimensiones_referencia.config(text="Área de Referencia: N/A")
         self.lbl_promedio_referencia.config(text="Promedio Gris Referencia: N/A")
         self.confirm_button.config(state=tk.DISABLED)
         self.curve_button.config(state=tk.DISABLED)
@@ -1146,7 +1156,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        add_arbol.grid(row=0, column=0, sticky="ew", padx=0, pady=3)
+        add_arbol.grid(row=0, column=0, sticky="ew", padx=(0, 12), pady=3)
 
         add_estructura = tk.Button(
             acciones,
@@ -1156,7 +1166,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        add_estructura.grid(row=1, column=0, sticky="ew", padx=0, pady=3)
+        add_estructura.grid(row=1, column=0, sticky="ew", padx=(0, 12), pady=3)
 
         seleccionar = tk.Button(
             acciones,
@@ -1166,7 +1176,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        seleccionar.grid(row=2, column=0, sticky="ew", pady=3)
+        seleccionar.grid(row=2, column=0, sticky="ew", padx=(0, 12), pady=3)
 
         guardar = tk.Button(
             acciones,
@@ -1176,7 +1186,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        guardar.grid(row=3, column=0, sticky="ew", padx=0, pady=6)
+        guardar.grid(row=3, column=0, sticky="ew", padx=(0, 12), pady=6)
 
         abrir = tk.Button(
             acciones,
@@ -1186,7 +1196,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        abrir.grid(row=4, column=0, sticky="ew", padx=0, pady=6)
+        abrir.grid(row=4, column=0, sticky="ew", padx=(0, 12), pady=6)
 
         grafico = tk.Button(
             acciones,
@@ -1196,7 +1206,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        grafico.grid(row=5, column=0, sticky="ew", padx=0, pady=4)
+        grafico.grid(row=5, column=0, sticky="ew", padx=(0, 12), pady=4)
 
         vista_3d = tk.Button(
             acciones,
@@ -1206,7 +1216,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        vista_3d.grid(row=6, column=0, sticky="ew", padx=0, pady=4)
+        vista_3d.grid(row=6, column=0, sticky="ew", padx=(0, 12), pady=4)
 
         modo_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         modo_frame.grid(row=2, column=0, sticky="w", pady=4)
@@ -1248,10 +1258,10 @@ class SombraApp:
             self.advanced_edit_frame,
             textvariable=self.vars["viento"],
             values=["nulo", "moderado", "fuerte"],
-        ).grid(row=1, column=0, sticky="ew", pady=2)
+        ).grid(row=1, column=0, sticky="ew", padx=(0, 12), pady=2)
 
         panelin = tk.Frame(self.advanced_edit_frame, bg=panel.cget("bg"))
-        panelin.grid(row=2, column=0, sticky="nsew", pady=6)
+        panelin.grid(row=2, column=0, sticky="nsew", padx=(0, 12), pady=6)
         for texto, var, fila, rango, es_fecha in self.controles:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
         self._toggle_edicion_mode()    
@@ -1380,13 +1390,40 @@ class SombraApp:
                     hijo.config(wraplength=max(80, ancho - 30))
                 _ajustar_wraplength(hijo, ancho)
 
+        # FIX ("elementos sin margen a la derecha"): antes el frame de
+        # contenido se igualaba EXACTAMENTE al ancho del canvas
+        # (width=event.width), así que cualquier widget con
+        # sticky="ew"/fill="x" llegaba justo hasta el borde del canvas
+        # (=borde del panel, pegado a la scrollbar) sin importar el
+        # padx que tuviera cada widget puesto por separado — bastaba
+        # que UN control se creara sin padx (como pasó en varios
+        # lugares) para que se viera pegado al borde. Ahora se resta un
+        # margen fijo acá, una sola vez, para que TODO el contenido
+        # quede short del borde real del canvas sin depender de que
+        # cada widget nuevo se acuerde de ponerle padx.
+        MARGEN_DERECHO_PANEL = 14
+
         def _on_canvas_resize(event):
-            # Ancho: el frame interno copia el ancho del canvas.
-            canvas.itemconfig(ventana_id, width=event.width)
+            # Ancho: el frame interno copia el ancho del canvas menos el
+            # margen fijo de la derecha.
+            ancho = max(event.width - MARGEN_DERECHO_PANEL, 1)
+            canvas.itemconfig(ventana_id, width=ancho)
+            # Alto: antes NO se tocaba, así que el frame interno se
+            # quedaba siempre en su alto natural (lo que pide su
+            # contenido) y nunca crecía con la ventana — por más
+            # sticky="nsew"/weight que tuvieran los widgets de adentro,
+            # nunca había alto "sobrante" para repartir. Usamos el
+            # máximo entre el alto pedido por el contenido y el alto
+            # visible del canvas: si el contenido entra, se estira para
+            # llenar el panel (y ahí sí actúan los grid_rowconfigure con
+            # weight); si no entra, se respeta su alto real y sigue
+            # scrolleando como corresponde.
+            alto = max(event.height, contenido.winfo_reqheight())
+            canvas.itemconfig(ventana_id, height=alto)
             # Texto: todas las Labels del panel (recursivo) se ajustan
             # al mismo ancho, para que el texto largo haga salto de
             # línea en vez de quedar recortado por el Canvas.
-            _ajustar_wraplength(contenido, event.width)
+            _ajustar_wraplength(contenido, ancho)
 
         canvas.bind("<Configure>", _on_canvas_resize)
         canvas.configure(yscrollcommand=scrollbar.set)
@@ -2260,47 +2297,52 @@ class SombraApp:
         result_frame.pack(expand=True, fill='both', pady=5)
 
         sombra_frame = tk.Frame(result_frame, bg=self.palette["panel"])
-        sombra_frame.pack(side=tk.LEFT, padx=12, pady=2)
+        # Cambiamos a fill='x' para que el contenedor use todo el ancho disponible
+        sombra_frame.pack(side=tk.TOP, fill='x', padx=12, pady=2)
 
-        # Fila 1, Columna 1
+        # (Opcional) Configurar las columnas para que se repartan el espacio 50% y 50%
+        sombra_frame.columnconfigure(0, weight=1)
+        sombra_frame.columnconfigure(1, weight=1)
+
         self.lbl_dimensiones_calculo = tk.Label(
             sombra_frame,
             text="Área de Cálculo: N/A",
-            font=("Arial", 8, "bold"),
+            font=("Arial", 7, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_dimensiones_calculo.grid(row=0, column=0, padx=10, pady=2, sticky="w")
+        # Fila 0, Columna 0
+        self.lbl_dimensiones_calculo.grid(row=0, column=0, sticky="w", padx=5, pady=2)
 
-        # Fila 1, Columna 2
         self.lbl_dimensiones_referencia = tk.Label(
             sombra_frame,
             text="Área de Referencia: N/A",
-            font=("Arial", 8, "bold"),
+            font=("Arial", 7, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_dimensiones_referencia.grid(row=0, column=1, padx=10, pady=2, sticky="w")
+        # Fila 0, Columna 1
+        self.lbl_dimensiones_referencia.grid(row=0, column=1, sticky="w", padx=5, pady=2)
 
-        # Fila 2, Columna 1
         self.lbl_promedio_referencia = tk.Label(
             sombra_frame,
             text="Promedio Gris Referencia: N/A",
-            font=("Arial", 8, "bold"),
+            font=("Arial", 7, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_promedio_referencia.grid(row=1, column=0, padx=10, pady=2, sticky="w")
+        # Fila 1, Columna 0
+        self.lbl_promedio_referencia.grid(row=1, column=0, sticky="w", padx=5, pady=2)
 
-        # Fila 2, Columna 2
         self.lbl_porcentaje_sombra = tk.Label(
             sombra_frame,
             text="Porcentaje de sombra: N/A",
-            font=("Arial", 8, "bold"),
+            font=("Arial", 7, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_porcentaje_sombra.grid(row=1, column=1, padx=10, pady=2, sticky="w")
+        # Fila 1, Columna 1
+        self.lbl_porcentaje_sombra.grid(row=1, column=1, sticky="w", padx=5, pady=2)
 
     def carrusel(self, frame):
         """Carrusel de elementos analizados — ÁREA PROPIA del Panel 2
@@ -2432,42 +2474,51 @@ class SombraApp:
         canvas.xview_moveto(nuevo)
     def temp_sombra(self, frame):
         """Configura el área de temperatura en sombra."""
-        #temp_frame = tk.Frame(frame, bd=2, relief=tk.RAISED, padx=1, pady=1, width=1000, height=200)
         temp_frame = self.create_card(frame)
         temp_frame.config(padx=8, pady=6)
         temp_frame.pack(expand=True, fill='both', pady=5)
 
-        #self.lbl_temp_shade = tk.Label(temp_frame, text="Temperatura en Sombra: N/A", font=("Arial", 12, "bold"))
+        # 1. Creamos un sub-contenedor (Frame) exclusivo para la fila de etiquetas
+        labels_frame = tk.Frame(temp_frame, bg=self.palette["panel"])
+        labels_frame.pack(side=tk.TOP, fill='x', pady=2)
+
+        # Configuramos 3 columnas para que los textos se repartan el ancho en partes iguales
+        labels_frame.columnconfigure(0, weight=1)
+        labels_frame.columnconfigure(1, weight=1)
+        labels_frame.columnconfigure(2, weight=1)
+
+        # 2. Ubicamos las etiquetas dentro de 'labels_frame' usando grid
         self.lbl_tmrt_sol = tk.Label(
-            temp_frame,
+            labels_frame, # OJO: El padre ahora es labels_frame
             text="Tmrt al sol: N/A",
-            font=("Arial", 8, "bold"),
+            font=("Arial", 7, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_tmrt_sol.pack(pady=1)
+        self.lbl_tmrt_sol.grid(row=0, column=0, sticky="ew", padx=2)
 
         self.lbl_tmrt_sombra = tk.Label(
-            temp_frame,
+            labels_frame,
             text="Tmrt en sombra: N/A",
-            font=("Arial", 8, "bold"),
+            font=("Arial", 7, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_tmrt_sombra.pack(pady=1)
+        self.lbl_tmrt_sombra.grid(row=0, column=1, sticky="ew", padx=2)
 
         self.lbl_delta_tmrt = tk.Label(
-            temp_frame,
+            labels_frame,
             text="ΔTmrt (impacto sombra): N/A",
-            font=("Arial", 8, "bold"),
+            font=("Arial", 7, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_delta_tmrt.pack(pady=1)    
+        self.lbl_delta_tmrt.grid(row=0, column=2, sticky="ew", padx=2)    
 
-        #self.graph_frame = tk.Frame(temp_frame)
+        # 3. Empaquetamos el frame de la gráfica justo debajo de las etiquetas
         self.graph_frame = tk.Frame(temp_frame, bg=self.palette["panel"])
-        self.graph_frame.pack(side=tk.RIGHT, padx=4)
+        # Cambiamos side=tk.RIGHT por tk.TOP y le damos expansión para que ocupe el resto del alto
+        self.graph_frame.pack(side=tk.TOP, expand=True, fill='both', padx=4, pady=5)
     def imagen(self, frame):
         """Configura el área de visualización de imágenes."""
         img_frame = self.create_card(frame)
@@ -2591,7 +2642,12 @@ class SombraApp:
                 widget.destroy()
 
             # Crear un objeto de la clase TemperatureGraph y mostrar la gráfica dentro del frame
-            graph = TemperatureGraph(temp_ambient, result["Tmrt_sombra"], self.graph_frame)
+            # FIX: antes se pasaba temp_ambient (temperatura de aire cruda,
+            # sin el aporte de radiación) como extremo "Sol" del gráfico,
+            # mientras el label de arriba mostraba Tmrt_sol (que sí lo
+            # incluye) — dos números distintos para lo que parecía el
+            # mismo dato. Ahora el gráfico usa Tmrt_sol, igual que el label.
+            graph = TemperatureGraph(result["Tmrt_sol"], result["Tmrt_sombra"], self.graph_frame)
             graph.plot_temperature_scale()  # Dibujar la gráfica en el frame
             if self.project_manager.current_project:
                 temp_img_dir = os.path.join(self.project_manager.current_project.root_path, "resultados")

@@ -43,9 +43,9 @@ def setup_panel_1(app):
 
     for label_text in labels:
         label = tk.Label(panel, text=label_text, bg=panel.cget("bg"), fg="black")
-        label.pack(fill="x", padx=20, pady=5)
+        label.pack(fill="x", padx=10, pady=5)
         entry = tk.Entry(panel)
-        entry.pack(fill="x", padx=20, pady=5)
+        entry.pack(fill="x", padx=10, pady=5)
         app.entries.append(entry)
 
     app.entry_temp = app.entries[0]
@@ -66,22 +66,22 @@ def setup_panel_1(app):
         panel, text="Porcentaje de sombra manual:",
         bg=panel.cget("bg"), fg="black",
     )
-    manual_label.pack(fill="x", padx=20, pady=(15, 5))
+    manual_label.pack(fill="x", padx=10, pady=(15, 5))
     app.entry_porcentaje_manual = tk.Entry(panel)
-    app.entry_porcentaje_manual.pack(fill="x", padx=20, pady=5)
+    app.entry_porcentaje_manual.pack(fill="x", padx=10, pady=5)
     manual_hint = tk.Label(
         panel,
         text="Si se completa,\n se usa en vez del % calculado \n en el Panel 2.",
-        bg=panel.cget("bg"), fg="#666666", font=("Arial", 8),
+        bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
     )
-    manual_hint.pack(fill="x", padx=20, pady=(0, 5))
+    manual_hint.pack(fill="x", padx=10, pady=(0, 5))
 
     app.calculate_temp_button = tk.Button(
         panel,
         text="Calcular temperatura en sombra",
         command=app.calculate_temperature_in_shade,
     )
-    app.calculate_temp_button.pack(fill="x", padx=20, pady=20)
+    app.calculate_temp_button.pack(fill="x", padx=10, pady=20)
 
 
 def crear_control(app, panel, texto, var, fila, rango=None, es_fecha=False):
@@ -89,11 +89,11 @@ def crear_control(app, panel, texto, var, fila, rango=None, es_fecha=False):
     # el ancho disponible del panel (antes quedaba fijo al tamaño
     # pedido y el panel avanzado desbordaba el contenedor).
     panel.grid_columnconfigure(1, weight=1)
-    tk.Label(panel, text=texto, anchor="w", font=("Arial", 8), width=18).grid(
+    tk.Label(panel, text=texto, anchor="w", font=("Arial", 7), width=18).grid(
         row=fila, column=0, sticky="ew", padx=0, pady=10)
     if es_fecha:
         entry = tk.Entry(panel, width=12)
-        entry.grid(row=fila, column=1, sticky="ew", padx=0)
+        entry.grid(row=fila, column=1, sticky="ew", padx=(0, 12))
         # FIX: el binding original llamaba a `actualizar_dia` como nombre
         # global (no existía) y habría dado NameError al presionar Enter;
         # ahora usa el método real de la app (app_ui.actualizar_dia).
@@ -101,7 +101,7 @@ def crear_control(app, panel, texto, var, fila, rango=None, es_fecha=False):
     elif rango:
         scale = tk.Scale(panel, from_=rango[0], to=rango[1], variable=var,
                          orient=tk.HORIZONTAL, length=1, width=5)
-        scale.grid(row=fila, column=1, sticky="ew", padx=0)
+        scale.grid(row=fila, column=1, sticky="ew", padx=(0, 12))
 
 
 def setup_panel_4(app):
@@ -121,6 +121,15 @@ def setup_panel_4(app):
         widget.destroy()
 
     panel.grid_columnconfigure(0, weight=1)
+    # FIX ("el panel no se ajusta al alto"): sticky="nsew" en simple_frame /
+    # advanced_frame (fila 2, más abajo) no alcanza si la fila no tiene
+    # weight — grid solo reparte el espacio sobrante entre filas con
+    # weight>0. Sin esto, aunque el frame del panel creciera, esa fila
+    # se queda con su alto natural y el resto queda vacío abajo. (El otro
+    # lado de este fix está en app_ui.py: _crear_panel_desplazable /
+    # _on_canvas_resize, que debe sincronizar también el alto del Canvas,
+    # no solo el ancho — si no, nunca hay "espacio sobrante" que repartir.)
+    panel.grid_rowconfigure(2, weight=1)
     contenido = panel
 
     diseno_label = tk.Label(contenido, text="Modelo", bg=panel.cget("bg"), fg="black")
@@ -156,42 +165,42 @@ def setup_panel_4(app):
         command=lambda: app._apply_location(True),
         bg="#4CAF50",
         fg="white",
-        font=("Arial", 8, "bold"),
+        font=("Arial", 7, "bold"),
         state="normal" if app.locations_data else "disabled",
     )
-    app.apply_location_button.grid(row=0, column=0, sticky="ew", padx=0, pady=3)
+    app.apply_location_button.grid(row=0, column=0, sticky="ew", padx=(0, 12), pady=3)
     tk.Button(
         acciones_frame,
         text="Cargar Excel",
         command=app.cargar_excel_modelo,
         bg="#4CAF50",
         fg="white",
-        font=("Arial", 8, "bold"),
-    ).grid(row=1, column=0, sticky="ew", padx=0, pady=3)
+        font=("Arial", 7, "bold"),
+    ).grid(row=1, column=0, sticky="ew", padx=(0, 12), pady=3)
     tk.Button(
         acciones_frame,
         text="Guardar Excel",
         command=app.guardar_excel_modelo,
         bg="#4CAF50",
         fg="white",
-        font=("Arial", 8, "bold"),
-    ).grid(row=2, column=0, sticky="ew", padx=0, pady=3)
+        font=("Arial", 7, "bold"),
+    ).grid(row=2, column=0, sticky="ew", padx=(0, 12), pady=3)
     tk.Button(
         acciones_frame,
         text="Generar Gráfico",
         command=app.generar_grafico_modelo,
         bg="#4CAF50",
         fg="white",
-        font=("Arial", 8, "bold"),
-    ).grid(row=3, column=0, sticky="ew", padx=0, pady=3)
+        font=("Arial", 7, "bold"),
+    ).grid(row=3, column=0, sticky="ew", padx=(0, 12), pady=3)
     tk.Button(
         acciones_frame,
         text="Vista 3D",
         command=lambda: modelo.generar_3d(app.vars_modelo),
         bg="#4CAF50",
         fg="white",
-        font=("Arial", 8, "bold"),
-    ).grid(row=4, column=0, sticky="ew", padx=0, pady=3)
+        font=("Arial", 7, "bold"),
+    ).grid(row=4, column=0, sticky="ew", padx=(0, 12), pady=3)
 
     app.simple_frame = tk.Frame(contenido, bg=panel.cget("bg"))
     app.simple_frame.grid(row=2, column=0, sticky="nsew", pady=6)
@@ -253,7 +262,7 @@ def setup_panel_4(app):
     tk.Label(app.simple_frame, text="Temperatura aire (°C)", bg=panel.cget("bg")).grid(
         row=7, column=0, sticky="w", pady=(2, 0))
     tk.Entry(app.simple_frame, textvariable=app.simple_temp_air_c).grid(
-        row=8, column=0, sticky="ew", pady=(2, 6), padx=0
+        row=8, column=0, sticky="ew", pady=(2, 6), padx=(0, 12)
     )
     tk.Label(app.simple_frame, text="Viento", bg=panel.cget("bg")).grid(
         row=9, column=0, sticky="w", pady=(2, 0))
@@ -276,7 +285,7 @@ def setup_panel_4(app):
     herramientas.grid_columnconfigure(0, weight=1)
     tk.Label(herramientas, text="Herramientas", bg=panel.cget("bg"),
              font=("Arial", 9, "bold"), anchor="w").grid(
-        row=0, column=0, sticky="ew", pady=(0, 4))
+        row=0, column=0, sticky="ew", padx=(0, 12), pady=(0, 4))
     herramientas_estado = {
         "Calibrar k_factor": app._dialogo_calibrar_k_factor,
         "Confort térmico": app._dialogo_confort,
@@ -289,8 +298,8 @@ def setup_panel_4(app):
     for texto, comando in herramientas_estado.items():
         tk.Button(herramientas, text=texto, command=comando,
                   anchor="w", bg="#2196F3", fg="white",
-                  font=("Arial", 8, "bold")).grid(
-            row=fila_btn, column=0, sticky="ew", pady=2)
+                  font=("Arial", 7, "bold")).grid(
+            row=fila_btn, column=0, sticky="ew", padx=(0, 12), pady=2)
         fila_btn += 1
 
     app.advanced_frame = tk.Frame(contenido, bg=panel.cget("bg"))
@@ -314,7 +323,7 @@ def setup_panel_4(app):
         command=lambda: modelo.cargar_preset("soleado", app.vars_modelo),
         bg="#4CAF50",
         fg="white",
-        font=("Arial", 8, "bold"),
+        font=("Arial", 7, "bold"),
     ).grid(row=2, column=0, sticky="w", padx=0, pady=3)
     tk.Button(
         app.advanced_frame,
@@ -322,7 +331,7 @@ def setup_panel_4(app):
         command=lambda: modelo.cargar_preset("verano", app.vars),
         bg="#4CAF50",
         fg="white",
-        font=("Arial", 8, "bold"),
+        font=("Arial", 7, "bold"),
     ).grid(row=2, column=1, sticky="w", padx=10, pady=3)
     tk.Button(
         app.advanced_frame,
@@ -330,7 +339,7 @@ def setup_panel_4(app):
         command=lambda: modelo.cargar_preset("soleado", app.vars),
         bg="#4CAF50",
         fg="white",
-        font=("Arial", 8, "bold"),
+        font=("Arial", 7, "bold"),
     ).grid(row=3, column=0, sticky="w", padx=0, pady=3)
     tk.Button(
         app.advanced_frame,
@@ -338,11 +347,11 @@ def setup_panel_4(app):
         command=lambda: modelo.cargar_preset("nublado", app.vars),
         bg="#4CAF50",
         fg="white",
-        font=("Arial", 8, "bold"),
+        font=("Arial", 7, "bold"),
     ).grid(row=3, column=1, sticky="w", padx=10, pady=3)
 
     panelin = tk.Frame(app.advanced_frame, bg=panel.cget("bg"))
-    panelin.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=10)
+    panelin.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=(0, 12), pady=10)
     for texto, var, fila, rango, es_fecha in app.controles_modelo:
         crear_control(app, panelin, texto, var, fila, rango, es_fecha)
     app.vars_modelo["graph_frame"] = app.frame11
