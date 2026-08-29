@@ -2262,24 +2262,27 @@ class SombraApp:
         sombra_frame = tk.Frame(result_frame, bg=self.palette["panel"])
         sombra_frame.pack(side=tk.LEFT, padx=12, pady=2)
 
+        # Fila 1, Columna 1
         self.lbl_dimensiones_calculo = tk.Label(
             sombra_frame,
-            text="Dimensiones del Área de Cálculo: N/A",
+            text="Área de Cálculo: N/A",
             font=("Arial", 8, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_dimensiones_calculo.pack(pady=1)
+        self.lbl_dimensiones_calculo.grid(row=0, column=0, padx=10, pady=2, sticky="w")
 
+        # Fila 1, Columna 2
         self.lbl_dimensiones_referencia = tk.Label(
             sombra_frame,
-            text="Dimensiones del Área de Referencia: N/A",
+            text="Área de Referencia: N/A",
             font=("Arial", 8, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_dimensiones_referencia.pack(pady=1)
+        self.lbl_dimensiones_referencia.grid(row=0, column=1, padx=10, pady=2, sticky="w")
 
+        # Fila 2, Columna 1
         self.lbl_promedio_referencia = tk.Label(
             sombra_frame,
             text="Promedio Gris Referencia: N/A",
@@ -2287,8 +2290,9 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_promedio_referencia.pack(pady=1)
+        self.lbl_promedio_referencia.grid(row=1, column=0, padx=10, pady=2, sticky="w")
 
+        # Fila 2, Columna 2
         self.lbl_porcentaje_sombra = tk.Label(
             sombra_frame,
             text="Porcentaje de sombra: N/A",
@@ -2296,7 +2300,7 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_porcentaje_sombra.pack(pady=1)
+        self.lbl_porcentaje_sombra.grid(row=1, column=1, padx=10, pady=2, sticky="w")
 
     def carrusel(self, frame):
         """Carrusel de elementos analizados — ÁREA PROPIA del Panel 2
