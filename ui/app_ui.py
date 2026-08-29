@@ -1067,7 +1067,7 @@ class SombraApp:
             fg="white",
             font=("Arial", 10, "bold"),
         )
-        self.cargar_imagen_button.pack(fill="x", padx=20, pady=10)
+        self.cargar_imagen_button.pack(fill="x", padx=20, pady=4)
         self.panel2_advanced_check = tk.Checkbutton(
             panel,
             text="Modo avanzado\n(tamaño de matriz)",
@@ -1076,7 +1076,7 @@ class SombraApp:
             bg=panel.cget("bg"),
             command=self._toggle_panel2_advanced,
         )
-        self.panel2_advanced_check.pack(fill="x", padx=20, pady=4)
+        self.panel2_advanced_check.pack(fill="x", padx=20, pady=2)
         self.shadow_detector_check = tk.Checkbutton(
             panel,
             text="Detector sombras IA",
@@ -1087,7 +1087,7 @@ class SombraApp:
 
         # Selección del tamaño de la matriz
         matrix_label = tk.Label(panel, text="tamaño de matriz:", bg=panel.cget("bg"), fg="black")
-        matrix_label.pack(fill="x", padx=20, pady=10)
+        matrix_label.pack(fill="x", padx=20, pady=(4, 0))
 
         self.matrix_size_combo = ttk.Combobox(
             panel,
@@ -1095,27 +1095,27 @@ class SombraApp:
             values=[480, 640, 800, 1024],
             state="readonly",
         )
-        self.matrix_size_combo.pack(fill="x", padx=20, pady=5)
+        self.matrix_size_combo.pack(fill="x", padx=20, pady=(0, 3))
 
         # Botones de selección de área
         self.area_calc_button = tk.Button(panel, text="Seleccione área de cálculo",bg='blue',fg='white', command=self.shape_selector.select_area_calculo, state=tk.DISABLED)
-        self.area_calc_button.pack(fill="x",padx=20, pady=10)
+        self.area_calc_button.pack(fill="x",padx=20, pady=4)
 
         self.area_ref_button = tk.Button(panel, text="Seleccione área de referencia",bg='red',fg='white', command=self.shape_selector.select_area_referencia, state=tk.DISABLED)
-        self.area_ref_button.pack(fill="x",padx=20, pady=10)
+        self.area_ref_button.pack(fill="x",padx=20, pady=4)
 
         # Botones de confirmación y cálculo
         process_label = tk.Label(panel, text="Calcular y procesar:", bg=panel.cget("bg"), fg="black")
-        process_label.pack(fill="x", padx=20, pady=10)
+        process_label.pack(fill="x", padx=20, pady=(4, 0))
 
         self.confirm_button = tk.Button(panel, text="Confirmar selección y calcular", command=self.confirmar_seleccion, state=tk.DISABLED)
-        self.confirm_button.pack(fill="x",padx=20, pady=10)
+        self.confirm_button.pack(fill="x",padx=20, pady=4)
 
         self.curve_button = tk.Button(panel, text="Generar curva de nivel", command=self.mostrar_curvas_nivel, state=tk.DISABLED)
-        self.curve_button.pack(fill="x",padx=20, pady=10)
+        self.curve_button.pack(fill="x",padx=20, pady=4)
         
         self.save_dataset_button = tk.Button(panel, text="Guardar Dataset", command=self.save_dataset, state=tk.DISABLED)
-        self.save_dataset_button.pack(fill="x", padx=20, pady=10)
+        self.save_dataset_button.pack(fill="x", padx=20, pady=4)
 
         self._toggle_panel2_advanced()
         
@@ -1138,12 +1138,17 @@ class SombraApp:
         panel.grid_columnconfigure(0, weight=1)
         contenido = panel
         contenido.grid_columnconfigure(0, weight=1)
+        # Mismo fix aplicado a setup_panel_4 (ui/panels.py): sin esto,
+        # simple_edit_frame/advanced_edit_frame (fila 3, sticky="nsew")
+        # nunca reciben el alto sobrante del panel aunque el Canvas
+        # contenedor ya lo tenga disponible.
+        contenido.grid_rowconfigure(3, weight=1)
 
         diseno_label = tk.Label(contenido, text="Modo de Edición:", bg=panel.cget("bg"), fg="black")
-        diseno_label.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        diseno_label.grid(row=0, column=0, sticky="w", pady=(0, 4))
 
         acciones = tk.Frame(contenido, bg=panel.cget("bg"))
-        acciones.grid(row=1, column=0, sticky="ew", pady=4)
+        acciones.grid(row=1, column=0, sticky="ew", pady=2)
         acciones.grid_columnconfigure(0, weight=1)
         
 
@@ -1186,7 +1191,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        guardar.grid(row=3, column=0, sticky="ew", padx=(0, 12), pady=6)
+        guardar.grid(row=3, column=0, sticky="ew", padx=(0, 12), pady=3)
 
         abrir = tk.Button(
             acciones,
@@ -1196,7 +1201,7 @@ class SombraApp:
             fg='white',
             font=("Arial", 8, "bold"),
         )
-        abrir.grid(row=4, column=0, sticky="ew", padx=(0, 12), pady=6)
+        abrir.grid(row=4, column=0, sticky="ew", padx=(0, 12), pady=3)
 
         grafico = tk.Button(
             acciones,
@@ -1219,7 +1224,7 @@ class SombraApp:
         vista_3d.grid(row=6, column=0, sticky="ew", padx=(0, 12), pady=4)
 
         modo_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        modo_frame.grid(row=2, column=0, sticky="w", pady=4)
+        modo_frame.grid(row=2, column=0, sticky="w", pady=2)
         tk.Radiobutton(
             modo_frame,
             text="Modo Simple",
@@ -1238,22 +1243,22 @@ class SombraApp:
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
 
         self.simple_edit_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        self.simple_edit_frame.grid(row=3, column=0, sticky="nsew", pady=6)
+        self.simple_edit_frame.grid(row=3, column=0, sticky="nsew", pady=3)
         self.simple_edit_frame.grid_columnconfigure(1, weight=1)
         tk.Label(self.simple_edit_frame, text="Ubicación fija del proyecto", bg=panel.cget("bg")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 3)
         )
         self.edit_location_label = tk.Label(self.simple_edit_frame, text="Sin proyecto", bg=panel.cget("bg"))
-        self.edit_location_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=2)
+        self.edit_location_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=1)
         self.edit_latlon_label = tk.Label(self.simple_edit_frame, text="", bg=panel.cget("bg"))
-        self.edit_latlon_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=2)
+        self.edit_latlon_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=1)
 
         self.advanced_edit_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        self.advanced_edit_frame.grid(row=3, column=0, sticky="nsew", pady=6)
+        self.advanced_edit_frame.grid(row=3, column=0, sticky="nsew", pady=3)
         self.advanced_edit_frame.grid_columnconfigure(0, weight=1)
 
         label_viento = tk.Label(self.advanced_edit_frame, text="Viento", bg=panel.cget("bg"))
-        label_viento.grid(row=0, column=0, sticky="w", pady=(8, 2))
+        label_viento.grid(row=0, column=0, sticky="w", pady=(3, 2))
         ttk.Combobox(
             self.advanced_edit_frame,
             textvariable=self.vars["viento"],
@@ -1261,7 +1266,7 @@ class SombraApp:
         ).grid(row=1, column=0, sticky="ew", padx=(0, 12), pady=2)
 
         panelin = tk.Frame(self.advanced_edit_frame, bg=panel.cget("bg"))
-        panelin.grid(row=2, column=0, sticky="nsew", padx=(0, 12), pady=6)
+        panelin.grid(row=2, column=0, sticky="nsew", padx=(0, 12), pady=3)
         for texto, var, fila, rango, es_fecha in self.controles:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
         self._toggle_edicion_mode()    
