@@ -140,11 +140,20 @@ def utci(ta: float, tmrt: float, v: float, rh: float) -> float | None:
 
 
 def categoria_utci(valor: float | None) -> str:
-    """Banda de estrés del UTCI (Bröde et al. 2012)."""
+    """Banda estándar de estrés UTCI."""
     if valor is None:
         return "UTCI no disponible"
-    if valor <= 9:
-        return "Sin estrés térmico" if valor >= 0 else "Estrés por frío"
+    valor = float(valor)
+    if valor < -40:
+        return "Estrés por frío extremo"
+    if valor < -27:
+        return "Estrés por frío muy fuerte"
+    if valor < -13:
+        return "Estrés por frío fuerte"
+    if valor < 0:
+        return "Estrés por frío moderado"
+    if valor < 9:
+        return "Estrés por frío leve"
     if valor < 26:
         return "Sin estrés térmico"
     if valor < 32:
@@ -185,22 +194,48 @@ def categoria_estres(valor: float, indice: str = "heat") -> str:
 # ---------------------------------------------------------------- integrales
 
 def grados_hora(series, umbral: float, por_encima: bool = True) -> float:
-    """Integral temporal de la diferencia contra un umbral (°C·h).
+    """Integra el exceso/déficit respecto de un umbral en °C·h.
 
-    `series` es una lista de (hora, valor). Si por_encima=True suma
-    (valor − umbral) solo donde valor > umbral; si False suma
-    (umbral − valor) donde valor < umbral. La suma usa el promedio
-    entre muestras consecutivas (regla del trapecio), así no depende
-    del espaciado horario.
+    Usa interpolación lineal dentro de cada intervalo y parte el trapecio
+    cuando la serie cruza el umbral. Esto evita el sesgo de la versión
+    anterior, que podía duplicar el área en intervalos con cruce.
     """
-    if not series:
+    if not series or len(series) < 2:
         return 0.0
+
+    def exceso(v: float) -> float:
+        d = (float(v) - umbral) if por_encima else (umbral - float(v))
+        return max(d, 0.0)
+
     total = 0.0
     for (h1, v1), (h2, v2) in zip(series, series[1:]):
-        dt = max(h2 - h1, 0.0)
+        h1, h2 = float(h1), float(h2)
+        v1, v2 = float(v1), float(v2)
+        dt = h2 - h1
         if dt <= 0:
             continue
-        for v in (v1, v2):
-            delta = (v - umbral) if por_encima else (umbral - v)
-            total += max(delta, 0.0) * dt / 2.0
-    return total
+
+        d1_raw = (v1 - umbral) if por_encima else (umbral - v1)
+        d2_raw = (v2 - umbral) if por_encima else (umbral - v2)
+
+        # Mismo lado del umbral: trapecio convencional sobre los excesos.
+        if d1_raw >= 0 and d2_raw >= 0:
+            total += (d1_raw + d2_raw) * dt / 2.0
+            continue
+        if d1_raw <= 0 and d2_raw <= 0:
+            continue
+
+        # Cruce lineal: fracción temporal donde d(t)=0.
+        denom = d1_raw - d2_raw
+        if abs(denom) < 1e-12:
+            continue
+        frac = d1_raw / denom
+        frac = min(max(frac, 0.0), 1.0)
+        if d1_raw > 0:
+            dt_activo = dt * frac
+            total += d1_raw * dt_activo / 2.0
+        else:
+            dt_activo = dt * (1.0 - frac)
+            total += d2_raw * dt_activo / 2.0
+
+    return float(total)

@@ -1,16 +1,31 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import tkinter as tk
 from tkinter import ttk, filedialog
-from datetime import datetime
+from datetime import datetime, timedelta
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import pandas as pd
 import math
 from core.scene_objects import adaptar_objetos_escena
-from core.species import color_copa
+from core.species import color_copa, propiedades_especie
+from core.climate_profile import temperatura_diurna_ciclo
+from core.solar_math import (
+    solar_declination_deg, equation_of_time_degrees, standard_meridian_deg,
+    timezone_offset_hours, solar_elevation_deg, solar_azimuth_deg,
+)
 from tkinter import messagebox
 from plot_style import CMAP_TEMPERATURA
+from core.excel_scene import save_scene_excel, load_scene_excel, apply_parameters_to_vars
+from core.materials import get_surface_material, effective_structure_transmittance
+from core.surface_energy import (
+    solve_surface_energy_balance, cloud_fraction_from_label, downwelling_longwave,
+)
+from core.vegetation import (
+    VegetationConfig, phenology_factor, ground_latent_heat_flux_wm2,
+    species_canopy_latent_flux_wm2,
+)
 
 # Constantes
 sigma = 5.67e-8  # Constante de Stefan-Boltzmann
@@ -34,12 +49,17 @@ class Arbol:
 class Estructura:
     def __init__(self, tipo, x1, y1, x2, y2, altura=0, opacidad=1, material=None):
         self.tipo = tipo
-        self.x1 = min(x1, x2)
-        self.y1 = min(y1, y2)
-        self.x2 = max(x1, x2)
-        self.y2 = max(y1, y2)
-        self.altura = altura
-        self.opacidad = opacidad
+        # Una pared es un SEGMENTO orientado: ordenar x/y por separado cambia
+        # la pendiente de diagonales. Solo los elementos rectangulares se
+        # normalizan a bounding box.
+        if tipo == "Pared":
+            self.x1, self.y1 = float(x1), float(y1)
+            self.x2, self.y2 = float(x2), float(y2)
+        else:
+            self.x1, self.x2 = sorted((float(x1), float(x2)))
+            self.y1, self.y2 = sorted((float(y1), float(y2)))
+        self.altura = float(altura)
+        self.opacidad = float(opacidad)
         self.material = material
 
 
@@ -103,64 +123,43 @@ MATERIALES_LOWER = {k.lower(): v for k, v in materiales.items()}
 
 
 def declinacion_solar(dia_del_año):
-    return 23.45 * np.sin(np.radians((360 / 365) * (dia_del_año - 81)))
+    """Declinación solar [°], delegada al núcleo solar compartido."""
+    return solar_declination_deg(dia_del_año)
 
 
 def ecuacion_del_tiempo(dia_del_año):
-    """Ecuación del tiempo en GRADOS (minutos/4). Misma aproximación
-    analítica (Spencer) que usa shadow_temp.py — así ambos módulos
-    calculan el mismo ángulo horario para los mismos datos."""
-    b = 360 * (dia_del_año - 81) / 365
-    minutos = (9.87 * np.sin(np.radians(2 * b))
-               - 7.53 * np.cos(np.radians(b))
-               - 1.5 * np.sin(np.radians(b)))
-    return minutos / 4
+    """Ecuación del tiempo [grados horarios]."""
+    return equation_of_time_degrees(dia_del_año)
 
 
 def _meridiano_estandar(longitud, huso_horas=None):
-    """Devuelve el meridiano estándar (grados, oeste negativo) del huso.
+    return standard_meridian_deg(longitud, huso_horas)
 
-    Si `huso_horas` es None se estima desde la longitud: `round(longitud/15)`
-    (cada 15° de longitud ≈ 1 hora de huso). Es una heurística razonable
-    cuando no se conoce el huso real del sitio; la mayoría de las ciudades
-    quedan dentro de ±0.5 h de su huso por longitud, aunque hay excepciones
-    políticas (p. ej. Argentina es UTC-3 con longitud ~-58° => -3.9 h).
-    Si se conoce el huso real, pasalo explícito.
-    """
-    if huso_horas is None:
-        huso_horas = float(np.clip(np.round(longitud / 15), -12, 14))
-    return float(huso_horas) * 15.0
+
+def _huso_desde_timezone(timezone_name, dia_del_año, hora_local=12.0, year=2026):
+    return timezone_offset_hours(
+        timezone_name, dia_del_año, hora_local, year=year
+    )
 
 
 def angulo_solar(latitud, longitud, dia_del_año, hora_local, huso_horas=None):
-    delta = np.radians(declinacion_solar(dia_del_año))
-    phi = np.radians(latitud)
-    # FIX (bug #3, v2): el ángulo horario se mide contra el MERIDIANO
-    # ESTÁNDAR del huso, no contra la longitud absoluta del sitio, e
-    # incluye la ecuación del tiempo:
-    #     H = 15·(hora_local − 12) + (longitud − meridiano_estándar) + EoT
-    # Derivación: hora_solar = UTC + longitud/15 + EoT, y como el reloj
-    # local vale UTC + meridiano/15, hora_solar = hora_local + (L−M)/15 + EoT.
-    # Verificado contra pvlib para Buenos Aires (era un error de ~27° en H).
-    h = np.radians(15 * (hora_local - 12) + (longitud - _meridiano_estandar(longitud, huso_horas))
-                   + ecuacion_del_tiempo(dia_del_año))
-    sin_theta = np.sin(phi) * np.sin(delta) + np.cos(phi) * np.cos(delta) * np.cos(h)
-    return np.arcsin(sin_theta)
+    """Elevación solar en radianes para compatibilidad histórica."""
+    return np.radians(
+        solar_elevation_deg(
+            latitud, longitud, dia_del_año, hora_local, huso_horas
+        )
+    )
 
 
 def azimut_solar(latitud, longitud, dia_del_año, hora_local, theta_sol, huso_horas=None):
-    delta = np.radians(declinacion_solar(dia_del_año))
-    phi = np.radians(latitud)
-    # Mismo fix que en angulo_solar, para que ambas funciones sigan siendo
-    # consistentes entre sí.
-    h = np.radians(15 * (hora_local - 12) + (longitud - _meridiano_estandar(longitud, huso_horas))
-                   + ecuacion_del_tiempo(dia_del_año))
-    cos_theta = np.cos(theta_sol)
-    if cos_theta == 0:
-        return 0.0
-    sin_az = -np.sin(h) * np.cos(delta) / cos_theta
-    cos_az = (np.sin(delta) - np.sin(theta_sol) * np.sin(phi)) / (cos_theta * np.cos(phi))
-    return np.arctan2(sin_az, cos_az)
+    """Azimut solar en radianes, 0=norte, horario."""
+    elev_deg = np.degrees(float(theta_sol))
+    return np.radians(
+        solar_azimuth_deg(
+            latitud, longitud, dia_del_año, hora_local, huso_horas,
+            elevation_deg=elev_deg,
+        )
+    )
 
 
 def temperatura_ambiente(hora_local, T_min, T_max, hora_min=6, hora_max=15):
@@ -171,12 +170,19 @@ def temperatura_ambiente(hora_local, T_min, T_max, hora_min=6, hora_max=15):
     realidad el mínimo ocurre cerca del amanecer (hora_min, default 6h) y el
     máximo 2-3 horas después del mediodía (hora_max, default 15h) por
     inercia térmica. Los defaults no rompen los call sites existentes.
+
+    FIX (v4): la corrección de fase de arriba seguía usando una sinusoide
+    de período fijo `2*(hora_max-hora_min)` SIN acotar fuera de
+    [hora_min, hora_max], así que la curva volvía a subir antes de
+    medianoche (con T_min=18°C/T_max=30°C, a las 0h daba ~27°C, casi el
+    máximo del día). Ahora delega en `core.climate_profile.
+    temperatura_diurna_ciclo`, que da exactamente los mismos valores
+    dentro de [hora_min, hora_max] pero decae de forma continua hacia
+    T_min durante la noche en vez de seguir oscilando. La misma función
+    unificada la usa `core/scenario.py::temperatura_diurna`, así ambos
+    módulos comparten un solo ciclo diurno.
     """
-    amplitud = (T_max - T_min) / 2
-    media = (T_max + T_min) / 2
-    periodo_horas = 2 * (hora_max - hora_min)
-    fase = (hora_local - hora_min) / periodo_horas * 2 * np.pi - np.pi / 2
-    return media + amplitud * np.sin(fase)
+    return temperatura_diurna_ciclo(float(hora_local), float(T_min), float(T_max), hora_min, hora_max)
 
 
 def calcular_sombra_arboles(X, Y, arboles, theta_sol, azimut_sol, elongacion_maxima=6.0):
@@ -206,8 +212,22 @@ def calcular_sombra_arboles(X, Y, arboles, theta_sol, azimut_sol, elongacion_max
         dx_rel = (X - cx) * np.cos(azimut_sol) - (Y - cy) * np.sin(azimut_sol)
         dy_rel = (X - cx) * np.sin(azimut_sol) + (Y - cy) * np.cos(azimut_sol)
 
-        dentro_elipse = (dx_rel / semi_eje_mayor) ** 2 + (dy_rel / semi_eje_menor) ** 2 <= 1
-        sombra[dentro_elipse] *= (1 - arbol.rho_copa)
+        # dy_rel queda alineado con la dirección de proyección de la sombra;
+        # por eso el eje MAYOR debe dividir dy_rel (antes estaba girado 90°).
+        dentro_elipse = (dx_rel / semi_eje_menor) ** 2 + (dy_rel / semi_eje_mayor) ** 2 <= 1
+
+        # Si el árbol tiene especie, usar la transmitancia de copa documentada
+        # en la biblioteca. Para árboles antiguos/sin especie se conserva la
+        # compatibilidad tau = 1-rho_copa.
+        tau_copa = 1.0 - float(arbol.rho_copa)
+        especie = getattr(arbol, "especie", "")
+        if especie:
+            try:
+                tau_copa = float(propiedades_especie(especie).get("transmitancia", tau_copa))
+            except Exception:
+                pass
+        tau_copa = float(np.clip(tau_copa, 0.0, 1.0))
+        sombra[dentro_elipse] *= tau_copa
     return sombra
 
 
@@ -230,31 +250,20 @@ def _punto_en_poligono(X, Y, poligono):
 
 
 def sombra_estructuras(X, Y, estructuras, theta_sol, azimut_sol):
-    """FIX (bug #7): para 'Pared', antes se usaba un bounding box de las 4
-    esquinas trasladadas, sobreestimando el área sombreada. Ahora se calcula
-    la huella real (paralelogramo) con un test de punto-en-polígono.
+    """Fracción geométrica bloqueada por estructuras (modelo estándar).
+
+    Conserva la semántica legacy: opacidad 1 bloquea toda la radiación, sin
+    considerar transmitancia óptica del material. El modo avanzado usa
+    ``transmitancia_estructuras_avanzada``.
     """
-    sombra_total = np.zeros_like(X)
+    sombra_total = np.zeros_like(X, dtype=float)
     if theta_sol <= 0:
         return sombra_total
-    tan_theta = np.tan(max(theta_sol, np.radians(2)))
     for estructura in estructuras:
-        if estructura.tipo == 'Pared' and theta_sol > 0:
-            longitud_sombra = estructura.altura / tan_theta
-            dx = -longitud_sombra * np.sin(azimut_sol)
-            dy = -longitud_sombra * np.cos(azimut_sol)
-            poligono = np.array([
-                [estructura.x1, estructura.y1],
-                [estructura.x2, estructura.y2],
-                [estructura.x2 + dx, estructura.y2 + dy],
-                [estructura.x1 + dx, estructura.y1 + dy],
-            ])
-            mask = _punto_en_poligono(X, Y, poligono)
-            sombra_total[mask] += float(estructura.opacidad)
-        elif estructura.tipo == 'Galeria':
-            mask = (X >= estructura.x1) & (X <= estructura.x2) & \
-                   (Y >= estructura.y1) & (Y <= estructura.y2)
-            sombra_total[mask] += float(estructura.opacidad)
+        if getattr(estructura, "tipo", None) not in {"Pared", "Galeria"}:
+            continue
+        mask = _mascara_sombra_estructura(X, Y, estructura, theta_sol, azimut_sol)
+        sombra_total[mask] += float(getattr(estructura, "opacidad", 1.0))
     return np.clip(sombra_total, 0, 1)
 
 
@@ -287,6 +296,12 @@ def asignar_materiales_grilla(X, Y, estructuras, debug=False):
     alpha = np.full_like(X, materiales["suelo"].alpha, dtype=float)
     epsilon = np.full_like(X, materiales["suelo"].epsilon, dtype=float)
     for estructura in estructuras:
+        # Esta grilla representa la TEMPERATURA DE LA SUPERFICIE HORIZONTAL
+        # del suelo. Una pared o el material de una cubierta no deben pintar
+        # el piso con sus propiedades térmicas. Solo los elementos a nivel de
+        # suelo (Sendero) modifican alpha/epsilon de la grilla.
+        if getattr(estructura, "tipo", None) != "Sendero":
+            continue
         mat = MATERIALES_LOWER.get(estructura.material.lower()) if getattr(estructura, "material", None) else None
         if mat is None:
             if debug:
@@ -300,49 +315,610 @@ def asignar_materiales_grilla(X, Y, estructuras, debug=False):
     return alpha, epsilon
 
 
+
+def asignar_propiedades_avanzadas_grilla(X, Y, estructuras, debug=False):
+    """Propiedades físicas de la superficie horizontal para el modo avanzado.
+
+    Solo ``Sendero`` modifica el material del suelo, igual que en el modelo
+    estándar. Paredes/cubiertas intervienen por su sombra/transmitancia, no
+    reemplazando artificialmente el material del piso.
+    """
+    base_legacy = materiales["suelo"]
+    base = get_surface_material("suelo", legacy_alpha=base_legacy.alpha, legacy_epsilon=base_legacy.epsilon)
+    props = {
+        "alpha": np.full_like(X, base.solar_absorptance, dtype=float),
+        "epsilon": np.full_like(X, base.longwave_emissivity, dtype=float),
+        "conductivity": np.full_like(X, base.thermal_conductivity, dtype=float),
+        "coupling_depth": np.full_like(X, base.coupling_depth_m, dtype=float),
+        "heat_capacity": np.full_like(X, base.volumetric_heat_capacity, dtype=float),
+    }
+    for estructura in estructuras:
+        if getattr(estructura, "tipo", None) != "Sendero":
+            continue
+        name = getattr(estructura, "material", None)
+        legacy = MATERIALES_LOWER.get(str(name or "").lower())
+        mat = get_surface_material(
+            name,
+            legacy_alpha=getattr(legacy, "alpha", None),
+            legacy_epsilon=getattr(legacy, "epsilon", None),
+        )
+        if debug and mat.source_quality == "legacy_fallback":
+            print(f"[aviso] propiedades avanzadas estimadas para material {name!r}")
+        mask = ((X >= estructura.x1) & (X <= estructura.x2)
+                & (Y >= estructura.y1) & (Y <= estructura.y2))
+        props["alpha"][mask] = mat.solar_absorptance
+        props["epsilon"][mask] = mat.longwave_emissivity
+        props["conductivity"][mask] = mat.thermal_conductivity
+        props["coupling_depth"][mask] = mat.coupling_depth_m
+        props["heat_capacity"][mask] = mat.volumetric_heat_capacity
+    return props
+
+
+def _mascara_sombra_estructura(X, Y, estructura, theta_sol, azimut_sol):
+    """Máscara geométrica de sombra para pared/galería."""
+    if theta_sol <= 0 or getattr(estructura, "tipo", None) not in {"Pared", "Galeria"}:
+        return np.zeros_like(X, dtype=bool)
+    tan_theta = np.tan(max(theta_sol, np.radians(2)))
+    longitud_sombra = float(estructura.altura) / tan_theta if estructura.altura > 0 else 0.0
+    dx = -longitud_sombra * np.sin(azimut_sol)
+    dy = -longitud_sombra * np.cos(azimut_sol)
+    if estructura.tipo == "Pared":
+        poligono = np.array([
+            [estructura.x1, estructura.y1],
+            [estructura.x2, estructura.y2],
+            [estructura.x2 + dx, estructura.y2 + dy],
+            [estructura.x1 + dx, estructura.y1 + dy],
+        ])
+    else:
+        poligono = np.array([
+            [estructura.x1 + dx, estructura.y1 + dy],
+            [estructura.x2 + dx, estructura.y1 + dy],
+            [estructura.x2 + dx, estructura.y2 + dy],
+            [estructura.x1 + dx, estructura.y2 + dy],
+        ])
+    return _punto_en_poligono(X, Y, poligono)
+
+
+def transmitancia_estructuras_avanzada(X, Y, estructuras, theta_sol, azimut_sol, debug=False):
+    """Transmitancia SW de estructuras para el modelo avanzado.
+
+    A diferencia del legado, un material físicamente transmisivo (vidrio,
+    policarbonato, ETFE...) puede dejar pasar radiación incluso con opacidad
+    geométrica 1. Los solapamientos multiplican transmitancias.
+    """
+    tau = np.ones_like(X, dtype=float)
+    if theta_sol <= 0:
+        return tau
+    for estructura in estructuras:
+        if getattr(estructura, "tipo", None) not in {"Pared", "Galeria"}:
+            continue
+        mask = _mascara_sombra_estructura(X, Y, estructura, theta_sol, azimut_sol)
+        if not np.any(mask):
+            continue
+        name = getattr(estructura, "material", None)
+        legacy = MATERIALES_LOWER.get(str(name or "").lower())
+        tau_eff = effective_structure_transmittance(
+            name,
+            getattr(estructura, "opacidad", 1.0),
+            legacy_alpha=getattr(legacy, "alpha", None),
+            legacy_epsilon=getattr(legacy, "epsilon", None),
+        )
+        if debug:
+            print(f"[material avanzado] {name}: tau_estructura={tau_eff:.3f}")
+        tau[mask] *= tau_eff
+    return np.clip(tau, 0.0, 1.0)
+
+
+
+def _vegetation_config_from_vars(vars):
+    """Configuración v13 desde proyecto/UI con defaults conservadores."""
+    app = vars.get("_app_instance") if isinstance(vars, dict) else None
+    settings = getattr(app, "settings", {}) if app is not None else {}
+
+    def val(key, default):
+        raw = vars.get("_" + key, settings.get(key, default)) if isinstance(vars, dict) else default
+        if hasattr(raw, "get"):
+            try:
+                raw = raw.get()
+            except Exception:
+                raw = default
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return float(default)
+
+    return VegetationConfig(
+        ground_vegetation_fraction=val("ground_vegetation_fraction", 0.50),
+        water_availability=val("vegetation_water_availability", 0.75),
+        canopy_water_availability=val("canopy_water_availability", 0.75),
+    ).validated()
+
+
+def _ground_vegetation_fraction_field(X, Y, estructuras, fraction):
+    """Fracción vegetal del suelo; senderos se consideran no vegetados."""
+    field = np.full_like(X, float(np.clip(fraction, 0.0, 1.0)), dtype=float)
+    for estructura in estructuras:
+        if getattr(estructura, "tipo", None) != "Sendero":
+            continue
+        mask = ((X >= estructura.x1) & (X <= estructura.x2)
+                & (Y >= estructura.y1) & (Y <= estructura.y2))
+        field[mask] = 0.0
+    return field
+
+
+def calcular_sombra_arboles_fenologica(X, Y, arboles, theta_sol, azimut_sol, dia, latitud, elongacion_maxima=6.0):
+    """Transmitancia de copa con fenología para el avanzado vegetación v2.
+
+    El modo estándar y el avanzado seco conservan exactamente la transmitancia
+    histórica. Solo v2 interpola entre la transmitancia foliada y la de época
+    sin hojas de las especies caducifolias.
+    """
+    sombra = np.ones_like(X, dtype=float)
+    diagnostics = []
+    if theta_sol <= 0:
+        return sombra, diagnostics
+    tan_theta = np.tan(max(theta_sol, np.radians(2)))
+    for arbol in arboles:
+        longitud_sombra = arbol.h / tan_theta
+        dx = -longitud_sombra * np.sin(azimut_sol)
+        dy = -longitud_sombra * np.cos(azimut_sol)
+        cx, cy = arbol.x + dx, arbol.y + dy
+        elongacion = min(1 / max(np.sin(theta_sol), 1e-3), elongacion_maxima)
+        a_major = arbol.radio_copa * elongacion
+        a_minor = arbol.radio_copa
+        dx_rel = (X - cx) * np.cos(azimut_sol) - (Y - cy) * np.sin(azimut_sol)
+        dy_rel = (X - cx) * np.sin(azimut_sol) + (Y - cy) * np.cos(azimut_sol)
+        mask = (dx_rel / a_minor) ** 2 + (dy_rel / a_major) ** 2 <= 1
+
+        especie = getattr(arbol, "especie", "")
+        props = propiedades_especie(especie) if especie else {}
+        tau_summer = float(props.get("transmitancia", 1.0 - float(arbol.rho_copa)))
+        deciduous = bool(props.get("caducifolio", False))
+        ph = phenology_factor(dia, latitud, deciduous)
+        tau_leaf_off = float(props.get("transmitancia_sin_hojas", max(0.65, tau_summer)))
+        tau_eff = tau_leaf_off - ph * (tau_leaf_off - tau_summer) if deciduous else tau_summer
+        tau_eff = float(np.clip(tau_eff, 0.0, 1.0))
+        sombra[mask] *= tau_eff
+        diagnostics.append({
+            "especie": especie or "sin especie",
+            "phenology_factor": ph,
+            "transmitancia_verano": tau_summer,
+            "transmitancia_sin_hojas": tau_leaf_off,
+            "transmitancia_efectiva": tau_eff,
+            "lai_tipico": float(props.get("lai_tipico", 3.0)),
+            "kc_et": float(props.get("kc_et", 1.0)),
+            "source_quality": props.get("veg_source_quality", "generic_default"),
+        })
+    return np.clip(sombra, 0.0, 1.0), diagnostics
+
+
+def _canopy_et_diagnostics(X, Y, arboles, T_amb, rh, viento, I_sol, lw_local, dia, latitud, cfg):
+    """ET de copa separada del balance del suelo; devuelve campo + detalle."""
+    field = np.zeros_like(X, dtype=float)
+    rows = []
+    lw_mean = float(np.nanmean(lw_local))
+    for arbol in arboles:
+        especie = getattr(arbol, "especie", "")
+        props = propiedades_especie(especie) if especie else {}
+        ph = phenology_factor(dia, latitud, bool(props.get("caducifolio", False)),
+                              leaf_off_fraction=cfg.leaf_off_fraction)
+        r = species_canopy_latent_flux_wm2(
+            air_temp_k=float(T_amb), rh_pct=rh, wind=viento,
+            ghi_wm2=float(I_sol), longwave_down_wm2=lw_mean,
+            lai=float(props.get("lai_tipico", 3.0)),
+            kc=float(props.get("kc_et", 1.0)), phenology=ph,
+            water_availability=cfg.canopy_water_availability, config=cfg,
+        )
+        radius = max(0.1, float(getattr(arbol, "radio_copa", 1.0)))
+        mask = (X - float(arbol.x)) ** 2 + (Y - float(arbol.y)) ** 2 <= radius ** 2
+        # Solapes: el flujo se suma, con tope global explícito.
+        field[mask] += r["latent_heat_flux_wm2"]
+        row = dict(r)
+        row.update({
+            "especie": especie or "sin especie",
+            "x": float(arbol.x), "y": float(arbol.y), "radio_copa_m": radius,
+            "source_quality": props.get("veg_source_quality", "generic_default"),
+        })
+        rows.append(row)
+    field = np.clip(field, 0.0, cfg.max_canopy_latent_wm2)
+    return field, rows
+
+
+def _surface_model_mode(vars):
+    app = vars.get("_app_instance") if isinstance(vars, dict) else None
+    if app is not None and hasattr(app, "surface_model_mode"):
+        try:
+            mode = app.surface_model_mode.get()
+            if mode in {"standard", "advanced", "advanced_vegetation"}:
+                return mode
+        except Exception:
+            pass
+    value = vars.get("_surface_model_mode", "standard") if isinstance(vars, dict) else "standard"
+    if hasattr(value, "get"):
+        value = value.get()
+    text = str(value).lower()
+    return text if text in {"standard", "advanced", "advanced_vegetation"} else "standard"
+
+def _var_value(vars, key, default=None):
+    value = vars.get(key, default)
+    if hasattr(value, "get"):
+        try:
+            return value.get()
+        except Exception:
+            return default
+    return value
+
+
+
+def _longwave_local_avanzada(vars, X, Y, T_amb, tau_arboles, estructuras, rh, cloud_fraction):
+    """LW incidente local aproximada para superficies horizontales.
+
+    Fuera de coberturas usa Brutsaert/nubosidad. Bajo copa se interpola hacia
+    emisión de follaje (epsilon~0.97, T~Ta) usando la atenuación de copa como
+    proxy de obstrucción del cielo. Bajo una galería se reemplaza parcialmente
+    el cielo por la emisividad LW del material de cubierta en su huella real.
+
+    No es todavía un cálculo 3D de factores de vista; evita, sin embargo, el
+    error de enfriar una superficie bajo techo como si siguiera viendo todo el
+    cielo despejado.
+    """
+    l_sky, eps_sky = downwelling_longwave(float(T_amb), rh, cloud_fraction)
+    ta4 = sigma * float(T_amb) ** 4
+    canopy_fraction = np.clip(1.0 - np.asarray(tau_arboles, dtype=float), 0.0, 1.0)
+    eps_field = eps_sky * (1.0 - canopy_fraction) + 0.97 * canopy_fraction
+
+    for estructura in estructuras:
+        if getattr(estructura, "tipo", None) != "Galeria":
+            continue
+        # Para LW importa la huella física del techo, no la sombra solar
+        # desplazada por el acimut.
+        mask = ((X >= estructura.x1) & (X <= estructura.x2)
+                & (Y >= estructura.y1) & (Y <= estructura.y2))
+        if not np.any(mask):
+            continue
+        name = getattr(estructura, "material", None)
+        legacy = MATERIALES_LOWER.get(str(name or "").lower())
+        mat = get_surface_material(
+            name,
+            legacy_alpha=getattr(legacy, "alpha", None),
+            legacy_epsilon=getattr(legacy, "epsilon", None),
+        )
+        op = float(np.clip(getattr(estructura, "opacidad", 1.0), 0.0, 1.0))
+        eps_field[mask] = (1.0 - op) * eps_field[mask] + op * mat.longwave_emissivity
+
+    return np.clip(eps_field, 0.0, 1.0) * ta4, float(eps_sky)
+
+
+def calcular_campo_termico_superficie(vars, X, Y, theta_sol, azimut_sol, I_sol, T_amb, debug=False):
+    """Única fuente de verdad para temperatura superficial de Edición/Modelo.
+
+    ``standard`` reproduce exactamente el balance linealizado histórico.
+    ``advanced`` usa Stefan-Boltzmann no lineal, LW atmosférica dependiente de
+    Ta/RH/nubosidad, convección y conducción al sustrato, además de óptica de
+    materiales transmisivos.
+    """
+    mode = _surface_model_mode(vars)
+    arboles = vars.get("arboles", [])
+    estructuras = vars.get("estructuras", [])
+    dia = float(_var_value(vars, "dia", 180) or 180)
+    latitud = float(_var_value(vars, "lat", 0.0) or 0.0)
+    phenology_diag = []
+    if mode == "advanced_vegetation":
+        tau_arboles, phenology_diag = calcular_sombra_arboles_fenologica(
+            X, Y, arboles, theta_sol, azimut_sol, dia, latitud
+        )
+    else:
+        tau_arboles = calcular_sombra_arboles(X, Y, arboles, theta_sol, azimut_sol)
+    h_c = calcular_coeficiente_conveccion(_var_value(vars, "viento", "moderado"))
+
+    if mode == "standard":
+        sombra_estruct = sombra_estructuras(X, Y, estructuras, theta_sol, azimut_sol)
+        tau_total = np.clip(tau_arboles * (1 - sombra_estruct), 0, 1)
+        alpha, epsilon = asignar_materiales_grilla(X, Y, estructuras, debug=debug)
+        q_solar = alpha * I_sol * tau_total
+        h_r = 4 * epsilon * sigma * (T_amb ** 3)
+        T = T_amb + q_solar / (h_c + h_r)
+        finite = np.isfinite(T)
+        T = np.where(finite, T, T_amb)
+        return {
+            "T": T,
+            "tau": tau_total,
+            "q_solar": q_solar,
+            "h_c": h_c,
+            "h_r": h_r,
+            "model": "standard",
+            "model_label": "Estándar · balance linealizado legacy",
+            "diagnostics": {},
+        }
+
+    tau_estruct = transmitancia_estructuras_avanzada(
+        X, Y, estructuras, theta_sol, azimut_sol, debug=debug
+    )
+    tau_total = np.clip(tau_arboles * tau_estruct, 0.0, 1.0)
+    props = asignar_propiedades_avanzadas_grilla(X, Y, estructuras, debug=debug)
+    incident_sw = np.maximum(0.0, float(I_sol)) * tau_total
+    rh = float(_var_value(vars, "humedad", 50.0) or 50.0)
+    cloudiness = _var_value(vars, "nubosidad", "Despejado")
+    cloud_override = vars.get("_cloud_fraction_override")
+    if hasattr(cloud_override, "get"):
+        cloud_override = cloud_override.get()
+    if cloud_override is None or cloud_override == "":
+        cloud_fraction = cloud_fraction_from_label(cloudiness)
+    else:
+        cloud_fraction = min(1.0, max(0.0, float(cloud_override)))
+    lw_local, eps_sky_clear = _longwave_local_avanzada(
+        vars, X, Y, T_amb, tau_arboles, estructuras, rh, cloud_fraction
+    )
+
+    vegetation_diag = None
+    latent_ground = 0.0
+    if mode == "advanced_vegetation":
+        cfg = _vegetation_config_from_vars(vars)
+        veg_fraction = _ground_vegetation_fraction_field(
+            X, Y, estructuras, cfg.ground_vegetation_fraction
+        )
+        ground_et = ground_latent_heat_flux_wm2(
+            air_temp_k=float(T_amb), rh_pct=rh,
+            wind=_var_value(vars, "viento", "moderado"),
+            incident_shortwave_wm2=incident_sw,
+            longwave_down_wm2=lw_local,
+            vegetation_fraction=veg_fraction,
+            water_availability=cfg.water_availability,
+            config=cfg,
+        )
+        latent_ground = ground_et["latent_heat_flux_wm2"]
+        canopy_field, canopy_rows = _canopy_et_diagnostics(
+            X, Y, arboles, T_amb, rh, _var_value(vars, "viento", "moderado"),
+            I_sol, lw_local, dia, latitud, cfg
+        )
+        vegetation_diag = {
+            "ground": ground_et,
+            "canopy_latent_heat_flux_field_wm2": canopy_field,
+            "canopies": canopy_rows,
+            "phenology": phenology_diag,
+            "config": {
+                "ground_vegetation_fraction": cfg.ground_vegetation_fraction,
+                "water_availability": cfg.water_availability,
+                "canopy_water_availability": cfg.canopy_water_availability,
+            },
+            "assumptions": [
+                "ET de suelo: FAO-56 PM horaria sobre fracción vegetal global",
+                "ET de copa se informa separada y no se resta al balance del suelo",
+                "LAI/Kc genéricos se usan cuando la especie no tiene datos específicos",
+            ],
+        }
+
+    energy = solve_surface_energy_balance(
+        air_temp_k=float(T_amb),
+        incident_shortwave_wm2=incident_sw,
+        solar_absorptance=props["alpha"],
+        longwave_emissivity=props["epsilon"],
+        convective_coefficient_wm2k=h_c,
+        thermal_conductivity_wmk=props["conductivity"],
+        coupling_depth_m=props["coupling_depth"],
+        rh_pct=rh,
+        cloud_fraction=cloud_fraction,
+        substrate_temp_k=float(T_amb),
+        latent_heat_flux_wm2=latent_ground,
+        longwave_down_override_wm2=lw_local,
+    )
+    energy["sky_emissivity_clear_area"] = eps_sky_clear
+    if vegetation_diag is not None:
+        energy["vegetation"] = vegetation_diag
+    T = np.asarray(energy["surface_temp_k"], dtype=float)
+    is_veg = mode == "advanced_vegetation"
+    return {
+        "T": T,
+        "tau": tau_total,
+        "q_solar": np.asarray(energy["q_shortwave_absorbed"], dtype=float),
+        "h_c": h_c,
+        "h_r": None,
+        "model": mode,
+        "model_label": (
+            "Avanzado · superficie + vegetación/ET v2" if is_veg
+            else "Avanzado · balance energético de superficie v1"
+        ),
+        "diagnostics": energy,
+        "properties": props,
+    }
+
+def _aplicar_parametros_app_desde_excel(vars, parametros):
+    """Sincroniza controles de la UI con los parámetros cargados.
+
+    ``vars`` incluye ``_app_instance`` en la aplicación real; los tests y usos
+    sin GUI simplemente ignoran esta parte.
+    """
+    app = vars.get('_app_instance') if isinstance(vars, dict) else None
+    if app is None:
+        return
+
+    modo = str(parametros.get('modo_calculo', '') or '').strip().lower()
+    if modo in {'simple', 'advanced'} and hasattr(app, 'modo_modelo'):
+        app.modo_modelo.set(modo)
+
+    surface_mode = str(parametros.get('surface_model_mode', '') or '').strip().lower()
+    if surface_mode in {'standard', 'advanced', 'advanced_vegetation'} and hasattr(app, 'surface_model_mode'):
+        app.surface_model_mode.set(surface_mode)
+
+    for key in ("ground_vegetation_fraction", "vegetation_water_availability", "canopy_water_availability"):
+        if key in parametros and hasattr(app, "settings"):
+            try:
+                app.settings[key] = float(parametros[key])
+            except (TypeError, ValueError):
+                pass
+
+    if 'simple_temp_air_c' in parametros and hasattr(app, 'simple_temp_air_c'):
+        try:
+            app.simple_temp_air_c.set(float(parametros['simple_temp_air_c']))
+        except (TypeError, ValueError):
+            pass
+    elif 'T_amb_base_K' in parametros and hasattr(app, 'simple_temp_air_c'):
+        try:
+            app.simple_temp_air_c.set(float(parametros['T_amb_base_K']) - 273.15)
+        except (TypeError, ValueError):
+            pass
+
+    if 'simple_rh_pct' in parametros and hasattr(app, 'simple_rh'):
+        try:
+            app.simple_rh.set(float(parametros['simple_rh_pct']))
+        except (TypeError, ValueError):
+            pass
+    elif 'humedad_relativa_pct' in parametros and hasattr(app, 'simple_rh'):
+        try:
+            app.simple_rh.set(float(parametros['humedad_relativa_pct']))
+        except (TypeError, ValueError):
+            pass
+
+    for key, attr in (
+        ('nubosidad', 'simple_cloudiness'),
+        ('simple_country', 'simple_country'),
+        ('simple_city', 'simple_city'),
+    ):
+        if key in parametros and hasattr(app, attr):
+            try:
+                getattr(app, attr).set(str(parametros[key]))
+            except Exception:
+                pass
+
+    if parametros.get("radiation_source_mode") and hasattr(app, "radiation_source_mode"):
+        mode_rad = str(parametros.get("radiation_source_mode")).strip().lower()
+        if mode_rad in {"clear_sky", "manual_measured", "manual_scenario", "observed_series"}:
+            app.radiation_source_mode.set(mode_rad)
+    met_name = str(parametros.get("meteorology_csv", "") or "").strip()
+    if met_name and hasattr(app, "meteorology_service"):
+        candidates = [met_name]
+        project = getattr(getattr(app, "project_manager", None), "current_project", None)
+        if project is not None:
+            candidates.insert(0, os.path.join(project.root_path, "meteorologia", os.path.basename(met_name)))
+        for met_path in candidates:
+            if os.path.exists(met_path):
+                try:
+                    app.meteorology_service.load_series(met_path, timezone=app._timezone_actual())
+                    app.meteorology_series_path = met_path
+                    break
+                except Exception:
+                    pass
+    try:
+        app._refresh_meteorology_status()
+    except Exception:
+        pass
+
+    try:
+        app._toggle_modelo_mode()
+    except Exception:
+        pass
+
+
 def cargar_excel(vars, filepath=None):
+    """Carga geometría y, si existen, parámetros térmicos del Excel.
+
+    Compatibilidad:
+    - archivos nuevos: restauran escena + condiciones de cálculo;
+    - archivos viejos sin ``Parametros``: cargan la escena y conservan los
+      parámetros actuales de la UI;
+    - hojas ``Estructuras``/``Árboles`` vacías sin encabezados: se aceptan
+      como listas vacías en vez de producir KeyError.
+    """
     if filepath is None:
         filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
     if not filepath:
         return None
     try:
-        # Cargar árboles
-        df_arboles = pd.read_excel(filepath, sheet_name='Árboles')
-        numeric_cols_arboles = ['X', 'Y', 'Altura (m)', 'Densidad_copa (0-1)', 'Radio_copa (m)']
-        df_arboles[numeric_cols_arboles] = df_arboles[numeric_cols_arboles].apply(pd.to_numeric, errors='coerce').fillna(0)
-        vars['arboles'] = [
-            Arbol(row['X'], row['Y'], row['Altura (m)'], row['Densidad_copa (0-1)'], row['Radio_copa (m)'])
-            for _, row in df_arboles.iterrows()
-        ]
+        libro = load_scene_excel(filepath)
 
-        # Cargar estructuras
-        df_estructuras = pd.read_excel(filepath, sheet_name='Estructuras')
-        numeric_cols_estructuras = ['X_inicial', 'Y_inicial', 'X_final', 'Y_final', 'Altura (m)', 'Opacidad (0-1)']
-        df_estructuras[numeric_cols_estructuras] = df_estructuras[numeric_cols_estructuras].apply(pd.to_numeric, errors='coerce')
-        df_estructuras['Altura (m)'] = df_estructuras['Altura (m)'].fillna(0)
-        df_estructuras['Opacidad (0-1)'] = df_estructuras['Opacidad (0-1)'].fillna(1)
+        vars['arboles'] = []
+        for _, row in libro.arboles.iterrows():
+            arbol = Arbol(
+                row['X'], row['Y'], row['Altura (m)'],
+                row['Densidad_copa (0-1)'], row['Radio_copa (m)']
+            )
+            especie = row.get('Especie', '')
+            if pd.notna(especie) and str(especie).strip():
+                arbol.especie = str(especie).strip()
+            vars['arboles'].append(arbol)
 
         vars['estructuras'] = []
-        for _, row in df_estructuras.iterrows():
-            estructura = Estructura(
+        for _, row in libro.estructuras.iterrows():
+            vars['estructuras'].append(Estructura(
                 tipo=row['Tipo'],
-                x1=row['X_inicial'],
-                y1=row['Y_inicial'],
-                x2=row['X_final'],
-                y2=row['Y_final'],
+                x1=row['X_inicial'], y1=row['Y_inicial'],
+                x2=row['X_final'], y2=row['Y_final'],
                 altura=row['Altura (m)'],
                 opacidad=row['Opacidad (0-1)'],
-                material=row['Material']
-            )
-            vars['estructuras'].append(estructura)
+                material=row['Material'],
+            ))
 
-        messagebox.showinfo("Éxito", "Datos cargados correctamente")
+        if libro.parametros:
+            apply_parameters_to_vars(vars, libro.parametros)
+            _aplicar_parametros_app_desde_excel(vars, libro.parametros)
+
+        messagebox.showinfo(
+            "Éxito",
+            "Datos cargados correctamente" +
+            (" con sus parámetros de cálculo." if libro.parametros else
+             ". Archivo antiguo: se conservaron los parámetros actuales del modelo.")
+        )
         vars['_update_required'] = True
         return filepath
     except Exception as e:
         messagebox.showerror("Error", f"Error al cargar archivo:\n{str(e)}")
         return None
 
+
+def guardar_excel(vars, filepath=None, app=None):
+    """Guarda el estado ACTUAL del modelo, no una mera copia del Excel fuente."""
+    if app is None and isinstance(vars, dict):
+        app = vars.get('_app_instance')
+
+    if filepath is None:
+        filepath = filedialog.asksaveasfilename(
+            defaultextension='.xlsx',
+            filetypes=[('Excel files', '*.xlsx')],
+        )
+    if not filepath:
+        return None
+
+    try:
+        modo = vars.get('_modo_modelo', 'advanced') if isinstance(vars, dict) else 'advanced'
+        if hasattr(modo, 'get'):
+            modo = modo.get()
+        if app is not None and hasattr(app, 'modo_modelo'):
+            modo = app.modo_modelo.get()
+        modo = str(modo or 'advanced').lower()
+        if modo not in {'simple', 'advanced'}:
+            modo = 'advanced'
+
+        save_scene_excel(
+            filepath,
+            vars.get('arboles', []),
+            vars.get('estructuras', []),
+            vars,
+            calculation_mode=modo,
+            origin='modelo',
+            app=app,
+            extra_parameters={
+                'modo_ui_origen': modo,
+                'surface_model_mode': _surface_model_mode(vars),
+                'ground_vegetation_fraction': getattr(app, 'settings', {}).get('ground_vegetation_fraction', 0.50) if app else 0.50,
+                'vegetation_water_availability': getattr(app, 'settings', {}).get('vegetation_water_availability', 0.75) if app else 0.75,
+                'canopy_water_availability': getattr(app, 'settings', {}).get('canopy_water_availability', 0.75) if app else 0.75,
+                'radiation_source_mode': getattr(getattr(app, 'radiation_source_mode', None), 'get', lambda: 'clear_sky')() if app else 'clear_sky',
+                'radiation_source_label': (getattr(app, 'last_meteorology_data', None) or {}).get('source_label', '' ) if app else '',
+                'radiation_quality': (getattr(app, 'last_meteorology_data', None) or {}).get('quality', '' ) if app else '',
+                'meteorology_csv': os.path.basename(getattr(app, 'meteorology_series_path', '') or '') if app else '',
+                'ghi_wm2': (getattr(app, 'last_meteorology_data', None) or {}).get('ghi', '' ) if app else '',
+                'dni_wm2': (getattr(app, 'last_meteorology_data', None) or {}).get('dni', '' ) if app else '',
+                'dhi_wm2': (getattr(app, 'last_meteorology_data', None) or {}).get('dhi', '' ) if app else '',
+            },
+        )
+        messagebox.showinfo(
+            'Modelo',
+            'Excel guardado con la escena y los parámetros actuales del cálculo.'
+        )
+        return filepath
+    except Exception as e:
+        messagebox.showerror('Error', f'Error al guardar archivo:\n{str(e)}')
+        return None
 
 def generar_grafico(vars, frame):
     if '_update_required' not in vars or not vars['_update_required']:
@@ -370,35 +946,53 @@ def generar_grafico(vars, frame):
     # Cálculos principales
     huso_var = vars.get("huso_horas")
     huso_horas = huso_var.get() if hasattr(huso_var, "get") else huso_var
+    tz_var = vars.get("timezone")
+    timezone_name = tz_var.get() if hasattr(tz_var, "get") else tz_var
+    if timezone_name:
+        huso_tz = _huso_desde_timezone(timezone_name, vars["dia"].get(), vars["hora"].get())
+        if huso_tz is not None:
+            huso_horas = huso_tz
     theta_sol = angulo_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), huso_horas)
     azimut_sol = azimut_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), theta_sol, huso_horas)
-    I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
+    # v14: radiación observada/manual puede entrar como GHI del instante.
+    # Si no hay override, se conserva EXACTAMENTE el comportamiento legacy
+    # del Panel 4: I_sol_base * sin(elevación).
+    _rad_override = vars.get("_radiation_override_ghi")
+    if hasattr(_rad_override, "get"):
+        _rad_override = _rad_override.get()
+    if _rad_override is None or _rad_override == "":
+        I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
+        radiation_source = "legacy_panel4"
+        radiation_quality = "legacy_configured"
+    else:
+        I_sol = max(0.0, float(_rad_override))
+        radiation_source = str(vars.get("_radiation_source_label", "Radiación externa"))
+        radiation_quality = str(vars.get("_radiation_quality", "external"))
 
-    # Cálculo de sombras
     vars["_scene_objects"] = adaptar_objetos_escena(vars.get("arboles", []), vars.get("estructuras", []))
-    sombra_arboles = calcular_sombra_arboles(X, Y, vars.get('arboles', []), theta_sol, azimut_sol)
-    sombra_estruct = sombra_estructuras(X, Y, vars.get('estructuras', []), theta_sol, azimut_sol)
-    sombra_total = np.clip(sombra_arboles * (1 - sombra_estruct), 0, 1)
-
     debug_flag = vars.get("debug", False)
     debug = bool(debug_flag.get()) if hasattr(debug_flag, "get") else bool(debug_flag)
-    if debug:
-        print("Sombra estructuras min/max:", np.min(sombra_estruct), np.max(sombra_estruct))
 
-    # Configuración de materiales
-    alpha, epsilon = asignar_materiales_grilla(X, Y, vars.get('estructuras', []), debug=debug)
+    # Temperatura del aire del instante: entrada simple o ciclo detallado.
+    modo_modelo = vars.get("_modo_modelo", "advanced")
+    if hasattr(modo_modelo, "get"):
+        modo_modelo = modo_modelo.get()
+    if str(modo_modelo).lower() == "simple":
+        T_amb = float(vars["T_amb_base"].get())
+    else:
+        T_amb = temperatura_ambiente(vars["hora"].get(), vars["T_min"].get(), vars["T_max"].get())
 
-    # Balance energético
-    T_amb = temperatura_ambiente(vars["hora"].get(), vars["T_min"].get(), vars["T_max"].get())
-    q_solar = alpha * I_sol * sombra_total
-    h_c = calcular_coeficiente_conveccion(vars["viento"].get())
-    h_r = 4 * epsilon * sigma * (T_amb ** 3)
-
-    # Cálculo final de temperatura (balance estacionario linealizado)
-    T = T_amb + q_solar / (h_c + h_r)
-    finite_mask = np.isfinite(T)
-    if not np.all(finite_mask):
-        T = np.where(finite_mask, T, T_amb)
+    thermal = calcular_campo_termico_superficie(
+        vars, X, Y, theta_sol, azimut_sol, I_sol, T_amb, debug=debug
+    )
+    T = thermal["T"]
+    sombra_total = thermal["tau"]
+    q_solar = thermal["q_solar"]
+    h_c = thermal["h_c"]
+    h_r = thermal["h_r"]
+    surface_mode = thermal["model"]
+    surface_model_label = thermal["model_label"]
+    surface_diag = thermal.get("diagnostics", {})
 
     # Guardar datos para 3D
     vars["X"] = X
@@ -410,60 +1004,68 @@ def generar_grafico(vars, frame):
     distance_unit = app_instance.get_distance_unit() if app_instance else "m"
     T_display = app_instance.convert_temperature_for_display(T) if app_instance else T
 
-    # Configuración del gráfico
+    # Configuración del gráfico. Edición y Modelo deben usar exactamente
+    # el mismo rango visual: mínimo/máximo reales de la matriz, sin sumar
+    # márgenes arbitrarios que hacían parecer distintos dos cálculos iguales.
     tmin = float(np.nanmin(T_display))
     tmax = float(np.nanmax(T_display))
-    margin = 1.0
 
     if debug:
         print("T min/max:", tmin, tmax)
         print("Sombra total min/max:", np.min(sombra_total), np.max(sombra_total))
         print("Radiación efectiva min/max:", np.min(q_solar), np.max(q_solar))
 
+    if not np.isfinite(tmin) or not np.isfinite(tmax):
+        tmin, tmax = 290.0, 310.0
     if np.isclose(tmin, tmax):
-        delta = max(margin, 0.01 * abs(tmin), 0.5)
-        tmin_auto = tmin - delta
-        tmax_auto = tmax + delta
+        niveles = np.linspace(tmin - 0.5, tmax + 0.5, 3)
     else:
-        tmin_auto = tmin - margin
-        tmax_auto = tmax + margin
+        niveles = np.linspace(tmin, tmax, 20)
+    niveles = np.sort(np.unique(niveles))
 
-    if tmin_auto >= tmax_auto:
-        tmax_auto = tmin_auto + max(margin, 0.5)
-
-    niveles = np.linspace(tmin_auto, tmax_auto, 20)
-    niveles = np.unique(np.sort(niveles))
-    if niveles.size < 2:
-        delta = max(margin, 0.01 * abs(tmin))
-        niveles = np.array([tmin_auto - delta, tmax_auto + delta])
-
-    # CAMBIO: 'viridis' -> CMAP_TEMPERATURA, misma paleta que el resto
-    # de la app (modo edición 2D/3D, curvas de nivel, histograma).
     contorno = ax.contourf(X, Y, T_display, niveles, cmap=CMAP_TEMPERATURA, alpha=0.8)
     ax.contour(X, Y, T_display, niveles, colors='k', linewidths=0.5)
-    ax.set_title('Distribución de temperatura', fontsize=12, pad=10)
-    fig.colorbar(contorno, ax=ax, orientation='horizontal', pad=0.12).set_label(f'Temperatura ({temp_unit})')
-    ax.contour(X, Y, T_display, niveles, colors='black', linewidths=1.5)
+    fig.colorbar(contorno, ax=ax, orientation='horizontal', pad=0.12).set_label(f'Temperatura superficial ({temp_unit})')
     ax.set_xlabel(f'Distancia ({distance_unit})')
     ax.set_ylabel(f'Distancia ({distance_unit})')
 
     if debug:
         print(f"Min T: {np.nanmin(T)}, Max T: {np.nanmax(T)}")
 
-    # Dibujar elementos
-    if 'arboles' in vars:
-        ax.scatter([a.x for a in vars['arboles']], [a.y for a in vars['arboles']], c='green', s=50, label='Árboles')
-    if 'estructuras' in vars:
-        for estructura in vars['estructuras']:
-            if estructura.tipo == 'Sendero':
-                ax.add_patch(plt.Rectangle((estructura.x1, estructura.y1), estructura.x2 - estructura.x1,
-                                            estructura.y2 - estructura.y1, color='gray', alpha=0.3,
-                                            label=estructura.material))
-            elif estructura.tipo == 'Pared':
-                ax.plot([estructura.x1, estructura.x1], [estructura.y1, estructura.y2], color='black', linewidth=2)
+    # Dibujar los objetos con la misma convención visual que Edición.
+    if vars.get('arboles'):
+        tamanos = [max(20, (a.radio_copa ** 2) * 8) for a in vars['arboles']]
+        ax.scatter(
+            [a.x for a in vars['arboles']], [a.y for a in vars['arboles']],
+            c='green', s=tamanos, alpha=0.6, edgecolors='darkgreen',
+            label='Árboles',
+        )
+    for estructura in vars.get('estructuras', []):
+        if estructura.tipo == 'Sendero':
+            ax.add_patch(plt.Rectangle(
+                (estructura.x1, estructura.y1),
+                estructura.x2 - estructura.x1, estructura.y2 - estructura.y1,
+                color='gray', alpha=0.3, label=f"Sendero ({estructura.material})",
+            ))
+        elif estructura.tipo == 'Pared':
+            ax.plot(
+                [estructura.x1, estructura.x2], [estructura.y1, estructura.y2],
+                color='black', linewidth=2, label=f"Pared ({estructura.material})",
+            )
+        elif estructura.tipo == 'Galeria':
+            ax.add_patch(plt.Rectangle(
+                (estructura.x1, estructura.y1),
+                estructura.x2 - estructura.x1, estructura.y2 - estructura.y1,
+                color='saddlebrown', alpha=0.35, hatch='//',
+                label=f"Galería ({estructura.material})",
+            ))
 
-    ax.set_title('Distribución de Temperatura')
-    ax.legend()
+    ax.set_title(f'Distribución de temperatura superficial\n{surface_model_label} · fuente radiativa: {radiation_source}')
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        vistos = dict(zip(labels, handles))
+        ax.legend(vistos.values(), vistos.keys(), loc='upper right', fontsize=8)
+    ax.grid(True, linestyle='--', alpha=0.5)
 
     # Función para manejar clics
     def on_click(event):
@@ -492,12 +1094,23 @@ def generar_grafico(vars, frame):
                     editar_elemento(vars, estructura=estructura)
                     return
 
-        info_text = (
-            f"Aportes energéticos:\n"
-            f"Radiación solar: {q_solar.mean():.1f} W/m²\n"
-            f"Coef. convección: {h_c:.1f} W/m²K\n"
-            f"Coef. radiativo: {h_r.mean():.1f} W/m²K"
-        )
+        if surface_mode in {"advanced", "advanced_vegetation"}:
+            info_text = (
+                f"Balance avanzado:\n"
+                f"SW absorbida: {np.mean(surface_diag.get('q_shortwave_absorbed', q_solar)):.1f} W/m²\n"
+                f"LW cielo: {surface_diag.get('longwave_down_wm2', 0.0):.1f} W/m²\n"
+                f"Emisividad cielo: {surface_diag.get('sky_emissivity', 0.0):.3f}\n"
+                f"Coef. convección: {h_c:.1f} W/m²K\n"
+                f"LE suelo medio: {np.mean(surface_diag.get('q_latent', 0.0)):.1f} W/m²\n"
+                f"Residuo máx.: {np.max(np.abs(surface_diag.get('residual_wm2', 0.0))):.3g} W/m²"
+            )
+        else:
+            info_text = (
+                f"Balance estándar:\n"
+                f"Radiación solar absorbida: {q_solar.mean():.1f} W/m²\n"
+                f"Coef. convección: {h_c:.1f} W/m²K\n"
+                f"Coef. radiativo: {h_r.mean():.1f} W/m²K"
+            )
         ax.text(0.05, 0.95, info_text, transform=ax.transAxes,
                 bbox=dict(facecolor='white', alpha=0.8), verticalalignment='top')
 
@@ -520,6 +1133,16 @@ def generar_grafico(vars, frame):
             "lat": vars["lat"].get() if hasattr(vars.get("lat"), "get") else vars.get("lat"),
             "lon": vars["lon"].get() if hasattr(vars.get("lon"), "get") else vars.get("lon"),
             "I_sol": float(I_sol),
+            "radiation_source": radiation_source,
+            "radiation_quality": radiation_quality,
+            "radiation_dni": vars.get("_radiation_override_dni"),
+            "radiation_dhi": vars.get("_radiation_override_dhi"),
+            "cloud_fraction": vars.get("_cloud_fraction_override"),
+            "surface_model": surface_mode,
+            "surface_model_label": surface_model_label,
+            "sky_emissivity": (float(surface_diag.get("sky_emissivity")) if surface_mode in {"advanced", "advanced_vegetation"} else None),
+            "energy_residual_max_wm2": (float(np.max(np.abs(surface_diag.get("residual_wm2", 0.0)))) if surface_mode in {"advanced", "advanced_vegetation"} else None),
+            "latent_heat_mean_wm2": (float(np.mean(surface_diag.get("q_latent", 0.0))) if surface_mode == "advanced_vegetation" else 0.0),
         },
     }
 

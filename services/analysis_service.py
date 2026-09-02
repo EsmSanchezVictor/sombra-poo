@@ -15,11 +15,22 @@ import matplotlib.pyplot as plt
 from plot_style import CMAP_TEMPERATURA, FONT_TITULO, FONT_ANOTACION
 
 
+def _coverage(entry):
+    value = entry.get("cobertura_sombra", entry.get("porcentaje_sombra"))
+    return value if isinstance(value, (int, float)) else None
+
+
+def _attenuation(entry):
+    value = entry.get("atenuacion_sombra")
+    return value if isinstance(value, (int, float)) else None
+
+
 def resumen_estadistico(snapshots: list) -> dict:
     """Estadística descriptiva (n, media, mín, máx, desvío) de % de
     sombra y ΔTmrt sobre los elementos del proyecto que tienen esos
     datos calculados."""
-    sombras = [s["porcentaje_sombra"] for s in snapshots if isinstance(s.get("porcentaje_sombra"), (int, float))]
+    sombras = [v for s in snapshots if (v := _coverage(s)) is not None]
+    atenuaciones = [v for s in snapshots if (v := _attenuation(s)) is not None]
     deltas = [s["delta_tmrt"] for s in snapshots if isinstance(s.get("delta_tmrt"), (int, float))]
 
     def _stats(values):
@@ -36,7 +47,9 @@ def resumen_estadistico(snapshots: list) -> dict:
 
     return {
         "n_elementos": len(snapshots),
-        "porcentaje_sombra": _stats(sombras),
+        "porcentaje_sombra": _stats(sombras),  # alias histórico = cobertura
+        "cobertura_sombra": _stats(sombras),
+        "atenuacion_sombra": _stats(atenuaciones),
         "delta_tmrt": _stats(deltas),
     }
 
@@ -45,22 +58,27 @@ def grafico_comparativo(snapshots: list, output_path: str, temp_unit: str = "°C
     """Gráfico de dos paneles: % de sombra y ΔTmrt por cada elemento
     analizado del proyecto. Guarda el PNG en output_path.
     Devuelve output_path, o None si no hay elementos con datos."""
-    validos = [s for s in snapshots if isinstance(s.get("porcentaje_sombra"), (int, float))]
+    validos = [s for s in snapshots if _coverage(s) is not None]
     if not validos:
         return None
 
     etiquetas = [s.get("label") or f"#{s.get('n', i)}" for i, s in enumerate(validos)]
-    sombras = [s["porcentaje_sombra"] for s in validos]
+    sombras = [_coverage(s) for s in validos]
+    atenuaciones = [_attenuation(s) if _attenuation(s) is not None else 0.0 for s in validos]
     deltas = [s.get("delta_tmrt") if isinstance(s.get("delta_tmrt"), (int, float)) else 0.0 for s in validos]
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+    fig, (ax1, ax_att, ax2) = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
     cmap = plt.get_cmap(CMAP_TEMPERATURA)
     colores = [cmap(v / 100) for v in sombras]
 
     ax1.bar(etiquetas, sombras, color=colores, edgecolor="0.3")
-    ax1.set_ylabel("% de sombra")
+    ax1.set_ylabel("Cobertura (%)")
     ax1.set_ylim(0, 100)
     ax1.set_title("Comparación de elementos analizados en el proyecto", fontsize=FONT_TITULO)
+
+    ax_att.bar(etiquetas, atenuaciones, color="0.45", alpha=0.85, edgecolor="0.3")
+    ax_att.set_ylabel("Atenuación (%)")
+    ax_att.set_ylim(0, 100)
 
     ax2.bar(etiquetas, deltas, color="firebrick", alpha=0.85, edgecolor="0.3")
     ax2.set_ylabel(f"ΔTmrt ({temp_unit})")
@@ -86,8 +104,8 @@ def dispersión_sombra_tmrt(snapshots: list, output_path: str, temp_unit: str = 
     hay al menos 2 elementos con ambos datos.
     """
     puntos = [
-        (s["porcentaje_sombra"], s["delta_tmrt"]) for s in snapshots
-        if isinstance(s.get("porcentaje_sombra"), (int, float))
+        (_coverage(s), s["delta_tmrt"]) for s in snapshots
+        if _coverage(s) is not None
         and isinstance(s.get("delta_tmrt"), (int, float))
     ]
     if len(puntos) < 2:
@@ -107,10 +125,10 @@ def dispersión_sombra_tmrt(snapshots: list, output_path: str, temp_unit: str = 
     ax.scatter(x, y, c=[cmap(v / 100) for v in x], edgecolors="0.3", s=70, zorder=3)
     x_linea = np.linspace(x.min(), x.max(), 50)
     ax.plot(x_linea, pendiente * x_linea + ordenada, color="firebrick", linewidth=1.5,
-            label=f"Tendencia: ΔTmrt ≈ {pendiente:.3f}·sombra {ordenada:+.2f}  (R²={r2:.2f})")
-    ax.set_xlabel("% de sombra (dato real del elemento)")
-    ax.set_ylabel(f"ΔTmrt real ({temp_unit})")
-    ax.set_title("Dispersión real: % de sombra vs. ΔTmrt\n(datos de los elementos del proyecto)", fontsize=FONT_TITULO)
+            label=f"Tendencia: ΔTmrt ≈ {pendiente:.3f}·cobertura {ordenada:+.2f}  (R²={r2:.2f})")
+    ax.set_xlabel("Cobertura de sombra fotográfica (%)")
+    ax.set_ylabel(f"ΔTmrt modelada ({temp_unit})")
+    ax.set_title("Cobertura de sombra vs. ΔTmrt modelada\n(resultados de los elementos del proyecto)", fontsize=FONT_TITULO)
     ax.legend(fontsize=FONT_ANOTACION, loc="best")
     ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -128,11 +146,23 @@ def exportar_tabla_excel(snapshots: list, output_path: str) -> str:
     filas = []
     for entry in snapshots:
         filas.append({
+            "Analysis ID": entry.get("analysis_id"),
             "Elemento": entry.get("label", "N/D"),
-            "% sombra": entry.get("porcentaje_sombra"),
+            "Área cálculo": entry.get("area_calculo_text"),
+            "Área cálculo (px válidos)": entry.get("area_calculo_px"),
+            "Área referencia": entry.get("area_referencia_text"),
+            "Área referencia (px válidos)": entry.get("area_referencia_px"),
+            "Promedio gris referencia": entry.get("promedio_gris"),
+            "Cobertura sombra (%)": _coverage(entry),
+            "Atenuación sombra (%)": _attenuation(entry),
+            "Transmitancia sombra": entry.get("transmitancia_sombra"),
+            "Transmitancia efectiva": entry.get("transmitancia_efectiva"),
+            "Umbral I/Iref": entry.get("umbral_sombra_ratio"),
+            "Algoritmo sombra": entry.get("algoritmo_sombra"),
             "Tmrt sol (°C)": entry.get("tmrt_sol"),
             "Tmrt sombra (°C)": entry.get("tmrt_sombra"),
             "Delta Tmrt (°C)": entry.get("delta_tmrt"),
+            "Modelo Tmrt": entry.get("modelo_tmrt"),
             "Temp. ambiente (°C)": entry.get("temp_ambient"),
             "Fecha": entry.get("timestamp"),
         })
@@ -167,10 +197,10 @@ def curva_sensibilidad(temp_calculator, temp_ambient: float, fecha, hora: float,
     ax.plot(porcentajes, tmrt_sombra, color="firebrick", linewidth=2, label="Tmrt en sombra")
     if tmrt_sol_ref is not None:
         ax.axhline(tmrt_sol_ref, color="0.4", linestyle="--", linewidth=1, label="Tmrt al sol (0% sombra)")
-    ax.set_xlabel("% de sombra")
+    ax.set_xlabel("Cobertura de sombra (%)")
     ax.set_ylabel(f"Tmrt ({temp_unit})")
     ax.set_title(
-        f"Sensibilidad Tmrt vs. % de sombra\n"
+        f"Sensibilidad Tmrt vs. cobertura de sombra\n"
         f"(T aire {temp_ambient:.1f}{temp_unit}, {fecha}, {hora:.1f}h)",
         fontsize=FONT_TITULO,
     )

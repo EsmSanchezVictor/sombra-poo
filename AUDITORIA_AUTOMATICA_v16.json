@@ -1,0 +1,179 @@
+{
+  "generated_at": "2026-08-30T23:28:42",
+  "scientific_release": "v16",
+  "scientific_schema": "sombra-science/1.0",
+  "project_root": null,
+  "readiness": "APTO CON ADVERTENCIAS: listo para campaña, no para afirmar validación externa",
+  "counts": {
+    "pass": 14,
+    "warning": 6,
+    "fail": 0,
+    "info": 1
+  },
+  "items": [
+    {
+      "code": "dep.numpy",
+      "level": "pass",
+      "title": "Dependencia requerida: numpy",
+      "detail": "Disponible."
+    },
+    {
+      "code": "dep.pandas",
+      "level": "pass",
+      "title": "Dependencia requerida: pandas",
+      "detail": "Disponible."
+    },
+    {
+      "code": "dep.cv2",
+      "level": "pass",
+      "title": "Dependencia requerida: opencv",
+      "detail": "Disponible."
+    },
+    {
+      "code": "dep.openpyxl",
+      "level": "pass",
+      "title": "Dependencia requerida: openpyxl",
+      "detail": "Disponible."
+    },
+    {
+      "code": "dep.matplotlib",
+      "level": "pass",
+      "title": "Dependencia requerida: matplotlib",
+      "detail": "Disponible."
+    },
+    {
+      "code": "dep.PIL",
+      "level": "pass",
+      "title": "Dependencia requerida: Pillow",
+      "detail": "Disponible."
+    },
+    {
+      "code": "dep.fpdf",
+      "level": "pass",
+      "title": "Dependencia requerida: fpdf2",
+      "detail": "Disponible."
+    },
+    {
+      "code": "dep.optional.pvlib",
+      "level": "warning",
+      "title": "Dependencia opcional: pvlib",
+      "detail": "No disponible: las rutas asociadas quedan deshabilitadas o usan fallback. Antes de una liberación científica conviene ejecutar la suite también con esta dependencia."
+    },
+    {
+      "code": "dep.optional.pythermalcomfort",
+      "level": "warning",
+      "title": "Dependencia opcional: pythermalcomfort",
+      "detail": "No disponible: las rutas asociadas quedan deshabilitadas o usan fallback. Antes de una liberación científica conviene ejecutar la suite también con esta dependencia."
+    },
+    {
+      "code": "timezone.iana",
+      "level": "pass",
+      "title": "Base de zonas horarias IANA",
+      "detail": "America/Argentina/Buenos_Aires disponible."
+    },
+    {
+      "code": "solar.shared_core",
+      "level": "pass",
+      "title": "Geometría solar analítica compartida",
+      "detail": "Sanity check Buenos Aires: elev=30.61°, az=15.13°."
+    },
+    {
+      "code": "shadow.invariants",
+      "level": "pass",
+      "title": "Invariantes de sombra",
+      "detail": "tau(0%)=1.000; tau(100%)=0.150."
+    },
+    {
+      "code": "materials.optical_closure",
+      "level": "pass",
+      "title": "Cierre óptico de materiales",
+      "detail": "24 entradas cumplen α+ρ+τ=1."
+    },
+    {
+      "code": "materials.provenance",
+      "level": "warning",
+      "title": "Propiedades de materiales",
+      "detail": "La biblioteca avanzada usa valores representativos; para uso predictivo absoluto deben documentarse fabricante/literatura y rango de incertidumbre."
+    },
+    {
+      "code": "species.generic_vegetation",
+      "level": "warning",
+      "title": "LAI/Kc específicos por especie",
+      "detail": "22/22 especies usan LAI/Kc genéricos. Es válido para comparación, pero requiere calibración/bibliografía antes de afirmar predicción específica por especie."
+    },
+    {
+      "code": "surface.energy_closure",
+      "level": "pass",
+      "title": "Cierre del balance avanzado de superficie",
+      "detail": "Residual máximo=2.274e-13 W/m²; iteraciones=3."
+    },
+    {
+      "code": "surface.boundary_diagnostic",
+      "level": "pass",
+      "title": "Diagnóstico de límites numéricos",
+      "detail": "El solver distingue saturación en límites de convergencia energética real."
+    },
+    {
+      "code": "project.none",
+      "level": "info",
+      "title": "Proyecto abierto",
+      "detail": "Auditoría estática: no se proporcionó carpeta de proyecto."
+    },
+    {
+      "code": "settings.model_modes",
+      "level": "pass",
+      "title": "Modos metodológicos",
+      "detail": "Tmrt=standard; superficie=standard; radiación=clear_sky."
+    },
+    {
+      "code": "evidence.snapshots",
+      "level": "warning",
+      "title": "Evidencia del proyecto",
+      "detail": "No hay snapshots formales guardados para auditar trazabilidad de resultados."
+    },
+    {
+      "code": "validation.external",
+      "level": "warning",
+      "title": "Validación experimental externa",
+      "detail": "No hay una campaña de validación asociada. El software está preparado, pero los resultados aún no constituyen validación empírica."
+    }
+  ],
+  "methodology": {
+    "scientific_release": "v16",
+    "scientific_schema": "sombra-science/1.0",
+    "shadow_algorithm": "shadow_photo_v11",
+    "uncertainty_method": "operational_monte_carlo_v1",
+    "tmrt_models": {
+      "standard": {
+        "label": "Estándar · empírico calibrable",
+        "version": "tmrt_standard_v1",
+        "status": "predeterminado"
+      },
+      "advanced": {
+        "label": "Avanzado · balance radiativo v1",
+        "version": "advanced_radiative_v1",
+        "status": "requiere validación local"
+      }
+    },
+    "surface_models": {
+      "standard": {
+        "label": "Estándar · balance linealizado legacy",
+        "version": "surface_standard_v1"
+      },
+      "advanced": {
+        "label": "Avanzado seco · balance no lineal v1",
+        "version": "surface_energy_advanced_v1"
+      },
+      "advanced_vegetation": {
+        "label": "Avanzado vegetación + ET v2",
+        "version": "surface_energy_vegetation_v2"
+      }
+    },
+    "radiation_sources": {
+      "clear_sky": "Cielo despejado modelado",
+      "manual_measured": "Medición puntual",
+      "manual_scenario": "Escenario manual",
+      "observed_series": "Serie meteorológica observada"
+    }
+  }
+}

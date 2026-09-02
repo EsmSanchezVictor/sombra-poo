@@ -70,6 +70,8 @@ class Project:
             "Planos",
             "modelos",
             "excels",     # NUEVO: faltaba — acá copia snapshot_service el excel de modelo/edición
+            "meteorologia", # v14: copia reproducible de series meteorológicas importadas
+            "datos",        # v17: base SQLite y artefactos persistentes del carrusel
             os.path.join("resultados", "histogramas"),  # antes: "histograma" (singular) — corregido
             os.path.join("resultados", "curvas_nivel"),
             os.path.join("resultados", "excels"),

@@ -24,7 +24,15 @@ from core.species import (
     eliminar_especie, guardar_especie, nombres_especies,
     propiedades_especie, validar_especie,
 )
-from core.validation import k_factor_desde_mediciones, leer_csv_mediciones, metricas
+from core.scientific_audit import run_scientific_audit, format_audit_text, save_audit_json
+from core.validation import (
+    evaluar_modelos,
+    exportar_reporte_validacion,
+    guardar_plantilla_csv,
+    k_factor_desde_mediciones,
+    leer_csv_mediciones,
+    metricas,
+)
 from shadow_temp import Temperatura
 
 
@@ -258,42 +266,56 @@ class HerramientasDialogs:
     # ---------------------------------------------------------------- confort
 
     def _dialogo_confort(self):
-        """Índices de confort para las condiciones actuales: Heat Index
-        (NWS/Rothfusz), Temperatura Aparente (Steadman) y UTCI oficial
-        (si pythermalcomfort está instalada), en sol y en sombra, más la
-        clasificación de estrés del mapa de Tmrt si el modelo ya se
-        ejecutó."""
+        """Confort térmico con variables físicamente compatibles.
+
+        Heat Index y Temperatura Aparente se calculan con temperatura del aire;
+        el efecto radiativo de la sombra se expresa mediante Tmrt y UTCI.
+        """
         temp_ambient, hora, fecha, lat, lon = self.app._leer_parametros_tmrt()
         rh = float(self.app.simple_rh.get() or 60.0)
         if rh < 0 or rh > 100:
             messagebox.showwarning("Humedad", "La humedad relativa debe estar entre 0 y 100.")
             return
         v_ms = viento_categoria_a_ms(self.app.vars_modelo["viento"].get())
-        calculador = Temperatura(lat, lon, k_factor=self.app.k_factor)
-        doy = fecha.timetuple().tm_yday
-        elev = calculador.solar_altitude(doy, hora)
-        ghi = calculador.clear_sky_radiation(elev)
+        tz_offset = self.app._offset_timezone(fecha, hora)
+        calculador = Temperatura(
+            lat, lon, k_factor=self.app.k_factor, tz_offset_hours=tz_offset,
+            model_mode=self.app.tmrt_model_mode.get(),
+        )
+        solar_data = self.app._obtener_datos_solares(lat, lon, fecha, hora)
+        ghi = float(solar_data["ghi"])
+
         sombra_pct = 50.0
-        if self.app.last_shadow is not None:
+        if self.app.porcentaje_sombra is not None:
+            sombra_pct = float(self.app.porcentaje_sombra)
+        elif self.app.last_shadow is not None:
             sombra_pct = (1 - np.asarray(self.app.last_shadow, dtype=float)).mean() * 100
 
-        tau = calculador.shadow_transmittance(sombra_pct, "tree")
-        tmrt_sol = temp_ambient + self.app.k_factor * ghi
-        tmrt_sombra = temp_ambient + self.app.k_factor * ghi * tau
-        hi_sol = thermal_comfort.indice_calor(max(tmrt_sol, temp_ambient), rh)
-        hi_sombra = thermal_comfort.indice_calor(max(tmrt_sombra, temp_ambient), rh)
-        at_sol = thermal_comfort.temperatura_aparente(tmrt_sol, rh, v_ms)
-        at_sombra = thermal_comfort.temperatura_aparente(tmrt_sombra, rh, v_ms)
+        result = calculador.calculate_tmrt(
+            temp_ambient,
+            sombra_pct,
+            "tree",
+            date_value=fecha,
+            time_value=hora,
+            radiation_override=ghi,
+            solar_altitude_override=solar_data["elevation"],
+            dni_override=solar_data.get("dni"),
+            dhi_override=solar_data.get("dhi"),
+        )
+        tmrt_sol = result["Tmrt_sol"]
+        tmrt_sombra = result["Tmrt_sombra"]
+        hi_air = thermal_comfort.indice_calor(temp_ambient, rh)
+        at_air = thermal_comfort.temperatura_aparente(temp_ambient, rh, v_ms)
 
         lineas = [
-            f"Condiciones: Ta={temp_ambient:.1f}°C · RH={rh:.0f}% · viento={v_ms:.1f} m/s "
-            f"· GHI={ghi:.0f} W/m² · % sombra={sombra_pct:.0f}%",
+            f"Condiciones: Ta={temp_ambient:.1f}°C · RH={rh:.0f}% · viento ref.={v_ms:.1f} m/s "
+            f"· GHI={ghi:.0f} W/m² · sombra/índice={sombra_pct:.0f}%",
+            f"Fuente solar: {solar_data.get('source', 'fallback')} · zona {solar_data.get('timezone', '')}",
+            f"Modelo Tmrt: {result.get('Modelo_Tmrt_label', 'Estándar')}",
             "",
             f"Tmrt sol = {tmrt_sol:.1f} °C     Tmrt sombra = {tmrt_sombra:.1f} °C",
-            f"Heat Index sol = {hi_sol:.1f} °C ({thermal_comfort.categoria_estres(hi_sol, 'heat')})",
-            f"Heat Index sombra = {hi_sombra:.1f} °C ({thermal_comfort.categoria_estres(hi_sombra, 'heat')})",
-            f"T. aparente sol = {at_sol:.1f} °C ({thermal_comfort.categoria_estres(at_sol, 'at')})",
-            f"T. aparente sombra = {at_sombra:.1f} °C ({thermal_comfort.categoria_estres(at_sombra, 'at')})",
+            f"Heat Index (aire) = {hi_air:.1f} °C ({thermal_comfort.categoria_estres(hi_air, 'heat')})",
+            f"T. aparente (aire) = {at_air:.1f} °C ({thermal_comfort.categoria_estres(at_air, 'at')})",
         ]
         if thermal_comfort.UTCI_DISPONIBLE:
             utci_sol = thermal_comfort.utci(temp_ambient, tmrt_sol, v_ms, rh)
@@ -302,28 +324,31 @@ class HerramientasDialogs:
                 f"UTCI sol = {utci_sol:.1f} °C ({thermal_comfort.categoria_utci(utci_sol)})",
                 f"UTCI sombra = {utci_sombra:.1f} °C ({thermal_comfort.categoria_utci(utci_sombra)})",
             ]
+            if self.app.tmrt_map is not None:
+                try:
+                    mapa = scenario_tools.mapa_estres(
+                        np.asarray(self.app.tmrt_map, dtype=float),
+                        temp_ambient,
+                        rh,
+                        indice="utci",
+                        v_ms=v_ms,
+                    )
+                    por_area = ", ".join(f"{k}: {v}%" for k, v in mapa["por_area"].items())
+                    lineas += ["", f"Mapa UTCI derivado del mapa Tmrt: {por_area}"]
+                except ValueError:
+                    pass
         else:
             lineas += [
-                "UTCI: no disponible — falta la librería pythermalcomfort "
-                "(pip install pythermalcomfort).",
+                "UTCI: no disponible — falta pythermalcomfort (pip install pythermalcomfort).",
             ]
-        if self.app.last_T is not None:
-            try:
-                mapa = scenario_tools.mapa_estres(
-                    np.asarray(self.app.last_T, dtype=float), temp_ambient, rh)
-                por_area = ", ".join(f"{k}: {v}%" for k, v in mapa["por_area"].items())
-                lineas += ["", f"Mapa de Tmrt (modelo ya ejecutado): {por_area}"]
-            except ValueError:
-                pass
         lineas += [
             "",
-            "Heat Index: índice operativo del NWS (Rothfusz 1990), válido "
-            "para Ta ≥ 26.7 °C. Temperatura Aparente: Steadman (1984). "
-            "UTCI: Bröde et al. (2012), modelo de Fiala vía pythermalcomfort.",
+            "Nota: Heat Index y Temperatura Aparente no se calculan con Tmrt. "
+            "La comparación sol/sombra se realiza con Tmrt y UTCI.",
         ]
         dlg = tk.Toplevel(self.app.root)
         dlg.title("Confort térmico")
-        dlg.geometry("560x420")
+        dlg.geometry("620x460")
         dlg.transient(self.app.root)
         tk.Label(dlg, text="\n".join(lineas), justify="left", anchor="w").pack(
             fill="both", expand=True, padx=14, pady=12)
@@ -388,7 +413,10 @@ class HerramientasDialogs:
                 return
             horas = [float(h) for h in
                      np.arange(datos["hora_ini"], datos["hora_fin"] + 1)]
-            calc = Temperatura(lat, lon, k_factor=self.app.k_factor)
+            calc = Temperatura(
+                lat, lon, k_factor=self.app.k_factor,
+                model_mode=self.app.tmrt_model_mode.get(),
+            )
             esc_a = scenario_tools.escenario_horario(
                 calc, fecha, horas, datos["ta_min"], datos["ta_max"],
                 datos["rh"], datos["viento"], datos["sombra_a"])
@@ -401,50 +429,78 @@ class HerramientasDialogs:
             # reporta también el RMSE del ajuste en el resumen)
             k_lo = self.app.k_factor * 0.8
             k_hi = self.app.k_factor * 1.2
-            calc_lo = Temperatura(lat, lon, k_factor=k_lo)
-            calc_hi = Temperatura(lat, lon, k_factor=k_hi)
+            calc_lo = Temperatura(
+                lat, lon, k_factor=k_lo, model_mode=self.app.tmrt_model_mode.get()
+            )
+            calc_hi = Temperatura(
+                lat, lon, k_factor=k_hi, model_mode=self.app.tmrt_model_mode.get()
+            )
             esc_b_lo = scenario_tools.escenario_horario(
                 calc_lo, fecha, horas, datos["ta_min"], datos["ta_max"],
                 datos["rh"], datos["viento"], datos["sombra_b"])
             esc_b_hi = scenario_tools.escenario_horario(
                 calc_hi, fecha, horas, datos["ta_min"], datos["ta_max"],
                 datos["rh"], datos["viento"], datos["sombra_b"])
-            hi_lo = [r["hi_sombra"] for r in esc_b_lo]
-            hi_hi = [r["hi_sombra"] for r in esc_b_hi]
+            # La sombra no modifica Heat Index si Ta/RH son iguales. Para
+            # comparar escenarios se grafica UTCI (si está disponible) o,
+            # en su defecto, Tmrt.
+            usar_utci = all(r["utci_sombra"] is not None for r in esc_a + esc_b + esc_b_lo + esc_b_hi)
+            if usar_utci:
+                a_vals = [r["utci_sombra"] for r in esc_a]
+                b_vals = [r["utci_sombra"] for r in esc_b]
+                sol_vals = [r["utci_sol"] for r in esc_a]
+                lo_vals = [r["utci_sombra"] for r in esc_b_lo]
+                hi_vals = [r["utci_sombra"] for r in esc_b_hi]
+                ylabel = "UTCI (°C)"
+                prefijo = "UTCI"
+            else:
+                a_vals = [r["tmrt_sombra"] for r in esc_a]
+                b_vals = [r["tmrt_sombra"] for r in esc_b]
+                sol_vals = [r["tmrt_sol"] for r in esc_a]
+                lo_vals = [r["tmrt_sombra"] for r in esc_b_lo]
+                hi_vals = [r["tmrt_sombra"] for r in esc_b_hi]
+                ylabel = "Tmrt estimada (°C)"
+                prefijo = "Tmrt"
+
             ax.clear()
-            ax.plot(horas, [r["hi_sombra"] for r in esc_a], "o-", color="#E53935",
-                    label=f"HI sombra A ({datos['sombra_a']:.0f}%)")
-            ax.plot(horas, [r["hi_sombra"] for r in esc_b], "s-", color="#1E88E5",
-                    label=f"HI sombra B ({datos['sombra_b']:.0f}%)")
-            ax.fill_between(horas, hi_lo, hi_hi, color="#1E88E5", alpha=0.15,
-                            label=f"incertidumbre k ±20% ({k_lo:.4f}–{k_hi:.4f})")
-            ax.plot(horas, [r["hi_sol"] for r in esc_a], "--", color="#FB8C00",
-                    label="HI pleno sol")
-            ax.axhline(scenario_tools.UMBRAL_HI, color="gray", linestyle=":")
-            ax.text(horas[0], scenario_tools.UMBRAL_HI + 0.3,
-                    f"umbral estrés {scenario_tools.UMBRAL_HI:.1f} °C", fontsize=7)
+            ax.plot(horas, a_vals, "o-", color="#E53935",
+                    label=f"{prefijo} sombra A ({datos['sombra_a']:.0f}%)")
+            ax.plot(horas, b_vals, "s-", color="#1E88E5",
+                    label=f"{prefijo} sombra B ({datos['sombra_b']:.0f}%)")
+            ax.fill_between(horas, lo_vals, hi_vals, color="#1E88E5", alpha=0.15,
+                            label=f"sensibilidad k ±20% ({k_lo:.4f}–{k_hi:.4f})")
+            ax.plot(horas, sol_vals, "--", color="#FB8C00", label=f"{prefijo} pleno sol")
+            if usar_utci:
+                ax.axhline(32.0, color="gray", linestyle=":", linewidth=1)
             ax.set_xlabel("Hora")
-            ax.set_ylabel("Heat Index (°C)")
+            ax.set_ylabel(ylabel)
             ax.legend(fontsize=8)
             ax.grid(True, alpha=0.3)
             fig.tight_layout()
             canvas.draw()
+
             r = cmp["propuesto"]
-            ancho_banda = max(hi_hi) - max(hi_lo)
+            ancho_banda = max(hi_vals) - max(lo_vals)
             k_info = f" · calibrado {self.app.k_factor_info}" if self.app.k_factor_info else ""
-            utci_linea = ""
+            hi_nota = (
+                f"Heat Index del aire: pico {r['hi_max_air']:.1f} °C "
+                f"({r['categoria_pico_air']}); no cambia solo por aumentar sombra."
+            )
             if r["utci_max_sombra"] is not None:
-                utci_linea = (f"\nUTCI: pico sol {r['utci_max_sol']:.1f} °C "
-                              f"({r['utci_categoria_sol']}) · sombra "
-                              f"{r['utci_max_sombra']:.1f} °C ({r['utci_categoria_sombra']})")
+                cambio_utci = cmp.get("delta_utci_max")
+                cambio_txt = f" · cambio pico A→B {cambio_utci:+.1f} °C" if cambio_utci is not None else ""
+                metrica_linea = (
+                    f"UTCI B: pico sol {r['utci_max_sol']:.1f} °C ({r['utci_categoria_sol']}) · "
+                    f"sombra {r['utci_max_sombra']:.1f} °C ({r['utci_categoria_sombra']}){cambio_txt}"
+                )
+            else:
+                metrica_linea = "UTCI no disponible: el gráfico usa Tmrt estimada."
             resumen_txt.config(text=(
-                f"A: pico HI {r['hi_max_sombra']:.1f} °C · grados-hora (HI>{scenario_tools.UMBRAL_HI:.0f}) "
-                f"{r['grados_hora_hi_sombra']:.1f} °C·h · categoría: {r['categoria_pico_sombra']}\n"
-                f"Δ al pasar de A a B: HI pico {cmp['delta_hi_max']:+.1f} °C · "
-                f"grados-hora {cmp['delta_grados_hora_hi']:+.1f} °C·h · "
-                f"ΔTmrt máx {r['delta_tmrt_max']:.1f} °C\n"
-                f"Incertidumbre k ±20%: banda de {ancho_banda:.1f} °C en el pico{k_info}"
-                f"{utci_linea}"))
+                f"{hi_nota}\n"
+                f"{metrica_linea}\n"
+                f"Escenario B: reducción máxima sol→sombra en Tmrt {r['delta_tmrt_max']:.1f} °C.\n"
+                f"Sensibilidad k ±20%: banda de {ancho_banda:.1f} °C en el pico{k_info}"
+            ))
 
         botones = tk.Frame(dlg)
         botones.pack(fill="x", padx=12, pady=8)
@@ -456,89 +512,411 @@ class HerramientasDialogs:
     # ---------------------------------------------------------------- validación CSV
 
     def _dialogo_validar_csv(self):
-        """Valida el modelo contra mediciones de campo en CSV (tg o tmrt,
-        ta, rad, v) y opcionalmente recalibra k_factor desde el archivo."""
+        """Calibración/validación científica Estándar vs Avanzado.
+
+        La partición del CSV se respeta si existe ``conjunto``. En caso
+        contrario se usa un holdout interno reproducible, claramente marcado
+        como diagnóstico interno y no como validación independiente.
+        """
         dlg = tk.Toplevel(self.app.root)
-        dlg.title("Validación contra mediciones (CSV)")
-        dlg.geometry("640x560")
+        dlg.title("Calibración y validación científica")
+        dlg.geometry("940x760")
+        dlg.minsize(820, 650)
         dlg.transient(self.app.root)
 
-        top = tk.Frame(dlg)
-        top.pack(fill="x", padx=12, pady=8)
-        tk.Label(top, text="Archivo:").pack(side="left")
-        archivo_lbl = tk.Label(top, text="(ninguno)", fg="gray")
-        archivo_lbl.pack(side="left", padx=6)
-        tk.Button(top, text="Seleccionar CSV…",
-                  command=lambda: self._validar_cargar(archivo_lbl, resumen_txt, fig, canvas,
-                                                       aplicar_btn, dlg)).pack(side="right")
+        cabecera = ttk.Frame(dlg, padding=(12, 10))
+        cabecera.pack(fill="x")
+        cabecera.columnconfigure(1, weight=1)
 
-        fig = plt.Figure(figsize=(6.4, 3.2), dpi=100)
+        ttk.Label(cabecera, text="Mediciones de campo:").grid(row=0, column=0, sticky="w")
+        archivo_lbl = ttk.Label(cabecera, text="(ningún CSV cargado)")
+        archivo_lbl.grid(row=0, column=1, sticky="w", padx=8)
+
+        validation_pct = tk.DoubleVar(value=30.0)
+        seed_var = tk.IntVar(value=42)
+        ttk.Label(cabecera, text="Holdout interno (%):").grid(row=1, column=0, sticky="w", pady=(7, 0))
+        ttk.Spinbox(cabecera, from_=10, to=50, increment=5, width=7,
+                    textvariable=validation_pct).grid(row=1, column=1, sticky="w", pady=(7, 0))
+        ttk.Label(cabecera, text="Seed:").grid(row=1, column=1, sticky="w", padx=(110, 0), pady=(7, 0))
+        ttk.Spinbox(cabecera, from_=0, to=99999, width=8,
+                    textvariable=seed_var).grid(row=1, column=1, sticky="w", padx=(155, 0), pady=(7, 0))
+
+        botones_archivo = ttk.Frame(cabecera)
+        botones_archivo.grid(row=0, column=2, rowspan=2, sticky="e")
+
+        info = ttk.Label(
+            dlg,
+            text=(
+                "Mínimo: ta + (tmrt o tg) + ghi/rad. Recomendado: sombra_pct, fecha, hora, "
+                "lat/lon/timezone, viento, DNI/DHI y ta_local. Si existe la columna conjunto="
+                "calibracion/validacion, esa separación tiene prioridad sobre el holdout."
+            ),
+            justify="left", wraplength=890,
+        )
+        info.pack(fill="x", padx=12, pady=(0, 8))
+
+        cuerpo = ttk.Panedwindow(dlg, orient="vertical")
+        cuerpo.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+
+        superior = ttk.Frame(cuerpo)
+        inferior = ttk.Frame(cuerpo)
+        cuerpo.add(superior, weight=3)
+        cuerpo.add(inferior, weight=2)
+
+        fig = plt.Figure(figsize=(7.4, 3.5), dpi=100)
         ax = fig.add_subplot(111)
-        canvas = FigureCanvasTkAgg(fig, master=dlg)
-        canvas.get_tk_widget().pack(fill="both", expand=True, padx=12)
+        ax.set_xlabel("Tmrt observada (°C)")
+        ax.set_ylabel("Tmrt modelada (°C)")
+        ax.grid(True, alpha=0.25)
+        canvas = FigureCanvasTkAgg(fig, master=superior)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
 
-        resumen_txt = tk.Label(dlg, text="", justify="left", anchor="w", font=("Consolas", 8))
-        resumen_txt.pack(fill="x", padx=12)
+        tabla = ttk.Treeview(
+            inferior,
+            columns=("modelo", "n", "rmse", "mae", "bias", "r2"),
+            show="headings", height=4,
+        )
+        for key, titulo, ancho in (
+            ("modelo", "Modelo", 210), ("n", "n", 55),
+            ("rmse", "RMSE °C", 90), ("mae", "MAE °C", 90),
+            ("bias", "Sesgo °C", 90), ("r2", "R²", 80),
+        ):
+            tabla.heading(key, text=titulo)
+            tabla.column(key, width=ancho, anchor="center" if key != "modelo" else "w")
+        tabla.pack(fill="x", pady=(4, 6))
 
-        aplicar_btn = tk.Button(dlg, text="Aplicar k_factor sugerido",
-                                state="disabled", bg="#2196F3", fg="white")
-        aplicar_btn.pack(pady=6)
-        aplicar_btn.config(command=lambda: self._validar_aplicar_k(aplicar_btn, dlg))
-        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=4)
+        resumen_txt = tk.Text(inferior, height=8, wrap="word", font=("Consolas", 9))
+        resumen_txt.pack(fill="both", expand=True)
+        resumen_txt.configure(state="disabled")
 
-    def _validar_cargar(self, archivo_lbl, resumen_txt, fig, canvas, aplicar_btn, dlg):
+        acciones = ttk.Frame(dlg, padding=(12, 0, 12, 10))
+        acciones.pack(fill="x")
+        aplicar_k_btn = ttk.Button(acciones, text="Aplicar k calibrado", state="disabled")
+        aplicar_k_btn.pack(side="left", padx=(0, 6))
+        aplicar_air_btn = ttk.Button(acciones, text="Aplicar Ta local (árbol)", state="disabled")
+        aplicar_air_btn.pack(side="left", padx=6)
+        exportar_btn = ttk.Button(acciones, text="Exportar validación…", state="disabled")
+        exportar_btn.pack(side="left", padx=6)
+        ttk.Button(acciones, text="Cerrar", command=dlg.destroy).pack(side="right")
+
+        ttk.Button(
+            botones_archivo, text="Seleccionar CSV…",
+            command=lambda: self._validar_cargar_v10(
+                dlg, archivo_lbl, validation_pct, seed_var, tabla, resumen_txt,
+                fig, canvas, aplicar_k_btn, aplicar_air_btn, exportar_btn,
+            ),
+        ).pack(side="left", padx=4)
+        ttk.Button(
+            botones_archivo, text="Crear plantilla…",
+            command=lambda: self._validar_guardar_plantilla(dlg),
+        ).pack(side="left", padx=4)
+
+        aplicar_k_btn.config(command=lambda: self._validar_aplicar_k_v10(dlg))
+        aplicar_air_btn.config(command=lambda: self._validar_aplicar_aire_v10(dlg, "tree"))
+        exportar_btn.config(command=lambda: self._validar_exportar_v10(dlg))
+
+    def _validar_contexto_actual(self):
+        """Contexto de respaldo para filas que no traen ubicación/fecha."""
+        try:
+            _ta, hora, fecha, lat, lon = self.app._leer_parametros_tmrt()
+        except Exception:
+            return {}
+        tz = None
+        if getattr(self.app, "current_location", None):
+            tz = self.app.current_location.get("tz") or self.app.current_location.get("timezone")
+        if not tz and hasattr(self.app, "solar_engine"):
+            tz = getattr(self.app.solar_engine, "tz", None)
+        return {"hora": hora, "fecha": fecha, "lat": lat, "lon": lon, "timezone": tz}
+
+    def _validar_guardar_plantilla(self, dlg):
+        path = filedialog.asksaveasfilename(
+            parent=dlg,
+            title="Guardar plantilla de campaña",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            initialfile="plantilla_validacion_termica.csv",
+        )
+        if not path:
+            return
+        try:
+            guardar_plantilla_csv(path)
+        except OSError as exc:
+            messagebox.showerror("Plantilla", str(exc), parent=dlg)
+            return
+        messagebox.showinfo(
+            "Plantilla creada",
+            "Se creó una plantilla vacía con las columnas recomendadas.\n"
+            "No contiene datos de ejemplo para evitar incorporar valores ficticios.",
+            parent=dlg,
+        )
+
+    def _validar_cargar_v10(
+        self, dlg, archivo_lbl, validation_pct, seed_var, tabla, resumen_txt,
+        fig, canvas, aplicar_k_btn, aplicar_air_btn, exportar_btn,
+    ):
         path = filedialog.askopenfilename(
             parent=dlg,
             filetypes=[("CSV", "*.csv"), ("Todos", "*.*")],
-            title="Seleccionar mediciones de campo")
+            title="Seleccionar mediciones de campo",
+        )
         if not path:
             return
         try:
             filas = leer_csv_mediciones(path)
-        except (ValueError, FileNotFoundError) as e:
-            messagebox.showerror("CSV inválido",
-                                 f"{e}\n\nColumnas esperadas: tg (o tmrt), ta, rad, "
-                                 "v (opcional), hora (opcional).", parent=dlg)
+            report = evaluar_modelos(
+                filas,
+                k_actual=self.app.k_factor,
+                validation_fraction=float(validation_pct.get()) / 100.0,
+                seed=int(seed_var.get()),
+                defaults=self._validar_contexto_actual(),
+            )
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            messagebox.showerror("Datos inválidos", str(exc), parent=dlg)
             return
-        obs = np.array([f["tmrt_medido"] for f in filas], dtype=float)
-        pred = np.array([f["ta"] + self.app.k_factor * f["rad"] for f in filas], dtype=float)
-        met = metricas(obs, pred)
-        archivo_lbl.config(text=os.path.basename(path), fg="black")
-        resumen_txt.config(text=(
-            f"n={met['n']} · RMSE={met['rmse']:.2f} °C · MAE={met['mae']:.2f} °C · "
-            f"bias={met['bias']:+.2f} °C · R²={met['r2']:.3f}  (k_factor actual {self.app.k_factor:.4f})"))
-        try:
-            ajuste = k_factor_desde_mediciones(filas)
-            resumen_txt.config(text=resumen_txt.cget("text") +
-                               f"\nk_factor sugerido por el CSV: {ajuste['k_factor']:.5f} "
-                               f"(R²={ajuste['r2']:.3f}, RMSE={ajuste['rmse']:.2f} °C)")
-            aplicar_btn.config(state="normal")
-            aplicar_btn.sugerido = ajuste["k_factor"]
-        except ValueError as e:
-            aplicar_btn.config(state="disabled")
-            messagebox.showwarning("Calibración", str(e), parent=dlg)
+
+        dlg.validation_report = report
+        dlg.validation_source = path
+        # Resumen serializable para informe/proyecto. No guardamos arrays ni
+        # dataclasses internas del reporte completo.
+        self.app.last_validation_summary = {
+            "source": path,
+            "split_source": report["split"].fuente,
+            "k_actual": report.get("k_actual"),
+            "k_calibrado": report.get("k_calibrado"),
+            "metricas_modelos": report.get("metricas_modelos"),
+            "metricas_aire_local": report.get("metricas_aire_local"),
+            "advertencias": list(report.get("advertencias", [])),
+        }
+        archivo_lbl.config(text=os.path.basename(path))
+
+        for item in tabla.get_children():
+            tabla.delete(item)
+        for model, met in report["metricas_modelos"].items():
+            if met is None:
+                vals = (model, "—", "—", "—", "—", "—")
+            else:
+                vals = (
+                    model, met["n"], f"{met['rmse']:.2f}", f"{met['mae']:.2f}",
+                    f"{met['bias']:+.2f}", f"{met['r2']:.3f}",
+                )
+            tabla.insert("", "end", values=vals)
+
+        kfit = report["ajuste_k"]
+        split = report["split"]
+        lineas = [
+            f"Partición: {split.fuente}",
+            f"k actual = {report['k_actual']:.5f} | k calibrado = {report['k_calibrado']:.5f} "
+            f"(n calibración={kfit['n']})",
+            f"Diagnóstico libre: ΔTmrt = {kfit['diagnostico_intercepto_c']:+.2f} + "
+            f"{kfit['diagnostico_k_libre']:.5f} · (GHI·tau)",
+        ]
+        aire = report["ajuste_aire_local"].get("tree")
+        if aire:
+            lineas.append(
+                f"Ta local árbol: coeficiente calibrado={aire['coefficient']:.6f} K/(W/m²), "
+                f"tope={aire['max_cooling']:.1f} °C (n={aire['n']})"
+            )
+            met_air = report["metricas_aire_local"].get("tree")
+            if met_air:
+                lineas.append(
+                    f"Validación Ta local árbol: RMSE={met_air['rmse']:.2f} °C, "
+                    f"MAE={met_air['mae']:.2f} °C, sesgo={met_air['bias']:+.2f} °C, R²={met_air['r2']:.3f}"
+                )
+        else:
+            lineas.append("Ta local: se requieren ≥3 observaciones ta_local de un mismo tipo de sombra para calibrar.")
+
+        if report["advertencias"]:
+            lineas.append("")
+            lineas.append("ADVERTENCIAS / TRAZABILIDAD:")
+            lineas.extend(f"• {w}" for w in report["advertencias"])
+
+        resumen_txt.configure(state="normal")
+        resumen_txt.delete("1.0", "end")
+        resumen_txt.insert("1.0", "\n".join(lineas))
+        resumen_txt.configure(state="disabled")
+
+        aplicar_k_btn.config(state="normal" if kfit.get("aplicable") else "disabled")
+        aplicar_air_btn.config(state="normal" if aire and aire.get("aplicable") else "disabled")
+        exportar_btn.config(state="normal")
+
+        # Gráfico únicamente sobre el conjunto de validación.
+        valid = [r for r in report["filas"] if r["grupo_evaluacion"] == "validacion"]
+        obs = np.asarray([r["tmrt_medido"] for r in valid], dtype=float)
         ax = fig.axes[0]
         ax.clear()
-        ax.scatter(obs, pred, alpha=0.7, s=28)
-        lim = [min(float(obs.min()), float(pred.min())) - 1,
-               max(float(obs.max()), float(pred.max())) + 1]
-        ax.plot(lim, lim, "--", color="gray", label="1:1")
-        ax.set_xlabel("Tmrt medida (°C)")
-        ax.set_ylabel("Tmrt modelo (°C)")
+        ax.scatter(obs, [r["pred_estandar_actual"] for r in valid], alpha=0.72, s=30, label="Estándar actual")
+        ax.scatter(obs, [r["pred_estandar_calibrado"] for r in valid], alpha=0.72, s=30, marker="s", label="Estándar calibrado")
+        adv = np.asarray([r["pred_avanzado_v1"] for r in valid], dtype=float)
+        mask = np.isfinite(obs) & np.isfinite(adv)
+        if np.any(mask):
+            ax.scatter(obs[mask], adv[mask], alpha=0.72, s=32, marker="^", label="Avanzado v1")
+        vals = [float(v) for v in obs if np.isfinite(v)]
+        for r in valid:
+            for key in ("pred_estandar_actual", "pred_estandar_calibrado", "pred_avanzado_v1"):
+                val = r.get(key)
+                if val is not None and np.isfinite(val):
+                    vals.append(float(val))
+        if vals:
+            lo, hi = min(vals) - 1.0, max(vals) + 1.0
+            ax.plot([lo, hi], [lo, hi], "--", linewidth=1.0, label="1:1")
+            ax.set_xlim(lo, hi)
+            ax.set_ylim(lo, hi)
+        ax.set_xlabel("Tmrt observada (°C)")
+        ax.set_ylabel("Tmrt modelada (°C)")
+        ax.set_title("Validación: observado vs modelado")
+        ax.grid(True, alpha=0.25)
         ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
         fig.tight_layout()
-        canvas.draw()
+        canvas.draw_idle()
 
-    def _validar_aplicar_k(self, aplicar_btn, dlg):
-        k = getattr(aplicar_btn, "sugerido", None)
-        if k is None:
+    def _validar_aplicar_k_v10(self, dlg):
+        report = getattr(dlg, "validation_report", None)
+        if not report:
+            return
+        k = float(report["k_calibrado"])
+        if not np.isfinite(k) or k <= 0:
+            messagebox.showwarning("k_factor", "El k calibrado no es físicamente aplicable.", parent=dlg)
             return
         self.app.k_factor = k
         self.app.settings["k_factor"] = k
-        self.app.settings["k_factor_info"] = "CSV de validación"
+        self.app.settings["k_factor_info"] = (
+            f"Calibración v10 {datetime.now().strftime('%Y-%m-%d %H:%M')}; "
+            f"{report['split'].fuente}; n={report['ajuste_k']['n']}"
+        )
         self.app.settings_manager.write(self.app.settings)
-        messagebox.showinfo("Calibrado", f"k_factor = {k:.5f} aplicado y guardado.", parent=dlg)
+        messagebox.showinfo(
+            "k_factor aplicado",
+            f"k_factor = {k:.6f}\n\nSe aplicará al modelo Estándar en los próximos cálculos. "
+            "El modelo Avanzado no usa k_factor.",
+            parent=dlg,
+        )
+
+    def _validar_aplicar_aire_v10(self, dlg, tipo="tree"):
+        report = getattr(dlg, "validation_report", None)
+        if not report:
+            return
+        fit = report["ajuste_aire_local"].get(tipo)
+        if not fit:
+            return
+        prefix = "tree" if tipo == "tree" else "structure"
+        self.app.settings[f"local_air_{prefix}_coefficient"] = float(fit["coefficient"])
+        self.app.settings[f"local_air_{prefix}_max_cooling"] = float(fit["max_cooling"])
+        self.app.settings[f"local_air_{prefix}_calibration_info"] = (
+            f"Calibración v10 {datetime.now().strftime('%Y-%m-%d %H:%M')}; n={fit['n']}"
+        )
+        self.app.settings_manager.write(self.app.settings)
+        messagebox.showinfo(
+            "Ta local calibrada",
+            f"Coeficiente ({prefix}) = {fit['coefficient']:.6f} K/(W/m²)\n"
+            f"Tope = {fit['max_cooling']:.1f} °C\n\n"
+            "Se utilizará en las próximas curvas de nivel. La variable continúa rotulada como estimada.",
+            parent=dlg,
+        )
+
+    def _validar_exportar_v10(self, dlg):
+        report = getattr(dlg, "validation_report", None)
+        if not report:
+            return
+        path = filedialog.asksaveasfilename(
+            parent=dlg,
+            title="Exportar validación científica",
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx")],
+            initialfile="validacion_modelos_termicos.xlsx",
+        )
+        if not path:
+            return
+        try:
+            exportar_reporte_validacion(path, report)
+        except Exception as exc:
+            messagebox.showerror("Exportación", str(exc), parent=dlg)
+            return
+        messagebox.showinfo("Exportación", f"Validación exportada en:\n{path}", parent=dlg)
+
+    # Métodos históricos conservados como aliases internos para plugins/código
+    # que pudiera invocarlos directamente.
+    def _validar_aplicar_k(self, aplicar_btn, dlg):
+        return self._validar_aplicar_k_v10(dlg)
+
+    def _dialogo_auditoria_cientifica(self):
+        """Ejecuta la auditoría interna de preparación científica v16.
+
+        No sustituye una validación de campo: separa fallas internas,
+        advertencias metodológicas y evidencia experimental faltante.
+        """
+        project = getattr(getattr(self.app, "project_manager", None), "current_project", None)
+        report = run_scientific_audit(
+            project_root=(project.root_path if project else None),
+            settings=getattr(self.app, "settings", {}),
+            snapshots=getattr(self.app, "snapshots", []),
+            validation_summary=getattr(self.app, "last_validation_summary", None),
+        )
+        self.app.last_scientific_audit = report.to_dict()
+
+        dlg = tk.Toplevel(self.app.root)
+        dlg.title("Auditoría científica y preparación para validación")
+        dlg.geometry("820x640")
+        dlg.transient(self.app.root)
+
+        counts = report.counts
+        tk.Label(
+            dlg,
+            text=report.readiness,
+            font=("Arial", 11, "bold"),
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", padx=12, pady=(10, 2))
+        tk.Label(
+            dlg,
+            text=(
+                f"Release {report.scientific_release} · "
+                f"OK {counts.get('pass', 0)} · advertencias {counts.get('warning', 0)} · "
+                f"fallas {counts.get('fail', 0)}"
+            ),
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 8))
+
+        text = tk.Text(dlg, wrap="word", font=("Consolas", 9))
+        scroll = ttk.Scrollbar(dlg, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y", pady=(0, 8))
+        text.pack(fill="both", expand=True, padx=(12, 0), pady=(0, 8))
+        text.insert("1.0", format_audit_text(report))
+        text.configure(state="disabled")
+
+        pie = tk.Frame(dlg)
+        pie.pack(fill="x", padx=12, pady=(0, 10))
+
+        def export_json():
+            path = filedialog.asksaveasfilename(
+                parent=dlg,
+                title="Guardar auditoría científica",
+                defaultextension=".json",
+                filetypes=[("JSON", "*.json")],
+                initialfile="auditoria_cientifica_v16.json",
+            )
+            if not path:
+                return
+            save_audit_json(path, report)
+            messagebox.showinfo("Auditoría", f"Auditoría guardada en:\n{path}", parent=dlg)
+
+        def export_txt():
+            path = filedialog.asksaveasfilename(
+                parent=dlg,
+                title="Guardar auditoría científica",
+                defaultextension=".txt",
+                filetypes=[("Texto", "*.txt")],
+                initialfile="auditoria_cientifica_v16.txt",
+            )
+            if not path:
+                return
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(format_audit_text(report))
+            messagebox.showinfo("Auditoría", f"Auditoría guardada en:\n{path}", parent=dlg)
+
+        tk.Button(pie, text="Exportar JSON…", command=export_json).pack(side="left")
+        tk.Button(pie, text="Exportar TXT…", command=export_txt).pack(side="left", padx=6)
+        tk.Button(pie, text="Cerrar", command=dlg.destroy).pack(side="right")
 
     # ---------------------------------------------------------------- especies y ranking
 
@@ -571,6 +949,7 @@ class HerramientasDialogs:
                 f"Densidad de copa: {p['rho_copa']:.2f}  Transmitancia: {p['transmitancia']:.2f}\n"
                 f"Caducifolio: {'sí' if p['caducifolio'] else 'no'}  Albedo copa: {p['albedo_copa']:.2f}\n"
                 f"Altura típica: {p['altura_tipica']:.0f} m  Radio copa: {p['radio_copa_tipico']:.0f} m\n"
+                f"LAI típico: {p['lai_tipico']:.2f}  Kc ET: {p['kc_et']:.2f}  Tau sin hojas: {p['transmitancia_sin_hojas']:.2f}\n"
                 f"Ref.: {p['ref']}")).pack(anchor="w")
             fila += 1
         pie = tk.Frame(dlg)
@@ -632,6 +1011,9 @@ class HerramientasDialogs:
             ("Albedo de copa (0-1):", "albedo_copa"),
             ("Altura típica (m):", "altura_tipica"),
             ("Radio de copa típico (m):", "radio_copa_tipico"),
+            ("LAI típico (0.1-10):", "lai_tipico"),
+            ("Coeficiente ET Kc (0.1-2):", "kc_et"),
+            ("Transmitancia sin hojas (0-1):", "transmitancia_sin_hojas"),
             ("Referencia bibliográfica:", "ref"),
         ]
         vars_form = {}
@@ -665,7 +1047,8 @@ class HerramientasDialogs:
             p = propiedades_especie(nombre)
             vars_form["nombre"].set(nombre)
             for clave in ("rho_copa", "transmitancia", "albedo_copa",
-                          "altura_tipica", "radio_copa_tipico"):
+                          "altura_tipica", "radio_copa_tipico", "lai_tipico",
+                          "kc_et", "transmitancia_sin_hojas"):
                 vars_form[clave].set(str(p[clave]))
             vars_form["caducifolio"].set("sí" if p["caducifolio"] else "no")
             vars_form["ref"].set(p["ref"])
@@ -680,6 +1063,9 @@ class HerramientasDialogs:
             vars_form["rho_copa"].set("0.60")
             vars_form["transmitancia"].set("0.30")
             vars_form["albedo_copa"].set("0.18")
+            vars_form["lai_tipico"].set("3.0")
+            vars_form["kc_et"].set("1.0")
+            vars_form["transmitancia_sin_hojas"].set("0.75")
             lista.selection_clear(0, "end")
             error_lbl.config(text="")
 
@@ -691,6 +1077,9 @@ class HerramientasDialogs:
                 "albedo_copa": vars_form["albedo_copa"].get().replace(",", ".").strip(),
                 "altura_tipica": vars_form["altura_tipica"].get().replace(",", ".").strip(),
                 "radio_copa_tipico": vars_form["radio_copa_tipico"].get().replace(",", ".").strip(),
+                "lai_tipico": vars_form["lai_tipico"].get().replace(",", ".").strip(),
+                "kc_et": vars_form["kc_et"].get().replace(",", ".").strip(),
+                "transmitancia_sin_hojas": vars_form["transmitancia_sin_hojas"].get().replace(",", ".").strip(),
                 "ref": vars_form["ref"].get().strip(),
             }
             nombre = vars_form["nombre"].get().strip()

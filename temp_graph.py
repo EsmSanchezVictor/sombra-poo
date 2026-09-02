@@ -73,7 +73,7 @@ class TemperatureGraph:
             (self.tmrt_sol, "Sol"),
             (self.tmrt_sombra, "Sombra"),
         ):
-            pos = (valor - vmin) / (vmax - vmin)
+            pos = float(valor)
             ax_colorbar.axvline(pos, color="black", linewidth=1.3, ymin=-0.6, ymax=1.6, clip_on=False)
             ax_colorbar.text(
                 pos, 1.9, f"{etiqueta}\n{valor:.1f}°C",

@@ -1,319 +1,461 @@
-"""Modelo simplificado de radiación y Tmrt basado en porcentaje de sombra.
+"""Modelo empírico simplificado de radiación y Tmrt.
 
-CAMBIOS respecto a la versión original:
-
-1. Los `print` gateados por `DEBUG_TMRT` se reemplazan por el módulo
-   estándar `logging`. Así se puede activar/desactivar el detalle sin
-   tocar código, y los logs se pueden mandar a archivo en producción
-   en vez de a stdout.
-
-2. Se agrega `solar_azimuth()`. Antes el azimut solo se calculaba en
-   `services/solar_engine.py` con una aproximación lineal cruda
-   (`(180 + (hora-12)*15) % 360`), que no es la fórmula real de
-   azimut solar. Ahora vive acá, al lado de `solar_altitude()`, con
-   la misma fuente de declinación — así ambos módulos usan una sola
-   fuente de verdad para la geometría solar.
-
-3. `calculate_tmrt()` acepta un parámetro opcional `radiation_override`.
-   Esto es importante: hoy existen DOS modelos de radiación de cielo
-   despejado que pueden dar resultados distintos para la misma fecha/
-   hora — el de acá (fórmula propia con transmitancia fija 0.75) y el
-   de `SolarEngine` (que usa pvlib/Ineichen cuando está disponible,
-   mucho más preciso). Si quien llama ya calculó la radiación con
-   SolarEngine, ahora puede pasarla y evitar la inconsistencia. Si no
-   se pasa nada, se sigue usando el modelo simplificado interno (no
-   rompe compatibilidad).
-
-4. Se agrega `calibrate_k_factor()`: dado que k_factor=0.04 estaba
-   hardcodeado sin respaldo documentado, este método permite ajustarlo
-   contra una medición real de Tmrt en campo (por ejemplo con
-   termómetro de globo), en vez de dejarlo como un número mágico.
-   No inventa un valor "correcto" — deja explícito que hay que
-   calibrarlo con datos reales del sitio de estudio.
+La relación ``Tmrt = Ta + k * GHI`` se conserva como modelo rápido y
+calibrable. No sustituye un balance radiativo humano completo. Las mejoras de
+esta versión se concentran en coherencia solar, semántica de la sombra y
+compatibilidad con un motor solar externo (pvlib/SolarEngine).
 """
+from __future__ import annotations
+
 import datetime
 import logging
 import math
 
 import numpy as np
 
+from core.radiative_tmrt import AdvancedTmrtConfig, calculate_radiative_tmrt
+from core.solar_math import (
+    equation_of_time_minutes, solar_declination_deg, solar_hour_angle_deg,
+    solar_elevation_deg, solar_azimuth_deg, standard_meridian_deg,
+)
+
 logger = logging.getLogger("sombra_poo.tmrt")
 
 
 class Temperatura:
-    """Modelo simplificado de radiación y Tmrt basado en porcentaje de sombra.
+    """Estimación relativa de Tmrt basada en radiación y cobertura de sombra.
 
-    AVISO IMPORTANTE (léase antes de confiar en los resultados):
-    `Tmrt = T_air + k_factor * radiación` es una aproximación LINEAL,
-    no el cálculo riguroso de temperatura media radiante que define
-    ISO 7726 (que requiere temperatura de globo o un balance de flujos
-    radiativos de onda corta/larga con factores de vista del cuerpo
-    humano). Sirve como estimación relativa de "cuánto ayuda la sombra"
-    pero los valores absolutos de Tmrt no deberían presentarse como
-    medición certificada sin calibrar `k_factor` contra datos reales.
+    ``porcentaje_sombra`` se interpreta como FRACCIÓN DE ÁREA/EXPOSICIÓN
+    sombreada: 0 % implica pleno sol (transmitancia efectiva = 1) y 100 %
+    implica sombra completa con la transmitancia residual de copa/estructura.
     """
 
-    def __init__(self, latitude=0.0, longitude=0.0, k_factor=0.04, tz_offset_hours=None):
-        self.latitude = latitude
-        self.longitude = longitude
-        self.k_factor = k_factor
-        # Desvío del huso horario respecto de UTC (h). None => se estima
-        # desde la longitud (cada 15° ≈ 1 h), porque el tiempo que entra
-        # al modelo es hora LOCAL de reloj y el ángulo horario solar se
-        # mide contra el meridiano estándar del huso, no contra la
-        # longitud absoluta. Si el huso real difiere de la heurística
-        # (p. ej. Argentina: UTC-3 con lon ~ -58° => heurística -4 h),
-        # pasalo explícito.
+    DEFAULT_FULL_SHADE_TAU = {
+        "tree": 0.15,
+        "structure": 0.05,
+    }
+
+    # Modelo empírico y deliberadamente conservador para estimar la
+    # temperatura del aire local bajo sombra.  NO convierte Tmrt en Ta.
+    # Parte de la radiación solar que deja de llegar al punto:
+    #
+    #   ΔTa_local = min(ΔTa_max, c_air * (GHI - GHI_efectiva))
+    #
+    # c_air tiene unidades K/(W/m²).  Los valores por defecto buscan
+    # representar que el aire cambia mucho menos que la carga radiante.
+    # Deben considerarse parámetros calibrables si se dispone de medición
+    # microclimática local.
+    DEFAULT_LOCAL_AIR_MODEL = {
+        "tree": {"coefficient": 0.0025, "max_cooling": 2.5},
+        "structure": {"coefficient": 0.0012, "max_cooling": 1.2},
+    }
+
+    MODEL_STANDARD = "standard"
+    MODEL_ADVANCED = "advanced"
+
+    def __init__(
+        self,
+        latitude=0.0,
+        longitude=0.0,
+        k_factor=0.04,
+        tz_offset_hours=None,
+        model_mode="standard",
+        advanced_config=None,
+    ):
+        self.latitude = float(latitude)
+        self.longitude = float(longitude)
+        self.k_factor = float(k_factor)
         self.tz_offset_hours = tz_offset_hours
+        self.model_mode = self._normalize_model_mode(model_mode)
+        self.advanced_config = advanced_config or AdvancedTmrtConfig()
+
+    @classmethod
+    def _normalize_model_mode(cls, value):
+        value = str(value or cls.MODEL_STANDARD).strip().lower()
+        aliases = {
+            "standard": cls.MODEL_STANDARD,
+            "estandar": cls.MODEL_STANDARD,
+            "estándar": cls.MODEL_STANDARD,
+            "empirical": cls.MODEL_STANDARD,
+            "empirico": cls.MODEL_STANDARD,
+            "empírico": cls.MODEL_STANDARD,
+            "advanced": cls.MODEL_ADVANCED,
+            "avanzado": cls.MODEL_ADVANCED,
+            "radiative": cls.MODEL_ADVANCED,
+        }
+        if value not in aliases:
+            raise ValueError(f"Modelo Tmrt desconocido: {value}")
+        return aliases[value]
+
+    @property
+    def model_label(self):
+        return (
+            "Avanzado · balance radiativo v1"
+            if self.model_mode == self.MODEL_ADVANCED
+            else "Estándar · empírico calibrable"
+        )
 
     def _meridiano_estandar(self):
-        if self.tz_offset_hours is not None:
-            return float(self.tz_offset_hours) * 15.0
-        return float(np.clip(np.round(self.longitude / 15), -12, 14)) * 15.0
+        return standard_meridian_deg(self.longitude, self.tz_offset_hours)
 
     def _ecuacion_del_tiempo(self, day_of_year):
-        """Ecuación del tiempo en minutos (analítica, aproximación de
-        Spencer). Compensa la diferencia entre el tiempo solar verdadero
-        y el tiempo solar medio por la excentricidad de la órbita y la
-        oblicuidad de la eclíptica (±16 min ≈ ±4° en el ángulo horario).
-        """
-        b = 360 * (day_of_year - 81) / 365
-        return (9.87 * math.sin(math.radians(2 * b))
-                - 7.53 * math.cos(math.radians(b))
-                - 1.5 * math.sin(math.radians(b)))
+        return equation_of_time_minutes(day_of_year)
 
     def _hour_angle(self, time_of_day, day_of_year=None):
-        """Ángulo horario solar:
-            H = 15·(t_local − 12) + (longitud − meridiano_estándar) + EoT
-
-        Derivación: hora_solar = UTC + longitud/15 + EoT, y como el reloj
-        local vale UTC + meridiano/15, hora_solar = hora_local + (L−M)/15
-        + EoT. Antes este módulo ignoraba la longitud y la ecuación del
-        tiempo por completo; `modelo_con_excel.py` sumaba la longitud
-        absoluta (válido solo para UTC). Verificado contra pvlib: el signo
-        (L−M) es el físicamente correcto — con (M−L) Buenos Aires se
-        desviaba ~27° en H.
-        """
-        eot_deg = self._ecuacion_del_tiempo(day_of_year) / 4 if day_of_year is not None else 0.0
-        return 15 * (time_of_day - 12) + (self.longitude - self._meridiano_estandar()) + eot_deg
+        if day_of_year is None:
+            # Compatibilidad histórica para llamadas internas sin día.
+            return 15.0 * (float(time_of_day) - 12.0) + (self.longitude - self._meridiano_estandar())
+        return solar_hour_angle_deg(
+            self.longitude, day_of_year, time_of_day, self.tz_offset_hours
+        )
 
     def solar_declination(self, day_of_year):
-        return 23.45 * math.sin(math.radians((360 / 365) * (day_of_year - 81)))
+        return solar_declination_deg(day_of_year)
 
     def solar_altitude(self, day_of_year, time_of_day):
-        declination = self.solar_declination(day_of_year)
-        hour_angle = self._hour_angle(time_of_day, day_of_year)
-        latitude_rad = math.radians(self.latitude)
-        declination_rad = math.radians(declination)
-        altitude = math.degrees(
-            math.asin(
-                math.sin(latitude_rad) * math.sin(declination_rad)
-                + math.cos(latitude_rad)
-                * math.cos(declination_rad)
-                * math.cos(math.radians(hour_angle))
-            )
+        return solar_elevation_deg(
+            self.latitude, self.longitude, day_of_year, time_of_day, self.tz_offset_hours
         )
-        return altitude
 
     def solar_azimuth(self, day_of_year, time_of_day):
-        """NUEVO. Azimut solar real (0-360°, medido desde el norte,
-        sentido horario), reemplaza la aproximación lineal que vivía
-        suelta en solar_engine.py."""
-        declination = self.solar_declination(day_of_year)
-        hour_angle = self._hour_angle(time_of_day, day_of_year)
-        lat_rad = math.radians(self.latitude)
-        dec_rad = math.radians(declination)
-        altitude_rad = math.radians(self.solar_altitude(day_of_year, time_of_day))
-        hour_angle_rad = math.radians(hour_angle)
-
-        sin_az = -math.sin(hour_angle_rad) * math.cos(dec_rad) / max(math.cos(altitude_rad), 1e-6)
-        cos_az = (math.sin(dec_rad) - math.sin(lat_rad) * math.sin(altitude_rad)) / max(
-            (math.cos(lat_rad) * math.cos(altitude_rad)), 1e-6
+        """Azimut 0-360°, desde norte en sentido horario."""
+        return solar_azimuth_deg(
+            self.latitude, self.longitude, day_of_year, time_of_day, self.tz_offset_hours
         )
-        azimuth = math.degrees(math.atan2(sin_az, cos_az))
-        return azimuth % 360
 
     def clear_sky_radiation(self, solar_altitude):
-        if solar_altitude <= 0:
-            return 0
-        solar_constant = 1367
+        """Fallback simple de GHI de cielo despejado (W/m²)."""
+        if float(solar_altitude) <= 0.0:
+            return 0.0
+        solar_constant = 1367.0
         atmospheric_transmittance = 0.75
-        radiation = solar_constant * math.sin(math.radians(solar_altitude)) * atmospheric_transmittance
-        return max(radiation, 0)
+        radiation = solar_constant * math.sin(math.radians(float(solar_altitude))) * atmospheric_transmittance
+        return max(float(radiation), 0.0)
 
-    def shadow_transmittance(self, porcentaje_sombra, shadow_type):
-        porcentaje = min(max(porcentaje_sombra, 0), 100)
-        if shadow_type == "structure":
-            tau_min, tau_max = 0.05, 0.30
+    @classmethod
+    def _tau_sombra_total(cls, shadow_type: str, full_shadow_transmittance=None) -> float:
+        if full_shadow_transmittance is None:
+            tau = cls.DEFAULT_FULL_SHADE_TAU.get(shadow_type, cls.DEFAULT_FULL_SHADE_TAU["tree"])
         else:
-            tau_min, tau_max = 0.15, 0.60
-        tau = tau_max - (porcentaje / 100) * (tau_max - tau_min)
-        return max(min(tau, tau_max), tau_min)
+            tau = float(full_shadow_transmittance)
+        return min(max(float(tau), 0.0), 1.0)
 
-    def shadow_transmittance_map(self, porcentaje_sombra_map, shadow_type):
-        """NUEVO: misma fórmula que shadow_transmittance() pero vectorizada
-        sobre un array de numpy en vez de un escalar."""
-        porcentaje = np.clip(porcentaje_sombra_map, 0, 100)
-        if shadow_type == "structure":
-            tau_min, tau_max = 0.05, 0.30
-        else:
-            tau_min, tau_max = 0.15, 0.60
-        tau = tau_max - (porcentaje / 100) * (tau_max - tau_min)
-        return np.clip(tau, tau_min, tau_max)
+    def shadow_transmittance(self, porcentaje_sombra, shadow_type="tree", full_shadow_transmittance=None):
+        """Transmitancia efectiva del área analizada.
 
-    def calculate_tmrt_map(self, air_temp, porcentaje_sombra_map, shadow_type="tree",
-                            date_value=None, time_value=None, radiation_override=None):
-        """NUEVO: versión de calculate_tmrt() que opera sobre un mapa
-        (array 2D) de % de sombra en vez de un único valor promedio.
+        Si S es la fracción sombreada y tau_s la transmitancia residual de la
+        zona totalmente sombreada::
 
-        Se usa para que las curvas de nivel del Panel 2 muestren
-        TEMPERATURA en sombra calculada punto por punto (según el % de
-        sombra local de cada píxel, la ubicación, fecha y hora), en vez
-        de graficar directamente los valores crudos de gris de la
-        imagen — que no tienen unidad física ni son comparables entre
-        fotos con distinta exposición.
+            tau_eff = (1-S)*1 + S*tau_s = 1 - S*(1-tau_s)
 
-        La posición solar y la radiación de cielo despejado son
-        iguales para toda la escena en un mismo instante, así que se
-        calculan UNA sola vez (escalares) y solo la transmitancia y el
-        Tmrt final se vectorizan sobre el mapa.
+        Esto garantiza que 0 % de sombra no produzca enfriamiento ficticio.
         """
-        porcentaje_sombra_map = np.asarray(porcentaje_sombra_map, dtype=np.float32)
+        s = min(max(float(porcentaje_sombra) / 100.0, 0.0), 1.0)
+        tau_s = self._tau_sombra_total(shadow_type, full_shadow_transmittance)
+        return 1.0 - s * (1.0 - tau_s)
 
+    def shadow_transmittance_map(
+        self,
+        porcentaje_sombra_map,
+        shadow_type="tree",
+        full_shadow_transmittance=None,
+    ):
+        porcentaje = np.asarray(porcentaje_sombra_map, dtype=np.float32)
+        s = np.clip(porcentaje / 100.0, 0.0, 1.0)
+        tau_s = self._tau_sombra_total(shadow_type, full_shadow_transmittance)
+        return 1.0 - s * (1.0 - tau_s)
+
+
+    @classmethod
+    def _local_air_parameters(cls, shadow_type="tree", cooling_coefficient=None, max_cooling=None):
+        defaults = cls.DEFAULT_LOCAL_AIR_MODEL.get(
+            shadow_type, cls.DEFAULT_LOCAL_AIR_MODEL["tree"]
+        )
+        coefficient = (
+            float(defaults["coefficient"])
+            if cooling_coefficient is None
+            else max(0.0, float(cooling_coefficient))
+        )
+        cooling_cap = (
+            float(defaults["max_cooling"])
+            if max_cooling is None
+            else max(0.0, float(max_cooling))
+        )
+        return coefficient, cooling_cap
+
+    def estimate_local_air_temperature_map(
+        self,
+        air_temp,
+        porcentaje_sombra_map,
+        radiation,
+        shadow_type="tree",
+        full_shadow_transmittance=None,
+        cooling_coefficient=None,
+        max_cooling=None,
+        transmittance_map_override=None,
+    ):
+        """Estima Ta local bajo sombra sin confundirla con Tmrt.
+
+        La estimación usa la reducción de radiación de onda corta respecto
+        a pleno sol y aplica una respuesta empírica acotada.  Es una
+        variable microclimática *estimada*, no una medición ni una solución
+        CFD/energética del aire.
+
+        Con 0 % de sombra, Ta_local == Ta_referencia.  La reducción máxima
+        queda limitada por ``max_cooling`` (2.5 °C para árbol por defecto).
+        """
+        sombra = np.asarray(porcentaje_sombra_map, dtype=np.float32)
+        if transmittance_map_override is not None:
+            tau = np.asarray(transmittance_map_override, dtype=np.float32)
+            if tau.shape != sombra.shape:
+                raise ValueError("transmittance_map_override debe tener la misma forma que el mapa de sombra.")
+            tau = np.clip(tau, 0.0, 1.0)
+        else:
+            tau = self.shadow_transmittance_map(
+                sombra,
+                shadow_type=shadow_type,
+                full_shadow_transmittance=full_shadow_transmittance,
+            )
+        ghi = max(0.0, float(radiation))
+        coefficient, cooling_cap = self._local_air_parameters(
+            shadow_type,
+            cooling_coefficient=cooling_coefficient,
+            max_cooling=max_cooling,
+        )
+        radiacion_evitada = ghi * np.clip(1.0 - tau, 0.0, 1.0)
+        delta_t = np.minimum(cooling_cap, coefficient * radiacion_evitada)
+        local_air = float(air_temp) - delta_t
+        local_air = np.asarray(local_air, dtype=np.float32)
+        local_air[np.isnan(sombra)] = np.nan
+        return local_air
+
+    def estimate_local_air_temperature(
+        self,
+        air_temp,
+        porcentaje_sombra,
+        radiation,
+        shadow_type="tree",
+        full_shadow_transmittance=None,
+        cooling_coefficient=None,
+        max_cooling=None,
+        transmittance_override=None,
+    ):
+        """Versión escalar de :meth:`estimate_local_air_temperature_map`."""
+        result = self.estimate_local_air_temperature_map(
+            air_temp,
+            np.asarray([float(porcentaje_sombra)], dtype=np.float32),
+            radiation,
+            shadow_type=shadow_type,
+            full_shadow_transmittance=full_shadow_transmittance,
+            cooling_coefficient=cooling_coefficient,
+            max_cooling=max_cooling,
+            transmittance_map_override=(
+                None if transmittance_override is None
+                else np.asarray([float(transmittance_override)], dtype=np.float32)
+            ),
+        )
+        return float(result[0])
+
+    @staticmethod
+    def _date_time(date_value=None, time_value=None):
         if isinstance(date_value, datetime.date):
             day_of_year = date_value.timetuple().tm_yday
         else:
-            now = datetime.datetime.now()
-            day_of_year = now.timetuple().tm_yday
-
+            day_of_year = datetime.datetime.now().timetuple().tm_yday
         if time_value is None:
             now = datetime.datetime.now()
-            time_of_day = now.hour + now.minute / 60
+            time_of_day = now.hour + now.minute / 60.0 + now.second / 3600.0
         else:
             time_of_day = float(time_value)
+        return day_of_year, time_of_day
 
-        solar_altitude = self.solar_altitude(day_of_year, time_of_day)
-        if radiation_override is not None:
-            radiation = max(0.0, float(radiation_override))
+    def calculate_tmrt_map(
+        self,
+        air_temp,
+        porcentaje_sombra_map,
+        shadow_type="tree",
+        date_value=None,
+        time_value=None,
+        radiation_override=None,
+        solar_altitude_override=None,
+        full_shadow_transmittance=None,
+        dni_override=None,
+        dhi_override=None,
+        model_mode=None,
+        transmittance_map_override=None,
+    ):
+        porcentaje_sombra_map = np.asarray(porcentaje_sombra_map, dtype=np.float32)
+        day_of_year, time_of_day = self._date_time(date_value, time_value)
+        solar_altitude = (
+            float(solar_altitude_override)
+            if solar_altitude_override is not None
+            else float(self.solar_altitude(day_of_year, time_of_day))
+        )
+        radiation = (
+            max(0.0, float(radiation_override))
+            if radiation_override is not None
+            else self.clear_sky_radiation(solar_altitude)
+        )
+
+        if transmittance_map_override is not None:
+            tau_map = np.asarray(transmittance_map_override, dtype=np.float32)
+            if tau_map.shape != porcentaje_sombra_map.shape:
+                raise ValueError("transmittance_map_override debe tener la misma forma que porcentaje_sombra_map.")
+            tau_map = np.clip(tau_map, 0.0, 1.0)
         else:
-            radiation = self.clear_sky_radiation(solar_altitude)
+            tau_map = self.shadow_transmittance_map(
+                porcentaje_sombra_map,
+                shadow_type,
+                full_shadow_transmittance=full_shadow_transmittance,
+            )
+        selected_model = self._normalize_model_mode(model_mode or self.model_mode)
 
-        if radiation <= 0:
-            tmrt_map = np.full_like(porcentaje_sombra_map, air_temp, dtype=np.float32)
-            return {"Tmrt_map": tmrt_map, "Radiacion_Wm2": 0.0, "Solar_altitude": solar_altitude}
+        if radiation <= 0.0:
+            tmrt_map = np.full_like(porcentaje_sombra_map, float(air_temp), dtype=np.float32)
+            advanced = None
+        elif selected_model == self.MODEL_ADVANCED:
+            advanced = calculate_radiative_tmrt(
+                air_temp,
+                tau_map,
+                radiation,
+                solar_altitude,
+                dni=dni_override,
+                dhi=dhi_override,
+                config=self.advanced_config,
+            )
+            tmrt_map = np.asarray(advanced["tmrt_c"], dtype=np.float32)
+        else:
+            advanced = None
+            tmrt_map = float(air_temp) + self.k_factor * radiation * tau_map
 
-        tau_map = self.shadow_transmittance_map(porcentaje_sombra_map, shadow_type)
-        radiation_map = radiation * tau_map
-        tmrt_map = air_temp + self.k_factor * radiation_map
-        return {
+        tmrt_map = np.asarray(tmrt_map, dtype=np.float32)
+        tmrt_map[np.isnan(porcentaje_sombra_map)] = np.nan
+        result = {
             "Tmrt_map": tmrt_map,
             "Radiacion_Wm2": round(radiation, 2),
             "Solar_altitude": round(solar_altitude, 2),
+            "Modelo_Tmrt": selected_model,
+            "Modelo_Tmrt_label": (
+                "Avanzado · balance radiativo v1"
+                if selected_model == self.MODEL_ADVANCED
+                else "Estándar · empírico calibrable"
+            ),
         }
+        if advanced is not None:
+            result.update({
+                "DNI_Wm2": round(float(advanced["dni"]), 2),
+                "DHI_Wm2": round(float(advanced["dhi"]), 2),
+                "Longwave_equivalent_Wm2": round(float(advanced["longwave_equivalent"]), 2),
+            })
+        return result
 
-    def calculate_tmrt(self, air_temp, porcentaje_sombra, shadow_type="tree",
-                        date_value=None, time_value=None, radiation_override=None):
-        """Calcula Tmrt al sol, Tmrt en sombra y ΔTmrt.
+    def calculate_tmrt(
+        self,
+        air_temp,
+        porcentaje_sombra,
+        shadow_type="tree",
+        date_value=None,
+        time_value=None,
+        radiation_override=None,
+        solar_altitude_override=None,
+        full_shadow_transmittance=None,
+        dni_override=None,
+        dhi_override=None,
+        model_mode=None,
+        transmittance_override=None,
+    ):
+        """Calcula Tmrt al sol y en sombra con el modelo seleccionado.
 
-        radiation_override: si se pasa (por ejemplo, el GHI calculado por
-        SolarEngine vía pvlib), se usa en vez de recalcular con el modelo
-        simplificado interno. Recomendado cuando pvlib está disponible,
-        porque es más preciso que la transmitancia fija de 0.75 de acá.
+        ``standard`` conserva exactamente el modelo empírico histórico.
+        ``advanced`` usa un balance radiativo humano simplificado con
+        GHI/DNI/DHI y parámetros físicamente interpretables.
         """
-        if isinstance(date_value, datetime.date):
-            day_of_year = date_value.timetuple().tm_yday
+        air_temp = float(air_temp)
+        day_of_year, time_of_day = self._date_time(date_value, time_value)
+        solar_altitude = (
+            float(solar_altitude_override)
+            if solar_altitude_override is not None
+            else float(self.solar_altitude(day_of_year, time_of_day))
+        )
+        radiation = (
+            max(0.0, float(radiation_override))
+            if radiation_override is not None
+            else self.clear_sky_radiation(solar_altitude)
+        )
+        tau = (
+            float(np.clip(float(transmittance_override), 0.0, 1.0))
+            if transmittance_override is not None
+            else self.shadow_transmittance(
+                porcentaje_sombra,
+                shadow_type,
+                full_shadow_transmittance=full_shadow_transmittance,
+            )
+        )
+        selected_model = self._normalize_model_mode(model_mode or self.model_mode)
+
+        if radiation <= 0.0:
+            tmrt_sol = tmrt_sombra = air_temp
+            advanced_sol = advanced_sombra = None
+        elif selected_model == self.MODEL_ADVANCED:
+            advanced_sol = calculate_radiative_tmrt(
+                air_temp, 1.0, radiation, solar_altitude,
+                dni=dni_override, dhi=dhi_override, config=self.advanced_config,
+            )
+            advanced_sombra = calculate_radiative_tmrt(
+                air_temp, tau, radiation, solar_altitude,
+                dni=dni_override, dhi=dhi_override, config=self.advanced_config,
+            )
+            tmrt_sol = float(advanced_sol["tmrt_c"])
+            tmrt_sombra = float(advanced_sombra["tmrt_c"])
         else:
-            now = datetime.datetime.now()
-            day_of_year = now.timetuple().tm_yday
-
-        if time_value is None:
-            now = datetime.datetime.now()
-            time_of_day = now.hour + now.minute / 60
-        else:
-            time_of_day = float(time_value)
-
-        solar_altitude = self.solar_altitude(day_of_year, time_of_day)
-
-        if radiation_override is not None:
-            radiation = max(0.0, float(radiation_override))
-        else:
-            radiation = self.clear_sky_radiation(solar_altitude)
-
-        tau = self.shadow_transmittance(porcentaje_sombra, shadow_type)
-        sombra_frac = min(max(porcentaje_sombra / 100, 0), 1)
-        radiation_sombra = radiation * tau
-
-        if radiation <= 0:
-            tmrt_sol = air_temp
-            tmrt_sombra = air_temp
-            delta_tmrt = 0
-        else:
+            advanced_sol = advanced_sombra = None
             tmrt_sol = air_temp + self.k_factor * radiation
-            tmrt_sombra = air_temp + self.k_factor * radiation_sombra
-            delta_tmrt = tmrt_sol - tmrt_sombra
+            tmrt_sombra = air_temp + self.k_factor * radiation * tau
 
-        eps = 1.0
+        delta_tmrt = tmrt_sol - tmrt_sombra
         logger.debug(
-            "TMRT inputs: day_of_year=%s time=%.2f lat=%s lon=%s T_air=%s",
-            day_of_year, time_of_day, self.latitude, self.longitude, air_temp,
+            "TMRT[%s]: doy=%s hora=%.3f alt=%.2f GHI=%.2f tau=%.3f Ta=%.2f sol=%.2f sombra=%.2f",
+            selected_model, day_of_year, time_of_day, solar_altitude, radiation, tau,
+            air_temp, tmrt_sol, tmrt_sombra,
         )
-        logger.debug(
-            "TMRT solar/rad: altitude=%.2f° I_total=%.2f W/m2 (fuente=%s)",
-            solar_altitude, radiation, "override" if radiation_override is not None else "modelo interno",
-        )
-        logger.debug(
-            "TMRT sombra: sombra_frac=%.2f tau=%.2f I_sombra=%.2f W/m2",
-            sombra_frac, tau, radiation_sombra,
-        )
-        logger.debug(
-            "TMRT resultados: Tmrt_sol=%.2f Tmrt_sombra=%.2f delta=%.2f",
-            tmrt_sol, tmrt_sombra, delta_tmrt,
-        )
-        if solar_altitude <= 0:
-            logger.debug("Elevación solar <= 0: radiación directa ~0, ΔTmrt ~0.")
-        if radiation <= eps:
-            logger.debug("Radiación efectiva baja: ΔTmrt ~0.")
-        if radiation > eps and sombra_frac > 0 and math.isclose(radiation_sombra, radiation, rel_tol=1e-6):
-            logger.warning("I_sombra == I_sol con sombra > 0 (posible sombra no aplicada).")
-        if sombra_frac == 0:
-            logger.debug("sombra_promedio=0: Tmrt_sol ≈ Tmrt_sombra.")
-
-        return {
+        result = {
             "Tmrt_sol": round(tmrt_sol, 2),
             "Tmrt_sombra": round(tmrt_sombra, 2),
             "Delta_Tmrt": round(delta_tmrt, 2),
             "Radiacion_Wm2": round(radiation, 2),
-            "Transmitancia_tau": round(tau, 2),
+            "Transmitancia_tau": round(tau, 4),
+            "Modelo_Tmrt": selected_model,
+            "Modelo_Tmrt_label": (
+                "Avanzado · balance radiativo v1"
+                if selected_model == self.MODEL_ADVANCED
+                else "Estándar · empírico calibrable"
+            ),
         }
+        if advanced_sol is not None:
+            result.update({
+                "DNI_Wm2": round(float(advanced_sol["dni"]), 2),
+                "DHI_Wm2": round(float(advanced_sol["dhi"]), 2),
+                "K_sw_sol_Wm2": round(float(advanced_sol["shortwave_effective"]), 2),
+                "K_sw_sombra_Wm2": round(float(advanced_sombra["shortwave_effective"]), 2),
+                "Longwave_equivalent_Wm2": round(float(advanced_sol["longwave_equivalent"]), 2),
+            })
+        return result
 
     def temperature_in_shade(self, air_temp, porcentaje_sombra):
-        """Compatibilidad con el método antiguo. Devuelve Tmrt en sombra."""
-        result = self.calculate_tmrt(air_temp, porcentaje_sombra)
-        return result["Tmrt_sombra"]
+        return self.calculate_tmrt(air_temp, porcentaje_sombra)["Tmrt_sombra"]
 
     def calibrate_k_factor(self, tmrt_medido: float, air_temp: float, radiation: float) -> float:
-        """NUEVO: calibra k_factor contra una medición real de Tmrt en
-        campo (por ejemplo, termómetro de globo negro) para un momento
-        en que se conoce la radiación efectiva. No reemplaza automáticamente
-        self.k_factor — devuelve el valor sugerido para que se revise
-        antes de aplicarlo:
-
-            k_sugerido = calc.calibrate_k_factor(tmrt_medido=45.2,
-                                                   air_temp=30.0,
-                                                   radiation=750.0)
-            calc.k_factor = k_sugerido  # solo si el valor es razonable
-        """
-        if radiation <= 0:
+        radiation = float(radiation)
+        if radiation <= 0.0:
             raise ValueError("No se puede calibrar con radiación <= 0.")
-        return (tmrt_medido - air_temp) / radiation
+        return (float(tmrt_medido) - float(air_temp)) / radiation
 
 
 def _debug_tmrt_case():
     logging.basicConfig(level=logging.DEBUG)
     test_date = datetime.date(2026, 2, 7)
-    calc = Temperatura(latitude=-34.6037, longitude=-58.3816)
-    result = calc.calculate_tmrt(34.0, 50.0, date_value=test_date, time_value=8)
-    logger.debug("Caso de prueba: %s", result)
+    calc = Temperatura(latitude=-34.6037, longitude=-58.3816, tz_offset_hours=-3)
+    logger.debug("Caso de prueba: %s", calc.calculate_tmrt(34.0, 50.0, date_value=test_date, time_value=8))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import zoneinfo
 from io import BytesIO
 import os
 import shutil
@@ -22,16 +23,19 @@ from core import thermal_comfort
 from core.climate_profile import viento_categoria_a_ms
 from core.species import ESPECIES as CATALOGO_ESPECIES, nombres_especies
 from core.validation import k_factor_desde_mediciones, leer_csv_mediciones, metricas
+from core.uncertainty import estimate_tmrt_uncertainty
 from image_processor import ImageProcessor
 #from mouse_pixel_value import MouseHoverPixelValueWithTooltip
 from save_pdf import PDFReportGenerator
 from services.location_service import LocationService
 from services.snapshot_service import SnapshotService
+from services.analysis_record_store import AnalysisRecordStore
 from services.shadow_detector import ShadowDetector
 from shape_selection import ShapeSelector
 from shadow_temp import Temperatura
 from temp_graph import TemperatureGraph
 from services.solar_engine import SolarEngine
+from services.meteorology_service import MeteorologyService, SOURCE_LABELS
 from services import analysis_service
 from services import report_service
 from ui import icon_factory
@@ -92,6 +96,7 @@ class SombraApp:
         self._herramientas = HerramientasDialogs(self)
         for _n in ("_dialogo_calibrar_k_factor", "_dialogo_confort",
                    "_dialogo_escenario_ab", "_dialogo_validar_csv",
+                   "_dialogo_auditoria_cientifica",
                    "_dialogo_especies", "_dialogo_editar_especies",
                    "_dialogo_ranking_arboles"):
             setattr(self, _n, getattr(self._herramientas, _n))
@@ -110,6 +115,7 @@ class SombraApp:
         self.last_histogram_path = None
         self.last_temp_graph_path = None
         self.shadow_quality = None
+        self.last_scientific_audit = None
 
         # Crear frames principales con una estética consistente
         self.frame0 = tk.Frame(
@@ -297,12 +303,28 @@ class SombraApp:
         self.app_state = AppState(self)
         self.project_manager = ProjectManager(self, self.app_state, self.settings_manager)
         self.snapshot_service = SnapshotService(self, self.project_manager)
+        self.analysis_store = None
+        self.current_analysis_id = None
         self.shadow_detector = ShadowDetector()
         self.shadow_detector_enabled = tk.BooleanVar(value=False)
-        self.use_pvlib_engine = tk.BooleanVar(value=False)
+        self.use_pvlib_engine = tk.BooleanVar(value=bool(self.settings.get("clear_sky_use_pvlib", False)))
         self.solar_engine = SolarEngine(use_pvlib=False)
+        # v14: fuente radiativa/meteorológica explícita. El default conserva
+        # el comportamiento histórico (cielo despejado modelado).
+        self.meteorology_service = MeteorologyService()
+        self.radiation_source_mode = tk.StringVar(value=self.settings.get("radiation_source_mode", "clear_sky"))
+        self.manual_ghi = tk.StringVar(value="800")
+        self.manual_dni = tk.StringVar(value="")
+        self.manual_dhi = tk.StringVar(value="")
+        self.meteorology_series_path = None
+        self.last_meteorology_data = None
+        self.last_validation_summary = None
         self.menu_bar = MenuBar(self)
-        self.porcentaje_sombra = None
+        self.porcentaje_sombra = None  # compatibilidad: ahora representa cobertura si proviene de foto
+        self.cobertura_sombra = None
+        self.atenuacion_sombra = None
+        self.shadow_photo_analysis = None
+        self.last_shadow_classification_path = None
         self.tmrt_result = None
         self.snapshots = []  # NUEVO: historial de elementos analizados (imagen+sombra+curva+Tmrt) del proyecto actual
         self.ref_gray_mean = None
@@ -311,6 +333,13 @@ class SombraApp:
         self._shadow_hover_cid = None
         self._shadow_hover_canvas = None
         self._shadow_hover_annotation = None
+        # Interacción del mapa Tmrt (curvas de nivel): hover y punto fijado.
+        self._curve_hover_cid = None
+        self._curve_click_cid = None
+        self._curve_hover_annotation = None
+        self._curve_hover_canvas = None
+        self._curve_pinned_pixel = None
+        self.tmrt_hover_data = None
         self.mouse_hover_pixel_value = None
         self.curva_frame = None
         self.curva_label = None
@@ -575,9 +604,41 @@ class SombraApp:
     def on_project_loaded(self):
         self.hide_startup_screen()
         self.set_project_ui_enabled(True)
+        self._get_analysis_store()
         self.update_status_saved_time()
         if self.current_location:
             self._update_location_labels()
+
+    def _get_analysis_store(self):
+        """Devuelve la base de análisis del proyecto actual.
+
+        La instancia se recrea automáticamente al cambiar de proyecto. La
+        SQLite vive dentro de la carpeta del proyecto, por lo que se incluye
+        también al exportar/duplicar el proyecto.
+        """
+        project = self.project_manager.current_project
+        if project is None:
+            self.analysis_store = None
+            return None
+        root = os.path.abspath(project.root_path)
+        store = getattr(self, "analysis_store", None)
+        if store is None or os.path.abspath(store.project_root) != root:
+            self.analysis_store = AnalysisRecordStore(root)
+        return self.analysis_store
+
+    def _recargar_analisis_desde_base(self, *, migrate_legacy=True):
+        """Sincroniza el cache ``self.snapshots`` desde SQLite.
+
+        ``snapshots`` se mantiene porque servicios de reportes/análisis ya lo
+        consumen, pero desde v17 es un cache de los registros persistentes y
+        no el mecanismo primario de almacenamiento del carrusel.
+        """
+        store = self._get_analysis_store()
+        if store is None:
+            return
+        if migrate_legacy:
+            store.migrate_legacy_snapshots(getattr(self, "snapshots", []))
+        self.snapshots = store.list_entries(complete_only=True)
 
     def set_project_ui_enabled(self, enabled: bool):
         state = tk.NORMAL if enabled else tk.DISABLED
@@ -607,6 +668,15 @@ class SombraApp:
         self.vars["lon"].set(lon)
         self.vars_modelo["lat"].set(lat)
         self.vars_modelo["lon"].set(lon)
+        tz = location.get("tz") or "America/Argentina/Buenos_Aires"
+        if "timezone" in self.vars and hasattr(self.vars["timezone"], "set"):
+            self.vars["timezone"].set(tz)
+        if "timezone" in self.vars_modelo and hasattr(self.vars_modelo["timezone"], "set"):
+            self.vars_modelo["timezone"].set(tz)
+        try:
+            self.solar_engine.set_timezone(tz)
+        except Exception:
+            pass
         self.vars["_update_required"] = True
         self.vars_modelo["_update_required"] = True
         if hasattr(self, "entry_lat") and self.entry_lat:
@@ -649,6 +719,9 @@ class SombraApp:
             )
 
     def restore_project_artifacts(self):
+        # v17: SQLite es la fuente primaria del carrusel. Los snapshots JSON
+        # viejos se migran una sola vez de forma idempotente.
+        self._recargar_analisis_desde_base(migrate_legacy=True)
         self.poblar_lista_snapshots()
         if self.snapshots:
             # Selecciona y carga el último elemento analizado —
@@ -709,46 +782,38 @@ class SombraApp:
             return candidate
         return path_value
 
-    def poblar_lista_snapshots(self):
-        """Sincroniza el contador de la barra de estado y el carrusel de
-        miniaturas del Panel 2 con self.snapshots. Se llama después de
-        guardar un snapshot y después de abrir un proyecto."""
+    def poblar_lista_snapshots(self, selected_analysis_id=None):
+        """Sincroniza contador y carrusel con la base de análisis.
+
+        ``self.snapshots`` sigue existiendo como cache compatible para los
+        reportes, pero desde v17 cada entrada completa tiene ``analysis_id`` y
+        proviene de SQLite.
+        """
         if hasattr(self, "status_elements_var"):
             self.status_elements_var.set(f"Elementos: {len(self.snapshots)}")
         if hasattr(self, "carrusel_inner"):
-            self._carrusel_actualizar()
+            self._carrusel_actualizar(selected_analysis_id=selected_analysis_id)
 
     def _registrar_histograma_en_carrusel(self):
-        """Agrega una ENTRADA PROVISIONAL al carrusel apenas se genera el
-        histograma (mostrar_curvas_nivel), sin esperar a guardar el
-        snapshot. save_snapshot reemplaza la provisional del mismo
-        elemento por la entrada formal al guardar."""
+        """Persiste/actualiza el análisis actual y refresca el carrusel.
+
+        Antes esta función agregaba una entrada provisional a la lista. Esa
+        lógica era la causa del bug de duplicación: seleccionar una miniatura
+        regeneraba la curva/histograma y volvía a hacer ``append``. Ahora el
+        registro se guarda por ``analysis_id`` con UPSERT en SQLite.
+        """
         hist = getattr(self, "last_histogram_path", None)
         if not hist or not os.path.exists(str(hist)):
             return
-        hist = str(hist)
-        if any(e.get("histogram") == hist for e in self.snapshots):
-            return
-        self.snapshots.append({
-            "n": len(self.snapshots) + 1,
-            "timestamp": pd.Timestamp.now().isoformat(),
-            "label": getattr(self, "current_image_stem", None) or f"elemento{len(self.snapshots) + 1}",
-            "image": getattr(self, "last_image_path", None),
-            "histogram": hist,
-            "porcentaje_sombra": getattr(self, "porcentaje_sombra", None),
-            "provisional": True,
-        })
-        self.poblar_lista_snapshots()
+        self.snapshot_service.capture_analysis_record(auto=True)
 
     def cargar_snapshot(self, index: int):
-        """Recarga TODO lo asociado a un elemento del historial: imagen,
-        selección de sombra (matriz), área de referencia, curva de nivel,
-        histograma, y la barra de temperatura calculada en "Calcular
-        temperatura en sombra" (redibujada a partir de los valores
-        guardados, no una imagen estática).
+        """Restaura un registro completo del carrusel sin recalcularlo.
 
-        NUEVO — antes solo se restauraba el ÚLTIMO elemento guardado del
-        proyecto (una sola imagen), sin poder volver a ninguno anterior.
+        Desde v17 el click recupera de SQLite + artefactos persistidos:
+        foto original, curva Tmrt, máscaras/ROIs de cálculo y referencia,
+        matrices válidas, promedio gris, cobertura, atenuación y
+        transmitancia. Para snapshots legacy se conservan fallbacks.
         """
         if index < 0 or index >= len(self.snapshots):
             return
@@ -763,83 +828,157 @@ class SombraApp:
                 return None
             return rel_path if os.path.isabs(rel_path) else os.path.join(root, rel_path)
 
+        # Limpiar completamente el estado visual del elemento anterior antes
+        # de restaurar el seleccionado. Luego fijamos el ID para que un futuro
+        # Guardar/Recalcular haga UPDATE del mismo registro.
+        self._reset_panel2_for_new_image()
+        self.current_analysis_id = entry.get("analysis_id")
+
         image_path = _abs(entry.get("image"))
         curve_path = _abs(entry.get("curve"))
         reference_path = _abs(entry.get("reference"))
         matrix_path = _abs(entry.get("matrix"))
+        calc_data_path = _abs(entry.get("calc_data"))
+        reference_data_path = _abs(entry.get("reference_data"))
+        photo_analysis_path = _abs(entry.get("photo_analysis_data"))
+        tmrt_data_path = _abs(entry.get("tmrt_data"))
         histogram_path = _abs(entry.get("histogram"))
+        classification_path = _abs(entry.get("shadow_classification"))
 
         if image_path and os.path.exists(image_path):
             self._load_image_from_path(image_path)
-        if curve_path and os.path.exists(curve_path):
-            self._load_curve_from_path(curve_path)
-        if reference_path and os.path.exists(reference_path):
+            # En snapshots históricos la imagen puede llamarse elementoN.png;
+            # el nombre conceptual del árbol es el label guardado.
+            if entry.get("label"):
+                self.current_image_stem = str(entry["label"])
+
+        # Nuevos bundles NPZ preservan máscara válida y máscara full-size.
+        calc_loaded = self._load_area_bundle(calc_data_path, "calculo")
+        ref_loaded = self._load_area_bundle(reference_data_path, "referencia")
+
+        # Fallback para snapshots <=v16.
+        if not ref_loaded and reference_path and os.path.exists(reference_path):
             self._load_mask_from_path(reference_path)
-        if self.shape_selector.area_referencia is not None:
-            try:
-                self.ref_gray_mean = float(np.mean(self.shape_selector.area_referencia))
-                if hasattr(self, "lbl_promedio_referencia"):
-                    self.lbl_promedio_referencia.config(
-                        text=f"Promedio Gris Referencia: {self.ref_gray_mean:.2f}")
-            except Exception:
-                pass
-        if matrix_path and os.path.exists(matrix_path):
+        if not calc_loaded and matrix_path and os.path.exists(matrix_path):
             try:
                 self.shape_selector.area_seleccionada = pd.read_excel(matrix_path).to_numpy()
+                self.shape_selector.area_seleccionada_mask = np.ones_like(
+                    self.shape_selector.area_seleccionada, dtype=bool
+                )
                 self.last_matrix_path = matrix_path
             except Exception:
                 pass
-        if histogram_path and os.path.exists(histogram_path):
-            self.last_histogram_path = histogram_path
 
-        # Redibujar las áreas dibujadas sobre la foto (área de cálculo
-        # en azul y área de referencia en rojo), guardadas con el
-        # snapshot para que al recargar se vean exactamente como en el
-        # momento del análisis.
+        self.area_calculo_done = self.shape_selector.area_seleccionada is not None
+        self.area_referencia_done = self.shape_selector.area_referencia is not None
+        if self.area_calculo_done:
+            self.area_ref_button.config(state=tk.NORMAL)
+        if self.area_calculo_done and self.area_referencia_done:
+            self.confirm_button.config(state=tk.NORMAL)
+
+        # Restaurar ROIs visuales. Las máscaras full-size quedan además en
+        # ShapeSelector para cálculos/inspección posteriores.
         self.shape_selector.shape_patch_calculo = self._restaurar_patch(
             entry.get("poly_calculo"), "blue")
         self.shape_selector.shape_patch_referencia = self._restaurar_patch(
             entry.get("poly_referencia"), "red")
-        if (self.shape_selector.shape_patch_calculo is not None
-                or self.shape_selector.shape_patch_referencia is not None):
-            if self.ax1 is not None and self.img_rgb is not None:
-                self.ax1.clear()
-                self.ax1.imshow(self.img_rgb)
-                self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
-                if self.shape_selector.shape_patch_calculo is not None:
-                    self.ax1.add_patch(self.shape_selector.shape_patch_calculo)
-                if self.shape_selector.shape_patch_referencia is not None:
-                    self.ax1.add_patch(self.shape_selector.shape_patch_referencia)
-                self.canvas1.draw()
+        if self.ax1 is not None and self.img_rgb is not None:
+            self.ax1.clear()
+            self.ax1.imshow(self.img_rgb)
+            self._setup_hover_shadow_percent_photo(self.ax1, self.canvas1, self.img_rgb)
+            if self.shape_selector.shape_patch_calculo is not None:
+                self.ax1.add_patch(self.shape_selector.shape_patch_calculo)
+            if self.shape_selector.shape_patch_referencia is not None:
+                self.ax1.add_patch(self.shape_selector.shape_patch_referencia)
+            self.canvas1.draw()
 
-        sombra = entry.get("porcentaje_sombra")
-        self.porcentaje_sombra = sombra
-        if isinstance(sombra, (int, float)):
-            self.lbl_porcentaje_sombra.config(text=f"Porcentaje de sombra: {sombra:.2f}%")
+        # Valores de las áreas: se recuperan, no se vuelven a inferir.
+        calc_text = entry.get("area_calculo_text")
+        ref_text = entry.get("area_referencia_text")
+        if calc_text:
+            self.lbl_dimensiones_calculo.config(text=calc_text)
+        elif entry.get("area_calculo_px") is not None:
+            self.lbl_dimensiones_calculo.config(
+                text=f"Área de Cálculo: {int(entry['area_calculo_px'])} px válidos")
+        if ref_text:
+            self.lbl_dimensiones_referencia.config(text=ref_text)
+        elif entry.get("area_referencia_px") is not None:
+            self.lbl_dimensiones_referencia.config(
+                text=f"Área de Referencia: {int(entry['area_referencia_px'])} px válidos")
 
-        # Redibujar la barra de temperatura a partir de los valores
-        # guardados en el snapshot (más confiable que depender de una
-        # imagen exportada, y consistente con calculate_temperature_in_shade).
+        promedio = entry.get("promedio_gris")
+        if isinstance(promedio, (int, float)):
+            self.ref_gray_mean = float(promedio)
+        elif self.shape_selector.area_referencia is not None:  # legacy
+            try:
+                self.ref_gray_mean = self.image_processor.media_valida(
+                    self.shape_selector.area_referencia,
+                    self.shape_selector.area_referencia_mask,
+                )
+            except Exception:
+                self.ref_gray_mean = None
+        if self.ref_gray_mean is not None:
+            self.lbl_promedio_referencia.config(
+                text=f"Promedio Gris Referencia: {self.ref_gray_mean:.2f}")
+
+        cobertura = entry.get("cobertura_sombra", entry.get("porcentaje_sombra"))
+        atenuacion = entry.get("atenuacion_sombra")
+        tau_eff = entry.get("transmitancia_efectiva")
+        self.cobertura_sombra = cobertura
+        self.atenuacion_sombra = atenuacion
+        self.porcentaje_sombra = cobertura
+        if isinstance(cobertura, (int, float)):
+            self.lbl_porcentaje_sombra.config(text=f"Cobertura de sombra: {cobertura:.2f}%")
+        if isinstance(atenuacion, (int, float)) and hasattr(self, "lbl_atenuacion_sombra"):
+            self.lbl_atenuacion_sombra.config(text=f"Atenuación en sombra: {atenuacion:.2f}%")
+        if isinstance(tau_eff, (int, float)) and hasattr(self, "lbl_transmitancia_sombra"):
+            self.lbl_transmitancia_sombra.config(text=f"Transmitancia efectiva: {tau_eff*100:.2f}%")
+
+        # Recuperar exactamente el análisis fotográfico y mapas guardados.
+        self.shadow_photo_analysis = self._load_photo_analysis_bundle(photo_analysis_path, entry)
+        if self.shadow_photo_analysis is None and self.area_calculo_done and self.area_referencia_done:
+            # Compatibilidad exclusiva con registros viejos que no guardaban
+            # los mapas: solo en ese caso se recompone desde matrices.
+            try:
+                self.shadow_photo_analysis = self.image_processor.analizar_sombra_fotografica(
+                    self.shape_selector.area_seleccionada,
+                    self.shape_selector.area_referencia,
+                    mascara_area=self.shape_selector.area_seleccionada_mask,
+                    mascara_referencia=self.shape_selector.area_referencia_mask,
+                )
+            except Exception:
+                self.shadow_photo_analysis = None
+        if self.shadow_photo_analysis is not None and hasattr(self, "shadow_mask_button"):
+            self.shadow_mask_button.config(state=tk.NORMAL)
+        if classification_path and os.path.exists(classification_path):
+            self.last_shadow_classification_path = classification_path
+        if histogram_path and os.path.exists(histogram_path):
+            self.last_histogram_path = histogram_path
+
+        # Curva: cargar matrices guardadas y reconstruir canvas interactivo sin
+        # llamar mostrar_curvas_nivel(). Eso evita duplicar y evita recalcular.
+        tmrt_loaded = self._load_tmrt_bundle(tmrt_data_path)
+        if tmrt_loaded:
+            self._render_stored_tmrt_map(entry)
+        elif curve_path and os.path.exists(curve_path):
+            self._load_curve_from_path(curve_path)
+        if curve_path and os.path.exists(curve_path):
+            self.last_curve_path = curve_path
+
+        # Barra Tmrt escalar, si el registro la tenía.
         tmrt_sombra = entry.get("tmrt_sombra")
         temp_ambient = entry.get("temp_ambient")
-        # FIX: el extremo "Sol" del gráfico debe ser Tmrt_sol (temperatura
-        # radiante al sol, con el aporte de radiación ya sumado) — el
-        # mismo valor que muestra el label "Tmrt al sol" — y NO
-        # temp_ambient (temperatura de aire cruda ingresada, sin ese
-        # aporte). Antes ambos números convivían con nombres parecidos
-        # pero representaban cosas distintas. Se mantiene temp_ambient
-        # como fallback solo para snapshots viejos guardados antes de
-        # que se empezara a persistir tmrt_sol.
         tmrt_sol = entry.get("tmrt_sol")
         valor_sol_grafico = tmrt_sol if tmrt_sol is not None else temp_ambient
         if tmrt_sombra is not None and valor_sol_grafico is not None:
             self.tmrt_result = {
-                "Tmrt_sol": entry.get("tmrt_sol"),
+                "Tmrt_sol": tmrt_sol,
                 "Tmrt_sombra": tmrt_sombra,
                 "Delta_Tmrt": entry.get("delta_tmrt"),
+                "Modelo_Tmrt": entry.get("modelo_tmrt"),
             }
-            if hasattr(self, "lbl_tmrt_sol") and entry.get("tmrt_sol") is not None:
-                self.lbl_tmrt_sol.config(text=f"Tmrt al sol: {entry['tmrt_sol']:.2f} °C")
+            if hasattr(self, "lbl_tmrt_sol") and tmrt_sol is not None:
+                self.lbl_tmrt_sol.config(text=f"Tmrt al sol: {tmrt_sol:.2f} °C")
             if hasattr(self, "lbl_tmrt_sombra"):
                 self.lbl_tmrt_sombra.config(text=f"Tmrt en sombra: {tmrt_sombra:.2f} °C")
             if hasattr(self, "lbl_delta_tmrt") and entry.get("delta_tmrt") is not None:
@@ -847,11 +986,117 @@ class SombraApp:
             if hasattr(self, "graph_frame"):
                 for widget in self.graph_frame.winfo_children():
                     widget.destroy()
-                graph = TemperatureGraph(valor_sol_grafico, tmrt_sombra, self.graph_frame)
-                graph.plot_temperature_scale()
+                TemperatureGraph(valor_sol_grafico, tmrt_sombra, self.graph_frame).plot_temperature_scale()
 
-        self.curve_button.config(state=tk.NORMAL)
+        self.curve_button.config(state=tk.NORMAL if self.area_calculo_done else tk.DISABLED)
         self._carrusel_marcar(index)
+
+    def _load_area_bundle(self, file_path, kind: str) -> bool:
+        if not file_path or not os.path.exists(file_path):
+            return False
+        try:
+            with np.load(file_path, allow_pickle=False) as data:
+                values = np.asarray(data["values"])
+                valid = np.asarray(data["valid_mask"], dtype=bool)
+                full = np.asarray(data["full_mask"], dtype=bool) if "full_mask" in data else np.empty((0, 0), dtype=bool)
+            if kind == "calculo":
+                self.shape_selector.area_seleccionada = values
+                self.shape_selector.area_seleccionada_mask = valid
+                self.shape_selector.mask_calculo_full = full if full.size else None
+                self.last_matrix_path = file_path
+            else:
+                self.shape_selector.area_referencia = values
+                self.shape_selector.area_referencia_mask = valid
+                self.shape_selector.mask_referencia_full = full if full.size else None
+                self.last_mask_path = file_path
+            return True
+        except Exception as exc:
+            print(f"[carrusel] no se pudo cargar bundle {kind}: {exc}")
+            return False
+
+    def _load_photo_analysis_bundle(self, file_path, entry):
+        arrays = {}
+        if file_path and os.path.exists(file_path):
+            try:
+                with np.load(file_path, allow_pickle=False) as data:
+                    arrays = {key: np.asarray(data[key]) for key in data.files}
+            except Exception as exc:
+                print(f"[carrusel] no se pudo cargar análisis fotográfico: {exc}")
+                arrays = {}
+        if not arrays and not entry.get("algoritmo_sombra"):
+            return None
+        return {
+            "algorithm": entry.get("algoritmo_sombra", "snapshot-restored"),
+            "coverage_pct": entry.get("cobertura_sombra", entry.get("porcentaje_sombra")),
+            "attenuation_pct": entry.get("atenuacion_sombra"),
+            "shadow_transmittance": entry.get("transmitancia_sombra"),
+            "effective_transmittance": entry.get("transmitancia_efectiva"),
+            "effective_attenuation_pct": entry.get("atenuacion_efectiva"),
+            "threshold_ratio": entry.get("umbral_sombra_ratio"),
+            "reference_gray": entry.get("promedio_gris"),
+            "legacy_shadow_index_pct": entry.get("indice_sombra_legacy"),
+            **arrays,
+        }
+
+    def _load_tmrt_bundle(self, file_path) -> bool:
+        if not file_path or not os.path.exists(file_path):
+            return False
+        try:
+            with np.load(file_path, allow_pickle=False) as data:
+                restored = {}
+                for key in data.files:
+                    value = np.asarray(data[key])
+                    restored[key] = float(value) if value.ndim == 0 else value
+            tmrt = restored.get("tmrt")
+            if tmrt is None:
+                return False
+            self.tmrt_hover_data = restored
+            self.tmrt_map = np.asarray(tmrt, dtype=float)
+            self.curvas_nivel_creadas = True
+            self._curve_pinned_pixel = None
+            return True
+        except Exception as exc:
+            print(f"[carrusel] no se pudo cargar datos Tmrt: {exc}")
+            return False
+
+    def _render_stored_tmrt_map(self, entry):
+        """Redibuja la curva guardada a partir de sus matrices, sin física."""
+        mapa = np.asarray(self.tmrt_map, dtype=float)
+        finite = mapa[np.isfinite(mapa)]
+        if not finite.size:
+            return
+        from plot_style import CMAP_CURVAS_NIVEL, agregar_colorbar_temperatura
+
+        if self.curva_label is not None:
+            self.curva_label.destroy()
+            self.curva_label = None
+            self.curva_photo = None
+        self.fig2.clf()
+        ax = self.fig2.add_subplot(111)
+        self.ax2 = ax
+        tmin, tmax = float(np.min(finite)), float(np.max(finite))
+        span = tmax - tmin
+        if span > 1e-9:
+            niveles = np.linspace(tmin, tmax, 21)
+            relleno = ax.contourf(mapa, levels=niveles, cmap=CMAP_CURVAS_NIVEL, vmin=tmin, vmax=tmax, antialiased=True)
+            ax.contour(mapa, levels=niveles[::2], colors="0.35", linewidths=0.45, alpha=0.55)
+            ticks = np.linspace(tmin, tmax, 6)
+        else:
+            eps = max(0.01, abs(tmin) * 1e-6)
+            relleno = ax.contourf(mapa, levels=[tmin-eps, tmin+eps], cmap=CMAP_CURVAS_NIVEL, vmin=tmin-eps, vmax=tmin+eps)
+            ticks = np.array([tmin])
+        ax.set_xlabel("Posición X (px)")
+        ax.set_ylabel("Posición Y (px)")
+        ax.set_title(f"Tmrt guardada — {entry.get('label', 'elemento')}\nregistro {entry.get('analysis_id', '')[:8]}", fontsize=9)
+        agregar_colorbar_temperatura(self.fig2, ax, relleno, unidad="°C", etiqueta="Tmrt", ticks=ticks)
+        ax.text(0.01, 0.01, f"Rango guardado: {tmin:.2f}–{tmax:.2f} °C", transform=ax.transAxes, fontsize=7.5,
+                va="bottom", ha="left", bbox=dict(boxstyle="round", fc="white", ec="0.75", alpha=0.82))
+        self.fig2.tight_layout(pad=0.8)
+        widget = self.canvas2.get_tk_widget()
+        if not widget.winfo_ismapped():
+            widget.pack(fill="both", expand=True)
+        self._setup_hover_tmrt_map(ax, self.canvas2)
+        self.canvas2.draw_idle()
 
     def _restaurar_patch(self, datos, color):
         """Reconstruye el patch dibujado (polígono/rectángulo/círculo)
@@ -927,15 +1172,28 @@ class SombraApp:
 
     def _reset_panel2_for_new_image(self):
         self.shape_selector.clear_panel2_selection()
+        self.current_analysis_id = None
         self.drawing_mode = None
         self.selection_mode = None
         self.area_calculo_done = False
         self.area_referencia_done = False
         self.porcentaje_sombra = None
+        self.cobertura_sombra = None
+        self.atenuacion_sombra = None
+        self.shadow_photo_analysis = None
+        self.last_shadow_classification_path = None
         self.ref_gray_mean = None
         self.tmrt_map = None
+        self.tmrt_hover_data = None
+        self._curve_pinned_pixel = None
         self.curvas_nivel_creadas = False
-        self.lbl_porcentaje_sombra.config(text="Porcentaje de sombra: N/A")
+        self.lbl_porcentaje_sombra.config(text="Cobertura de sombra: N/A")
+        if hasattr(self, "lbl_atenuacion_sombra"):
+            self.lbl_atenuacion_sombra.config(text="Atenuación en sombra: N/A")
+        if hasattr(self, "lbl_transmitancia_sombra"):
+            self.lbl_transmitancia_sombra.config(text="Transmitancia efectiva: N/A")
+        if hasattr(self, "shadow_mask_button"):
+            self.shadow_mask_button.config(state=tk.DISABLED)
         self.lbl_dimensiones_calculo.config(text="Área de Cálculo: N/A")
         self.lbl_dimensiones_referencia.config(text="Área de Referencia: N/A")
         self.lbl_promedio_referencia.config(text="Promedio Gris Referencia: N/A")
@@ -948,12 +1206,29 @@ class SombraApp:
             self.curva_label = None
             self.curva_photo = None
             self.curva_img_pil_original = None
-        if hasattr(self, "ax2") and self.ax2 is not None:
-            self.ax2.clear()
         if self.canvas2 is not None:
+            # Al cambiar de imagen eliminamos también colorbar, anotaciones
+            # y conexiones visuales de la curva anterior.
+            if self._curve_hover_cid is not None:
+                try:
+                    self.canvas2.mpl_disconnect(self._curve_hover_cid)
+                except Exception:
+                    pass
+                self._curve_hover_cid = None
+            if self._curve_click_cid is not None:
+                try:
+                    self.canvas2.mpl_disconnect(self._curve_click_cid)
+                except Exception:
+                    pass
+                self._curve_click_cid = None
+            self._curve_hover_annotation = None
+            self._curve_hover_canvas = None
+            if hasattr(self, "fig2") and self.fig2 is not None:
+                self.fig2.clf()
+                self.ax2 = self.fig2.add_subplot(111)
             widget = self.canvas2.get_tk_widget()
             if widget.winfo_exists():
-                widget.pack(side=tk.RIGHT)
+                widget.pack(fill="both", expand=True)
                 self.canvas2.draw_idle()
                 
     def _load_curve_from_path(self, file_path: str):
@@ -986,8 +1261,10 @@ class SombraApp:
             if ext in (".xlsx", ".xls"):
                 data = pd.read_excel(file_path)
                 self.shape_selector.area_referencia = data.to_numpy()
+                self.shape_selector.area_referencia_mask = np.ones_like(self.shape_selector.area_referencia, dtype=bool)
             elif ext in (".png", ".jpg", ".jpeg"):
                 self.shape_selector.area_referencia = np.array(Image.open(file_path).convert("L"))
+                self.shape_selector.area_referencia_mask = np.ones_like(self.shape_selector.area_referencia, dtype=bool)
         except Exception:
             return
         
@@ -996,6 +1273,8 @@ class SombraApp:
         self.selection_type = tk.StringVar(value="Polígono")
         self.matriz_size = tk.IntVar(value=480)
         self.panel2_advanced_mode = tk.BooleanVar(value=False)        
+        self.tmrt_model_mode = tk.StringVar(value=self.settings.get("tmrt_model_mode", "standard"))
+        self.surface_model_mode = tk.StringVar(value=self.settings.get("surface_model_mode", "standard"))
         self.drawing_mode = None
         self.selection_mode = None
         self.img = None
@@ -1045,8 +1324,9 @@ class SombraApp:
             "lat": tk.DoubleVar(value=40),
             "lon": tk.DoubleVar(value=-3),
             "hora": tk.DoubleVar(value=12),
-            "humedad": tk.DoubleVar(value=0.5),
+            "humedad": tk.DoubleVar(value=50.0),
             "viento": tk.StringVar(value="moderado"),
+            "timezone": tk.StringVar(value="America/Argentina/Buenos_Aires"),
             "arboles": [],
             "estructuras": [],
             "_update_required": True,
@@ -1110,6 +1390,14 @@ class SombraApp:
 
         self.confirm_button = tk.Button(panel, text="Confirmar selección y calcular", command=self.confirmar_seleccion, state=tk.DISABLED)
         self.confirm_button.pack(fill="x",padx=20, pady=4)
+
+        self.shadow_mask_button = tk.Button(
+            panel,
+            text="Ver máscara sombra / sol",
+            command=self.mostrar_mascara_sombra,
+            state=tk.DISABLED,
+        )
+        self.shadow_mask_button.pack(fill="x", padx=20, pady=4)
 
         self.curve_button = tk.Button(panel, text="Generar curva de nivel", command=self.mostrar_curvas_nivel, state=tk.DISABLED)
         self.curve_button.pack(fill="x",padx=20, pady=4)
@@ -1313,6 +1601,20 @@ class SombraApp:
                     return False
         return True
 
+    def _fecha_modelo_actual(self):
+        iso = self.vars_modelo.get("_date_iso") if isinstance(self.vars_modelo, dict) else None
+        if hasattr(iso, "get"):
+            iso = iso.get()
+        if iso:
+            try:
+                return datetime.strptime(str(iso), "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        day = int(float(self.vars_modelo["dia"].get()))
+        year = int(self.vars_modelo.get("_year", datetime.now().year))
+        day = max(1, min(day, 366))
+        return (datetime(year, 1, 1) + timedelta(days=day - 1)).date()
+
     def generar_grafico_modelo(self):
         if not self.require_project("generar el gráfico del modelo"):
             return
@@ -1333,11 +1635,67 @@ class SombraApp:
             rad_map = {"Despejado": 950, "Parcial": 650, "Nublado": 250}
             i_max = rad_map.get(cloudiness, 650)
             self.vars_modelo["T_amb_base"].set(temp_air_k)
-            self.vars_modelo["I_sol_base"].set(i_max)
+            if self.radiation_source_mode.get() in {"manual_measured", "manual_scenario"}:
+                try:
+                    manual_model_ghi = self._optional_float_text(self.manual_ghi)
+                    if manual_model_ghi is None:
+                        raise ValueError("Ingrese GHI manual en el Panel 1.")
+                    self.vars_modelo["I_sol_base"].set(manual_model_ghi)
+                except ValueError as exc:
+                    messagebox.showerror("Radiación manual", str(exc))
+                    return
+            else:
+                self.vars_modelo["I_sol_base"].set(i_max)
+            self.vars_modelo["humedad"].set(float(self.simple_rh.get()))
             self.vars_modelo["nubosidad"] = cloudiness
         else:
             if not self._validate_kelvin_input():
                 return
+        self.vars_modelo["_modo_modelo"] = self.modo_modelo.get()
+        self.vars_modelo["_surface_model_mode"] = self.surface_model_mode.get()
+
+        # v14: manual/observado pueden alimentar directamente el balance de
+        # superficies con GHI del instante. Para clear_sky se conserva el
+        # flujo legacy del Panel 4 para no cambiar resultados históricos.
+        self.vars_modelo["_radiation_override_ghi"] = None
+        self.vars_modelo["_radiation_override_dni"] = None
+        self.vars_modelo["_radiation_override_dhi"] = None
+        self.vars_modelo["_radiation_source_label"] = "Configuración histórica Panel 4"
+        self.vars_modelo["_radiation_quality"] = "legacy_configured"
+        self.vars_modelo["_cloud_fraction_override"] = None
+        source_mode = self.radiation_source_mode.get()
+        if source_mode in {"manual_measured", "manual_scenario", "observed_series"}:
+            try:
+                fecha_modelo = self._fecha_modelo_actual()
+                lat = float(self.vars_modelo["lat"].get())
+                lon = float(self.vars_modelo["lon"].get())
+                hora = float(self.vars_modelo["hora"].get())
+                manual_ghi = float(self.vars_modelo["I_sol_base"].get()) if source_mode.startswith("manual_") else None
+                met = self._obtener_datos_solares(lat, lon, fecha_modelo, hora, manual_ghi=manual_ghi)
+                self.vars_modelo["_radiation_override_ghi"] = float(met["ghi"])
+                self.vars_modelo["_radiation_override_dni"] = float(met["dni"])
+                self.vars_modelo["_radiation_override_dhi"] = float(met["dhi"])
+                self.vars_modelo["_radiation_source_label"] = met.get("source_label", source_mode)
+                self.vars_modelo["_radiation_quality"] = met.get("quality", "external")
+                # En una serie observada, variables meteorológicas disponibles
+                # reemplazan las entradas manuales de ese instante.
+                if source_mode == "observed_series":
+                    if met.get("ta_c") is not None:
+                        self.vars_modelo["T_amb_base"].set(float(met["ta_c"]) + 273.15)
+                        if self.modo_modelo.get() == "simple":
+                            self.simple_temp_air_c.set(float(met["ta_c"]))
+                    if met.get("rh_pct") is not None:
+                        self.vars_modelo["humedad"].set(float(met["rh_pct"]))
+                        if self.modo_modelo.get() == "simple":
+                            self.simple_rh.set(float(met["rh_pct"]))
+                    if met.get("wind_m_s") is not None:
+                        self.vars_modelo["viento"].set(float(met["wind_m_s"]))
+                    if met.get("cloud_fraction") is not None:
+                        self.vars_modelo["_cloud_fraction_override"] = float(met["cloud_fraction"])
+            except Exception as exc:
+                messagebox.showerror("Meteorología", f"No se pudo resolver la fuente meteorológica seleccionada:\n{exc}")
+                return
+
         result = modelo.generar_grafico(self.vars_modelo, self.frame11)
         if result:
             self.last_T = result.get("T")
@@ -1775,6 +2133,11 @@ class SombraApp:
         city_var = tk.StringVar(value=self.settings.get("default_city", "Paraná"))
         cloudiness_var = tk.StringVar(value=self.settings.get("default_cloudiness", "Despejado"))
         wind_var = tk.StringVar(value=self.settings.get("default_wind", "moderado"))
+        tmrt_model_var = tk.StringVar(value=self.settings.get("tmrt_model_mode", "standard"))
+        surface_model_var = tk.StringVar(value=self.settings.get("surface_model_mode", "standard"))
+        ground_veg_var = tk.StringVar(value=str(self.settings.get("ground_vegetation_fraction", 0.50)))
+        water_var = tk.StringVar(value=str(self.settings.get("vegetation_water_availability", 0.75)))
+        canopy_water_var = tk.StringVar(value=str(self.settings.get("canopy_water_availability", 0.75)))
 
         card = tk.Frame(preferences, bg="white", padx=16, pady=14, bd=1, relief="solid")
         card.grid(row=0, column=0, padx=14, pady=14)
@@ -1784,28 +2147,92 @@ class SombraApp:
             row=1, column=0, sticky="w"
         )
         ttk.Combobox(
-            card,
-            textvariable=distance_unit_var,
+            card, textvariable=distance_unit_var,
             values=["cm", "m", "km", "in", "ft", "yd", "mi"],
-            state="readonly",
-            width=10,
+            state="readonly", width=10,
         ).grid(row=1, column=1, sticky="w")
 
-        tk.Label(card, text="Modo UI", bg="white", font=("Arial", 9, "bold")).grid(row=2, column=0, sticky="w", pady=(10, 0))
-        tk.Radiobutton(card, text="Simple", variable=ui_mode_var, value="simple", bg="white").grid(row=3, column=0, sticky="w")
-        tk.Radiobutton(card, text="Avanzado", variable=ui_mode_var, value="advanced", bg="white").grid(row=3, column=1, sticky="w")
+        tk.Label(card, text="Modo de interfaz", bg="white", font=("Arial", 9, "bold")).grid(
+            row=2, column=0, sticky="w", pady=(10, 0)
+        )
+        tk.Radiobutton(card, text="Simple", variable=ui_mode_var, value="simple", bg="white").grid(
+            row=3, column=0, sticky="w"
+        )
+        tk.Radiobutton(card, text="Detallado", variable=ui_mode_var, value="advanced", bg="white").grid(
+            row=3, column=1, sticky="w"
+        )
 
-        tk.Label(card, text="País por defecto", bg="white", font=("Arial", 9, "bold")).grid(row=4, column=0, sticky="w", pady=(10, 0))
+        tk.Label(card, text="Modelo térmico Tmrt", bg="white", font=("Arial", 9, "bold")).grid(
+            row=4, column=0, sticky="w", pady=(10, 0)
+        )
+        tk.Radiobutton(
+            card, text="Estándar (empírico, predeterminado)",
+            variable=tmrt_model_var, value="standard", bg="white",
+        ).grid(row=5, column=0, columnspan=2, sticky="w")
+        tk.Radiobutton(
+            card, text="Avanzado (balance radiativo v1)",
+            variable=tmrt_model_var, value="advanced", bg="white",
+        ).grid(row=6, column=0, columnspan=2, sticky="w")
+        tk.Label(
+            card,
+            text=("El modelo avanzado usa GHI, DNI y DHI por separado y parámetros "
+                  "radiativos humanos. Es más físico, pero todavía requiere validación local."),
+            bg="white", fg="#666666", wraplength=380, justify="left", font=("Arial", 7),
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 4))
+
+        tk.Label(card, text="Modelo térmico de superficies", bg="white", font=("Arial", 9, "bold")).grid(
+            row=8, column=0, sticky="w", pady=(10, 0)
+        )
+        tk.Radiobutton(
+            card, text="Estándar (linealizado, predeterminado)",
+            variable=surface_model_var, value="standard", bg="white",
+        ).grid(row=9, column=0, columnspan=2, sticky="w")
+        tk.Radiobutton(
+            card, text="Avanzado seco (balance energético v1)",
+            variable=surface_model_var, value="advanced", bg="white",
+        ).grid(row=10, column=0, columnspan=2, sticky="w")
+        tk.Radiobutton(
+            card, text="Avanzado vegetación + ET (v2)",
+            variable=surface_model_var, value="advanced_vegetation", bg="white",
+        ).grid(row=11, column=0, columnspan=2, sticky="w")
+        tk.Label(
+            card,
+            text=("v2 añade evapotranspiración de suelo vegetado mediante FAO-56 Penman-Monteith, "
+                  "fenología de caducifolias y diagnóstico separado de transpiración de copa. "
+                  "El estándar y el avanzado seco conservan sus resultados anteriores."),
+            bg="white", fg="#666666", wraplength=380, justify="left", font=("Arial", 7),
+        ).grid(row=12, column=0, columnspan=2, sticky="w", pady=(0, 4))
+
+        tk.Label(card, text="Fracción de suelo vegetado (0-1)", bg="white", font=("Arial", 8, "bold")).grid(
+            row=13, column=0, sticky="w", pady=(6, 0)
+        )
+        tk.Entry(card, textvariable=ground_veg_var, width=10).grid(row=13, column=1, sticky="w")
+        tk.Label(card, text="Disponibilidad hídrica suelo (0-1)", bg="white", font=("Arial", 8, "bold")).grid(
+            row=14, column=0, sticky="w"
+        )
+        tk.Entry(card, textvariable=water_var, width=10).grid(row=14, column=1, sticky="w")
+        tk.Label(card, text="Disponibilidad hídrica copa (0-1)", bg="white", font=("Arial", 8, "bold")).grid(
+            row=15, column=0, sticky="w"
+        )
+        tk.Entry(card, textvariable=canopy_water_var, width=10).grid(row=15, column=1, sticky="w")
+
+        tk.Label(card, text="País por defecto", bg="white", font=("Arial", 9, "bold")).grid(
+            row=16, column=0, sticky="w", pady=(10, 0)
+        )
         if self.locations_data:
-            country_combo = ttk.Combobox(card, textvariable=country_var, values=self.locations_data["countries"], width=22)
-            country_combo.grid(row=5, column=0, columnspan=2, sticky="w")
+            country_combo = ttk.Combobox(
+                card, textvariable=country_var, values=self.locations_data["countries"], width=22
+            )
+            country_combo.grid(row=17, column=0, columnspan=2, sticky="w")
         else:
-            tk.Entry(card, textvariable=country_var, width=24).grid(row=5, column=0, columnspan=2, sticky="w")
+            tk.Entry(card, textvariable=country_var, width=24).grid(row=17, column=0, columnspan=2, sticky="w")
 
-        tk.Label(card, text="Ciudad por defecto", bg="white", font=("Arial", 9, "bold")).grid(row=6, column=0, sticky="w", pady=(10, 0))
+        tk.Label(card, text="Ciudad por defecto", bg="white", font=("Arial", 9, "bold")).grid(
+            row=18, column=0, sticky="w", pady=(10, 0)
+        )
         if self.locations_data:
             city_combo = ttk.Combobox(card, textvariable=city_var, width=22)
-            city_combo.grid(row=7, column=0, columnspan=2, sticky="w")
+            city_combo.grid(row=19, column=0, columnspan=2, sticky="w")
             if country_var.get() in self.locations_data["cities"]:
                 city_combo["values"] = self.locations_data["cities"][country_var.get()]
 
@@ -1817,19 +2244,33 @@ class SombraApp:
 
             country_combo.bind("<<ComboboxSelected>>", update_city_options)
         else:
-            tk.Entry(card, textvariable=city_var, width=24).grid(row=7, column=0, columnspan=2, sticky="w")
+            tk.Entry(card, textvariable=city_var, width=24).grid(row=19, column=0, columnspan=2, sticky="w")
 
-        tk.Label(card, text="Nubosidad", bg="white", font=("Arial", 9, "bold")).grid(row=8, column=0, sticky="w", pady=(10, 0))
-        ttk.Combobox(card, textvariable=cloudiness_var, values=["Despejado", "Parcial", "Nublado"], width=22).grid(
-            row=9, column=0, columnspan=2, sticky="w"
+        tk.Label(card, text="Nubosidad", bg="white", font=("Arial", 9, "bold")).grid(
+            row=20, column=0, sticky="w", pady=(10, 0)
         )
+        ttk.Combobox(
+            card, textvariable=cloudiness_var, values=["Despejado", "Parcial", "Nublado"], width=22
+        ).grid(row=21, column=0, columnspan=2, sticky="w")
 
-        tk.Label(card, text="Viento", bg="white", font=("Arial", 9, "bold")).grid(row=10, column=0, sticky="w", pady=(10, 0))
-        ttk.Combobox(card, textvariable=wind_var, values=["nulo", "moderado", "fuerte"], width=22).grid(
-            row=11, column=0, columnspan=2, sticky="w"
+        tk.Label(card, text="Viento", bg="white", font=("Arial", 9, "bold")).grid(
+            row=22, column=0, sticky="w", pady=(10, 0)
         )
+        ttk.Combobox(
+            card, textvariable=wind_var, values=["nulo", "moderado", "fuerte"], width=22
+        ).grid(row=23, column=0, columnspan=2, sticky="w")
 
         def save_preferences():
+            try:
+                ground_veg = float(ground_veg_var.get().replace(",", "."))
+                water = float(water_var.get().replace(",", "."))
+                canopy_water = float(canopy_water_var.get().replace(",", "."))
+            except ValueError:
+                messagebox.showerror("Vegetación", "Las fracciones de vegetación/agua deben ser numéricas.", parent=preferences)
+                return
+            if not all(0.0 <= v <= 1.0 for v in (ground_veg, water, canopy_water)):
+                messagebox.showerror("Vegetación", "Las fracciones de vegetación/agua deben estar entre 0 y 1.", parent=preferences)
+                return
             self.settings.update(
                 {
                     "ui_mode": ui_mode_var.get(),
@@ -1840,6 +2281,11 @@ class SombraApp:
                     "default_city": city_var.get(),
                     "default_cloudiness": cloudiness_var.get(),
                     "default_wind": wind_var.get(),
+                    "tmrt_model_mode": tmrt_model_var.get(),
+                    "surface_model_mode": surface_model_var.get(),
+                    "ground_vegetation_fraction": ground_veg,
+                    "vegetation_water_availability": water,
+                    "canopy_water_availability": canopy_water,
                 }
             )
             self.settings_manager.write(self.settings)
@@ -1847,7 +2293,7 @@ class SombraApp:
             preferences.destroy()
 
         actions = tk.Frame(card, bg="white")
-        actions.grid(row=12, column=0, columnspan=2, pady=(12, 0), sticky="e")
+        actions.grid(row=24, column=0, columnspan=2, pady=(12, 0), sticky="e")
         tk.Button(actions, text="Guardar", command=save_preferences).grid(row=0, column=0, padx=(0, 8))
         tk.Button(actions, text="Cancelar", command=preferences.destroy).grid(row=0, column=1)
 
@@ -1879,6 +2325,8 @@ class SombraApp:
         self.modo_modelo.set(self.settings.get("ui_mode", "simple"))
         self.modo_edicion.set(self.settings.get("ui_mode_edit", "simple"))
         self.panel2_advanced_mode.set(False)
+        self.tmrt_model_mode.set(self.settings.get("tmrt_model_mode", "standard"))
+        self.surface_model_mode.set(self.settings.get("surface_model_mode", "standard"))
         self.matriz_size.set(480)        
         self.simple_temp_air_c.set(25.0)
         if hasattr(self, "city_combo") and self.locations_data:
@@ -1922,17 +2370,48 @@ class SombraApp:
         filepath = modelo.cargar_excel(self.vars_modelo)
         if filepath:
             self.last_model_excel_path = filepath
+            # El archivo nuevo contiene también los parámetros del cálculo.
+            # Regeneramos inmediatamente para que cargar el Excel signifique
+            # realmente reproducir la escena guardada, sin exigir tocar otro
+            # control ni dejar una gráfica anterior en pantalla.
+            try:
+                self.vars_modelo["_update_required"] = True
+                self.generar_grafico_modelo()
+            except Exception as exc:
+                messagebox.showwarning(
+                    "Modelo",
+                    f"Los datos se cargaron, pero no se pudo regenerar el gráfico automáticamente:\n{exc}",
+                )
             self.mark_dirty()
 
     def guardar_excel_modelo(self):
         if not self.require_project("guardar Excel de modelo"):
             return
-        if not self.last_model_excel_path or not os.path.exists(self.last_model_excel_path):
-            messagebox.showwarning("Modelo", "Primero cargue un Excel de modelo.")
-            return
-        self.last_model_excel_path = self._copy_excel_to_project(self.last_model_excel_path, "modelos")
-        messagebox.showinfo("Modelo", "Excel de modelo guardado en la carpeta del proyecto.")
-        self.mark_dirty()
+
+        project = self.project_manager.current_project
+        target_dir = os.path.join(project.root_path, "modelos")
+        os.makedirs(target_dir, exist_ok=True)
+
+        # Si ya trabajamos sobre un Excel dentro de la carpeta del proyecto,
+        # lo actualizamos. Si vino de afuera, creamos una copia de trabajo en
+        # /modelos. Si todavía no existe ninguno, usamos un nombre estable.
+        current = self.last_model_excel_path
+        if current and os.path.exists(current):
+            try:
+                same_dir = os.path.commonpath([os.path.abspath(current), os.path.abspath(target_dir)]) == os.path.abspath(target_dir)
+            except ValueError:
+                same_dir = False
+            if same_dir:
+                target = current
+            else:
+                target = str(safe_path(target_dir, os.path.basename(current)))
+        else:
+            target = str(safe_path(target_dir, "modelo.xlsx"))
+
+        saved = modelo.guardar_excel(self.vars_modelo, filepath=target, app=self)
+        if saved:
+            self.last_model_excel_path = saved
+            self.mark_dirty()
 
     def run_model_for_active_panel(self, force=False):
         if not self.require_project("ejecutar el modelo"):
@@ -1963,7 +2442,7 @@ class SombraApp:
 
     def mostrar_analisis_comparativo(self):
         """NUEVO. Compara todos los elementos analizados del proyecto:
-        % de sombra y ΔTmrt lado a lado, más estadística descriptiva.
+        cobertura de sombra, atenuación y ΔTmrt lado a lado, más estadística descriptiva.
         No depende de tener una imagen cargada — usa self.snapshots."""
         if not self.require_project("comparar elementos del proyecto"):
             return
@@ -1985,7 +2464,7 @@ class SombraApp:
         if resultado is None:
             messagebox.showinfo(
                 "Análisis comparativo",
-                "Ningún elemento guardado tiene % de sombra calculado todavía.",
+                "Ningún elemento guardado tiene cobertura de sombra calculada todavía.",
             )
             return
         self.last_comparative_chart_path = str(chart_path)
@@ -1994,13 +2473,19 @@ class SombraApp:
         ventana.title("Análisis comparativo del proyecto")
         ventana.geometry("720x950")
 
-        s = resumen["porcentaje_sombra"]
+        s = resumen["cobertura_sombra"]
+        a = resumen["atenuacion_sombra"]
         d = resumen["delta_tmrt"]
         lineas = [f"Elementos analizados: {resumen['n_elementos']}"]
         if s["n"]:
             lineas.append(
-                f"% de sombra — media {s['media']:.1f}% · mín {s['min']:.1f}% · "
+                f"Cobertura de sombra — media {s['media']:.1f}% · mín {s['min']:.1f}% · "
                 f"máx {s['max']:.1f}% · σ {s['desvio']:.1f}%"
+            )
+        if a["n"]:
+            lineas.append(
+                f"Atenuación en sombra — media {a['media']:.1f}% · mín {a['min']:.1f}% · "
+                f"máx {a['max']:.1f}% · σ {a['desvio']:.1f}%"
             )
         if d["n"]:
             lineas.append(
@@ -2017,10 +2502,8 @@ class SombraApp:
         lbl.image = photo
         lbl.pack(padx=10, pady=5)
 
-        # NUEVO: dispersión real % sombra vs. ΔTmrt con línea de
-        # tendencia — a diferencia de la curva de sensibilidad (teórica,
-        # según el modelo), esto usa los datos reales ya calculados de
-        # cada elemento del proyecto.
+        # Dispersión entre cobertura fotográfica y ΔTmrt modelada. No se
+        # denomina "dato real": ambas magnitudes son derivadas/modeladas.
         scatter_path = safe_path(analisis_dir, "dispersion_sombra_tmrt.png")
         scatter_result, pendiente, r2 = analysis_service.dispersión_sombra_tmrt(
             self.snapshots, str(scatter_path),
@@ -2036,8 +2519,8 @@ class SombraApp:
         else:
             tk.Label(
                 ventana,
-                text="(Se necesitan al menos 2 elementos con % de sombra y ΔTmrt "
-                     "para la dispersión real)",
+                text="(Se necesitan al menos 2 elementos con cobertura de sombra y ΔTmrt "
+                     "para la dispersión)",
                 fg="#888888",
             ).pack(pady=5)
 
@@ -2060,14 +2543,16 @@ class SombraApp:
         messagebox.showinfo("Exportar tabla", f"Tabla exportada a:\n{resultado}")
 
     def mostrar_curva_sensibilidad(self):
-        """NUEVO. Grafica cómo responde el Tmrt en sombra al % de sombra
+        """Grafica cómo responde el Tmrt a la cobertura de sombra
         (0-100%) según el propio modelo, con la ubicación/fecha/hora/
         temperatura actuales del Panel 1. Herramienta pura de
         exploración del modelo — no requiere ninguna imagen."""
         if not self.require_project("generar curva de sensibilidad"):
             return
         temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
-        calculador = Temperatura(lat, lon, k_factor=self.k_factor)
+        calculador = Temperatura(
+            lat, lon, k_factor=self.k_factor, model_mode=self.tmrt_model_mode.get()
+        )
 
         project = self.project_manager.current_project
         analisis_dir = os.path.join(project.root_path, "resultados", "analisis")
@@ -2341,13 +2826,31 @@ class SombraApp:
 
         self.lbl_porcentaje_sombra = tk.Label(
             sombra_frame,
-            text="Porcentaje de sombra: N/A",
+            text="Cobertura de sombra: N/A",
             font=("Arial", 7, "bold"),
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
         # Fila 1, Columna 1
         self.lbl_porcentaje_sombra.grid(row=1, column=1, sticky="w", padx=5, pady=2)
+
+        self.lbl_atenuacion_sombra = tk.Label(
+            sombra_frame,
+            text="Atenuación en sombra: N/A",
+            font=("Arial", 7, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
+        )
+        self.lbl_atenuacion_sombra.grid(row=2, column=0, sticky="w", padx=5, pady=2)
+
+        self.lbl_transmitancia_sombra = tk.Label(
+            sombra_frame,
+            text="Transmitancia efectiva: N/A",
+            font=("Arial", 7, "bold"),
+            bg=self.palette["panel"],
+            fg="#2c3e50",
+        )
+        self.lbl_transmitancia_sombra.grid(row=2, column=1, sticky="w", padx=5, pady=2)
 
     def carrusel(self, frame):
         """Carrusel de elementos analizados — ÁREA PROPIA del Panel 2
@@ -2390,7 +2893,7 @@ class SombraApp:
         self._carrusel_sel = None
         self.poblar_lista_snapshots()
 
-    def _carrusel_actualizar(self):
+    def _carrusel_actualizar(self, selected_analysis_id=None):
         """(Re)construye las miniaturas del carrusel desde los snapshots
         que ya tienen imagen cargada (la FOTO del elemento, no el
         histograma)."""
@@ -2398,6 +2901,12 @@ class SombraApp:
             return
         for widget in self.carrusel_inner.winfo_children():
             widget.destroy()
+        # Conservar la selección lógica aunque se reconstruyan los widgets.
+        if selected_analysis_id is None and self._carrusel_sel is not None:
+            try:
+                selected_analysis_id = self.snapshots[self._carrusel_sel].get("analysis_id")
+            except Exception:
+                selected_analysis_id = None
         self._carrusel_photos = []
         self._carrusel_frames = []
         self._carrusel_sel = None
@@ -2437,7 +2946,15 @@ class SombraApp:
                      bg=self.palette["panel"]).pack()
             self._carrusel_frames.append((marco, idx))
         if self._carrusel_frames:
-            self._carrusel_marcar(len(self.snapshots) - 1)
+            target = None
+            if selected_analysis_id:
+                for idx, entry in enumerate(self.snapshots):
+                    if entry.get("analysis_id") == selected_analysis_id:
+                        target = idx
+                        break
+            if target is None:
+                target = len(self.snapshots) - 1
+            self._carrusel_marcar(target)
 
     def _carrusel_marcar(self, index):
         """Resalta la miniatura del elemento cargado."""
@@ -2453,16 +2970,13 @@ class SombraApp:
                              highlightbackground=self.palette["border"])
 
     def _carrusel_seleccionar(self, index):
-        """Click en una miniatura: recarga TODO lo asociado al elemento
-        (foto, áreas dibujadas, cálculos, curvas e histograma)."""
+        """Selecciona un análisis SIN recalcularlo ni crear otro registro.
+
+        El click es una operación puramente de lectura: restaura foto, curva,
+        máscaras, ROIs y métricas guardadas en la base. Esta separación entre
+        seleccionar y calcular elimina la duplicación del carrusel.
+        """
         self.cargar_snapshot(index)
-        # regenera curvas de nivel + histograma desde la selección
-        # restaurada (área de cálculo y de referencia ya cargadas)
-        if self.shape_selector.area_seleccionada is not None:
-            try:
-                self.mostrar_curvas_nivel()
-            except Exception as exc:
-                print(f"[carrusel] no se pudo regenerar curvas/histograma: {exc}")
         self._carrusel_marcar(index)
 
     def _carrusel_desplazar(self, direccion):
@@ -2518,7 +3032,14 @@ class SombraApp:
             bg=self.palette["panel"],
             fg="#2c3e50",
         )
-        self.lbl_delta_tmrt.grid(row=0, column=2, sticky="ew", padx=2)    
+        self.lbl_delta_tmrt.grid(row=0, column=2, sticky="ew", padx=2)
+
+        self.lbl_tmrt_uncertainty = tk.Label(
+            labels_frame,
+            text="Incertidumbre operativa Tmrt sombra: N/A",
+            font=("Arial", 7), bg=self.palette["panel"], fg="#555555",
+        )
+        self.lbl_tmrt_uncertainty.grid(row=1, column=0, columnspan=3, sticky="ew", padx=2, pady=(2, 0))
 
         # 3. Empaquetamos el frame de la gráfica justo debajo de las etiquetas
         self.graph_frame = tk.Frame(temp_frame, bg=self.palette["panel"])
@@ -2558,6 +3079,10 @@ class SombraApp:
             try:
                 saved_image_path = self.save_loaded_image_to_project(file_path)
                 self._reset_panel2_for_new_image()
+                # Un análisis nuevo recibe identidad propia desde el momento
+                # de cargar la foto. Recalcular/guardar ese mismo árbol hace
+                # UPDATE sobre este ID, nunca agrega otra miniatura.
+                self.current_analysis_id = AnalysisRecordStore.new_analysis_id()
                 self.img, self.img_rgb = self.image_processor.load_image(saved_image_path)
             except ValueError as exc:
                 messagebox.showerror("Error", str(exc))
@@ -2583,6 +3108,156 @@ class SombraApp:
         if not widget.winfo_exists():
             self.imagen(self.frame2)
             self.activar_mouse()
+    def _timezone_actual(self):
+        loc = self.current_location or {}
+        tz = loc.get("tz")
+        if not tz and "timezone" in self.vars_modelo:
+            var = self.vars_modelo.get("timezone")
+            tz = var.get() if hasattr(var, "get") else var
+        return tz or "America/Argentina/Buenos_Aires"
+
+    def _construir_instante(self, fecha, hora):
+        """Construye el instante local sin errores de redondeo de minutos."""
+        hora = float(hora)
+        if not np.isfinite(hora):
+            raise ValueError("La hora debe ser un número finito.")
+        # Se acepta 24.0 como inicio del día siguiente; otros valores fuera
+        # de un día se rechazan para evitar ambigüedad de UI.
+        if hora < 0.0 or hora > 24.0:
+            raise ValueError("La hora debe estar entre 0 y 24.")
+        return datetime.combine(fecha, datetime.min.time()) + timedelta(hours=hora)
+
+    def _offset_timezone(self, fecha, hora):
+        try:
+            tz = zoneinfo.ZoneInfo(self._timezone_actual())
+            instante = self._construir_instante(fecha, hora).replace(tzinfo=tz)
+            offset = instante.utcoffset()
+            return None if offset is None else offset.total_seconds() / 3600.0
+        except Exception:
+            return None
+
+    @staticmethod
+    def _optional_float_text(value):
+        if hasattr(value, "get"):
+            value = value.get()
+        text = str(value if value is not None else "").replace(",", ".").strip()
+        if not text:
+            return None
+        number = float(text)
+        if not np.isfinite(number):
+            raise ValueError("El valor radiativo debe ser finito.")
+        return number
+
+    def _obtener_datos_solares(self, latitude, longitude, fecha, hora, *, manual_ghi=None):
+        """Resuelve posición solar + radiación con procedencia explícita.
+
+        Fuentes disponibles (v14):
+        - clear_sky: cielo despejado modelado (pvlib si se solicita/está disponible,
+          fallback analítico en caso contrario);
+        - manual_measured: medición puntual ingresada por el usuario;
+        - manual_scenario: escenario hipotético ingresado manualmente;
+        - observed_series: serie meteorológica CSV importada.
+
+        Los componentes faltantes DNI/DHI pueden derivarse, pero esa derivación
+        queda registrada en ``quality``/``derived_components``.
+        """
+        instante = self._construir_instante(fecha, hora)
+        tz = self._timezone_actual()
+        try:
+            self.solar_engine.set_timezone(tz)
+        except Exception:
+            self.solar_engine.set_timezone("America/Argentina/Buenos_Aires")
+        self.solar_engine.set_use_pvlib(bool(self.use_pvlib_engine.get()))
+
+        mode = self.radiation_source_mode.get() if hasattr(self, "radiation_source_mode") else "clear_sky"
+        if manual_ghi is None:
+            manual_ghi = self._optional_float_text(getattr(self, "manual_ghi", ""))
+        manual_dni = self._optional_float_text(getattr(self, "manual_dni", ""))
+        manual_dhi = self._optional_float_text(getattr(self, "manual_dhi", ""))
+        max_gap = float(self.settings.get("meteorology_max_gap_minutes", 90.0))
+        data = self.meteorology_service.resolve(
+            mode=mode,
+            solar_engine=self.solar_engine,
+            lat=float(latitude), lon=float(longitude), dt=instante,
+            manual_ghi=manual_ghi,
+            manual_dni=manual_dni,
+            manual_dhi=manual_dhi,
+            max_gap_minutes=max_gap,
+        )
+        self.last_meteorology_data = data
+        return data
+
+    def cargar_serie_meteorologica(self):
+        """Importa una serie CSV y, si hay proyecto, guarda una copia dentro.
+
+        La copia en ``meteorologia/`` hace que el proyecto .3es sea reproducible
+        y no dependa de una ruta externa que pueda desaparecer.
+        """
+        file_path = filedialog.askopenfilename(
+            title="Importar serie meteorológica",
+            filetypes=[("CSV", "*.csv"), ("Todos los archivos", "*.*")],
+        )
+        if not file_path:
+            return None
+        try:
+            tz = self._timezone_actual()
+            target = file_path
+            project = getattr(self.project_manager, "current_project", None)
+            if project is not None:
+                folder = os.path.join(project.root_path, "meteorologia")
+                os.makedirs(folder, exist_ok=True)
+                target = os.path.join(folder, os.path.basename(file_path))
+                if os.path.abspath(file_path) != os.path.abspath(target):
+                    shutil.copy2(file_path, target)
+            summary = self.meteorology_service.load_series(target, timezone=tz)
+            self.meteorology_series_path = target
+            self.radiation_source_mode.set("observed_series")
+            self.mark_dirty()
+            if hasattr(self, "meteorology_status_label") and self.meteorology_status_label.winfo_exists():
+                self._refresh_meteorology_status()
+            cols = ", ".join(summary["columns"])
+            messagebox.showinfo(
+                "Serie meteorológica",
+                f"Serie cargada correctamente.\n"
+                f"Registros: {summary['n']}\n"
+                f"Cobertura: {summary['start']} a {summary['end']}\n"
+                f"Variables: {cols}",
+            )
+            return target
+        except Exception as exc:
+            messagebox.showerror("Serie meteorológica", f"No se pudo cargar la serie:\n{exc}")
+            return None
+
+    def _refresh_meteorology_status(self):
+        mode = self.radiation_source_mode.get()
+        text = SOURCE_LABELS.get(mode, mode)
+        if mode == "clear_sky":
+            engine = "pvlib/Ineichen" if bool(self.use_pvlib_engine.get()) and self.solar_engine.pvlib_available else "fallback analítico"
+            text += f" · {engine}"
+        elif mode == "observed_series":
+            series = self.meteorology_service.series
+            if series is None:
+                text += " · sin serie cargada"
+            else:
+                text += f" · {os.path.basename(series.path or 'serie')} · n={series.n}"
+        met = getattr(self, "last_meteorology_data", None) or {}
+        if met and met.get("source_mode") == mode:
+            text += f" · calidad: {met.get('quality', 'N/D')}"
+        for name in ("meteorology_status_label", "model_meteorology_status_label"):
+            label = getattr(self, name, None)
+            if label is not None and label.winfo_exists():
+                label.config(text=text)
+
+    def _obtener_radiacion_pvlib(self, latitude, longitude, fecha, hora):
+        """Compatibilidad: devuelve datos solo si cielo despejado usa pvlib."""
+        if not bool(self.use_pvlib_engine.get()) or self.radiation_source_mode.get() != "clear_sky":
+            return None
+        try:
+            datos = self._obtener_datos_solares(latitude, longitude, fecha, hora)
+            return datos if datos.get("source_detail") == "pvlib" else None
+        except Exception:
+            return None
+
     def calculate_temperature_in_shade(self):
         if not self.require_project("calcular temperatura en sombra"):
             return
@@ -2624,24 +3299,102 @@ class SombraApp:
             fecha_str = self.entry_date.get().replace('\ufeff', '').strip()
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
             
-            self.temp_calculator = Temperatura(latitude, longitude, k_factor=self.k_factor)
-            self.solar_engine.use_pvlib = bool(self.use_pvlib_engine.get())
-            _ = self.solar_engine.get_solar_position(latitude, longitude, datetime.combine(fecha, datetime.min.time()))
+            tz_offset = self._offset_timezone(fecha, hora)
+            self.temp_calculator = Temperatura(
+                latitude, longitude, k_factor=self.k_factor, tz_offset_hours=tz_offset,
+                model_mode=self.tmrt_model_mode.get(),
+            )
+            solar_data = self._obtener_datos_solares(latitude, longitude, fecha, hora)
+            # Si la fuente es una serie observada, Ta disponible en esa serie
+            # pasa a ser la temperatura de aire del cálculo. Si no existe, se
+            # conserva el valor ingresado por el usuario y queda trazado como
+            # fallback de entrada.
+            if solar_data.get("source_mode") == "observed_series" and solar_data.get("ta_c") is not None:
+                temp_ambient = float(solar_data["ta_c"])
+            transmittance_override = None
+            full_shadow_transmittance = None
+            if not manual_text and self.shadow_photo_analysis is not None:
+                transmittance_override = self.shadow_photo_analysis.get("effective_transmittance")
+                full_shadow_transmittance = self.shadow_photo_analysis.get("shadow_transmittance")
+
             result = self.temp_calculator.calculate_tmrt(
                 temp_ambient,
                 porcentaje_sombra,
                 shadow_type="tree",
                 date_value=fecha,
                 time_value=hora,
-            )            
+                radiation_override=solar_data["ghi"],
+                solar_altitude_override=solar_data["elevation"],
+                dni_override=solar_data.get("dni"),
+                dhi_override=solar_data.get("dhi"),
+                full_shadow_transmittance=full_shadow_transmittance,
+                transmittance_override=transmittance_override,
+            )
+            result["Fuente_solar"] = solar_data.get("source_label", solar_data.get("source", "fallback"))
+            result["Fuente_solar_codigo"] = solar_data.get("source_mode", "clear_sky")
+            result["Calidad_meteorologica"] = solar_data.get("quality")
+            result["Componentes_derivados"] = list(solar_data.get("derived_components", []))
+            result["Advertencias_meteorologicas"] = list(solar_data.get("warnings", []))
+            try:
+                uncertainty = estimate_tmrt_uncertainty(
+                    air_temp_c=temp_ambient,
+                    tau=float(result.get("Transmitancia_tau", 1.0)),
+                    ghi=float(solar_data["ghi"]),
+                    dni=solar_data.get("dni"), dhi=solar_data.get("dhi"),
+                    solar_elevation_deg=float(solar_data["elevation"]),
+                    model_mode=self.tmrt_model_mode.get(),
+                    k_factor=self.k_factor,
+                    source_quality=solar_data.get("quality"),
+                    advanced_config=getattr(self.temp_calculator, "advanced_config", None),
+                )
+                result["Incertidumbre_operativa"] = uncertainty
+            except Exception as exc:
+                result["Incertidumbre_operativa"] = None
+                result.setdefault("Advertencias_meteorologicas", []).append(
+                    f"No se pudo estimar incertidumbre operativa: {exc}"
+                )
             self.tmrt_result = result
             if hasattr(self, "lbl_porcentaje_sombra"):
-                self.lbl_porcentaje_sombra.config(text=f"Porcentaje de sombra: {porcentaje_sombra:.2f}%")
+                if manual_text:
+                    etiqueta_sombra = f"Cobertura de sombra manual: {porcentaje_sombra:.2f}%"
+                else:
+                    etiqueta_sombra = f"Cobertura de sombra fotográfica: {porcentaje_sombra:.2f}%"
+                self.lbl_porcentaje_sombra.config(text=etiqueta_sombra)
+                if manual_text:
+                    tau_full = self.temp_calculator._tau_sombra_total("tree")
+                    tau_eff = self.temp_calculator.shadow_transmittance(porcentaje_sombra, "tree")
+                    if hasattr(self, "lbl_atenuacion_sombra"):
+                        self.lbl_atenuacion_sombra.config(
+                            text=f"Atenuación sombra asumida: {(1-tau_full)*100:.2f}%"
+                        )
+                    if hasattr(self, "lbl_transmitancia_sombra"):
+                        self.lbl_transmitancia_sombra.config(
+                            text=f"Transmitancia efectiva: {tau_eff*100:.2f}%"
+                        )
+                elif self.shadow_photo_analysis is not None:
+                    if hasattr(self, "lbl_atenuacion_sombra"):
+                        self.lbl_atenuacion_sombra.config(
+                            text=f"Atenuación en sombra: {self.shadow_photo_analysis['attenuation_pct']:.2f}%"
+                        )
+                    if hasattr(self, "lbl_transmitancia_sombra"):
+                        self.lbl_transmitancia_sombra.config(
+                            text=f"Transmitancia efectiva: {self.shadow_photo_analysis['effective_transmittance']*100:.2f}%"
+                        )
             
             
             self.lbl_tmrt_sol.config(text=f"Tmrt al sol: {result['Tmrt_sol']:.2f} °C")
             self.lbl_tmrt_sombra.config(text=f"Tmrt en sombra: {result['Tmrt_sombra']:.2f} °C")
             self.lbl_delta_tmrt.config(text=f"ΔTmrt (impacto sombra): {result['Delta_Tmrt']:.2f} °C")
+            unc = result.get("Incertidumbre_operativa") or {}
+            us = unc.get("tmrt_shade") or {}
+            if hasattr(self, "lbl_tmrt_uncertainty"):
+                if np.isfinite(us.get("p05", np.nan)) and np.isfinite(us.get("p95", np.nan)):
+                    self.lbl_tmrt_uncertainty.config(
+                        text=(f"Tmrt sombra · intervalo operativo P05–P95: "
+                              f"{us['p05']:.1f}–{us['p95']:.1f} °C · no es IC instrumental")
+                    )
+                else:
+                    self.lbl_tmrt_uncertainty.config(text="Incertidumbre operativa Tmrt sombra: N/D")
             # Limpiar el frame anterior si existe (evita sobreposición de gráficos)
             for widget in self.graph_frame.winfo_children():
                 widget.destroy()
@@ -2667,24 +3420,46 @@ class SombraApp:
             return
         # Verificamos que ambas áreas hayan sido seleccionadas
         if self.shape_selector.area_seleccionada is not None and self.shape_selector.area_referencia is not None:
-            # Cálculo del porcentaje de sombra
-            porcentaje_sombra = self.image_processor.calcular_porcentaje_sombra(
+            # v11: se separan explícitamente cobertura geométrica e
+            # intensidad/atenuación de sombra. El porcentaje que alimenta
+            # el modelo como S es COBERTURA; la transmitancia de las zonas
+            # clasificadas sombra se estima por separado contra la referencia.
+            analisis = self.image_processor.analizar_sombra_fotografica(
                 self.shape_selector.area_seleccionada,
-                self.shape_selector.area_referencia
+                self.shape_selector.area_referencia,
+                mascara_area=self.shape_selector.area_seleccionada_mask,
+                mascara_referencia=self.shape_selector.area_referencia_mask,
             )
-            self.porcentaje_sombra = porcentaje_sombra
-            self.lbl_porcentaje_sombra.config(text=f"Porcentaje de sombra: {porcentaje_sombra:.2f}%")
+            self.shadow_photo_analysis = analisis
+            self.cobertura_sombra = analisis["coverage_pct"]
+            self.atenuacion_sombra = analisis["attenuation_pct"]
+            # Compatibilidad con módulos/proyectos anteriores: porcentaje_sombra
+            # pasa a significar cobertura cuando el origen es fotográfico v2.
+            self.porcentaje_sombra = self.cobertura_sombra
+            self.lbl_porcentaje_sombra.config(
+                text=f"Cobertura de sombra: {self.cobertura_sombra:.2f}%"
+            )
+            self.lbl_atenuacion_sombra.config(
+                text=f"Atenuación en sombra: {self.atenuacion_sombra:.2f}%"
+            )
+            self.lbl_transmitancia_sombra.config(
+                text=f"Transmitancia efectiva: {analisis['effective_transmittance']*100:.2f}%"
+            )
             if self.shadow_detector_enabled.get() and self.img_rgb is not None:
                 detected = self.shadow_detector.detect_shadow_mask(self.img_rgb, method="adaptive")
-                roi = np.zeros_like(detected, dtype=bool)
-                if self.shape_selector.area_seleccionada is not None:
-                    h, w = self.shape_selector.area_seleccionada.shape[:2]
-                    roi[:h, :w] = True
-                quality_meta = self.shadow_detector.compute_shadow_quality(detected, roi_mask=roi)
+                roi = self.shape_selector.mask_calculo_full
+                if roi is None or np.asarray(roi).shape != detected.shape:
+                    roi = np.ones_like(detected, dtype=bool)
+                quality_meta = self.shadow_detector.compute_shadow_quality(
+                    detected, roi_mask=np.asarray(roi, dtype=bool)
+                )
                 self.shadow_quality = quality_meta.get("shadow_quality")
                 
             # Habilitar el botón para curvas de nivel
             self.curve_button.config(state=tk.NORMAL)
+            if hasattr(self, "shadow_mask_button"):
+                self.shadow_mask_button.config(state=tk.NORMAL)
+            self._guardar_mascara_clasificacion_sombra()
             if not self.current_image_path or not os.path.exists(self.current_image_path):
                 print(f"[confirmar] Ruta de imagen inexistente: {self.current_image_path}")
                 messagebox.showerror("Error", "La imagen del proyecto no existe. Cargá la imagen nuevamente.")
@@ -2699,6 +3474,108 @@ class SombraApp:
             self.area_ref_button.config(state=tk.DISABLED)
         else:
             print("Error: No se ha seleccionado un área válida.")
+
+    def _guardar_mascara_clasificacion_sombra(self):
+        """Guarda una máscara reproducible sombra/sol para auditoría v11."""
+        analisis = self.shadow_photo_analysis
+        project = self.project_manager.current_project
+        if not analisis or project is None:
+            return None
+        mask = np.asarray(analisis.get("shadow_mask"), dtype=float)
+        if mask.size == 0:
+            return None
+        valid = np.isfinite(mask)
+        if not np.any(valid):
+            return None
+
+        out_dir = os.path.join(project.root_path, "resultados", "mascaras_sombra")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = safe_path(out_dir, f"{self.current_image_stem}_sombra_sol.png")
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        display = np.ma.masked_invalid(mask)
+        im = ax.imshow(display, cmap="gray_r", vmin=0, vmax=1, interpolation="nearest")
+        ax.set_title(
+            "Clasificación fotográfica sombra / sol\n"
+            f"Cobertura {analisis['coverage_pct']:.1f}% · "
+            f"Atenuación sombra {analisis['attenuation_pct']:.1f}% · "
+            f"umbral I/Iref={analisis['threshold_ratio']:.3f}",
+            fontsize=9,
+        )
+        ax.set_xlabel("Posición X (px)")
+        ax.set_ylabel("Posición Y (px)")
+        cbar = fig.colorbar(im, ax=ax, ticks=[0, 1], fraction=0.046, pad=0.04)
+        cbar.ax.set_yticklabels(["Sol", "Sombra"])
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        self.last_shadow_classification_path = str(out_path)
+        return str(out_path)
+
+    def mostrar_mascara_sombra(self):
+        """Muestra la clasificación sombra/sol y la atenuación óptica local."""
+        analisis = self.shadow_photo_analysis
+        if not analisis:
+            messagebox.showinfo(
+                "Sombra fotográfica",
+                "Primero confirme un área de cálculo y un área de referencia.",
+            )
+            return
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Cobertura e intensidad de sombra")
+        dlg.geometry("920x520")
+        dlg.configure(bg=self.palette["background"])
+
+        fig, axes = plt.subplots(1, 2, figsize=(9, 4.5))
+        mask = np.asarray(analisis["shadow_mask"], dtype=float)
+        att = np.asarray(analisis["local_attenuation_map"], dtype=float)
+
+        m0 = np.ma.masked_invalid(mask)
+        im0 = axes[0].imshow(m0, cmap="gray_r", vmin=0, vmax=1, interpolation="nearest")
+        axes[0].set_title(f"Cobertura de sombra: {analisis['coverage_pct']:.1f}%")
+        axes[0].set_xlabel("X")
+        axes[0].set_ylabel("Y")
+        cb0 = fig.colorbar(im0, ax=axes[0], ticks=[0, 1], fraction=0.046, pad=0.04)
+        cb0.ax.set_yticklabels(["Sol", "Sombra"])
+
+        m1 = np.ma.masked_invalid(att)
+        im1 = axes[1].imshow(m1, cmap="viridis", vmin=0, vmax=100, interpolation="nearest")
+        axes[1].set_title(f"Atenuación en sombra: {analisis['attenuation_pct']:.1f}%")
+        axes[1].set_xlabel("X")
+        axes[1].set_ylabel("Y")
+        cb1 = fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        cb1.set_label("Atenuación óptica relativa (%)")
+
+        fig.suptitle(
+            f"Método {analisis['algorithm']} · umbral I/Iref={analisis['threshold_ratio']:.3f} · "
+            f"transmitancia efectiva={analisis['effective_transmittance']:.3f}",
+            fontsize=9,
+        )
+        fig.tight_layout(rect=(0, 0, 1, 0.94))
+        canvas = FigureCanvasTkAgg(fig, master=dlg)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=8, pady=8)
+
+        note = tk.Label(
+            dlg,
+            text=(
+                "Cobertura = fracción de píxeles clasificados como sombra.  "
+                "Atenuación = reducción fotométrica relativa respecto del área de referencia; "
+                "no sustituye una medición radiométrica de irradiancia."
+            ),
+            bg=self.palette["background"],
+            justify="left",
+            wraplength=880,
+            font=("Arial", 8),
+        )
+        note.pack(fill="x", padx=10, pady=(0, 8))
+
+        def _close():
+            plt.close(fig)
+            dlg.destroy()
+        dlg.protocol("WM_DELETE_WINDOW", _close)
+
     def exportar_a_excel(self):
         if not self.require_project("exportar a Excel"):
             return
@@ -2774,135 +3651,434 @@ class SombraApp:
         return ui_panels._apply_location(self, show_message)
 
     def mostrar_curvas_nivel(self):
+        """Genera un mapa interactivo de Tmrt local.
+
+        La escala de color usa exactamente el mínimo y máximo de Tmrt
+        finitos del mapa. Por lo tanto, el rango mostrado en la colorbar
+        coincide con el rango de valores que se pueden leer al mover el
+        mouse sobre la figura.
+        """
         if not self.require_project("generar curvas de nivel"):
             return
-        if self.shape_selector.area_seleccionada is not None:
+        if self.shape_selector.area_seleccionada is None:
+            return
 
-            # Rotar la matriz 90 grados en sentido horario
-            area_volteada = np.flipud(self.shape_selector.area_seleccionada)
+        # El mapa se voltea para conservar la orientación visual que ya
+        # utiliza la aplicación en la curva de nivel.
+        temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
+        analisis_foto = self.image_processor.analizar_sombra_fotografica(
+            self.shape_selector.area_seleccionada,
+            self.shape_selector.area_referencia,
+            mascara_area=self.shape_selector.area_seleccionada_mask,
+            mascara_referencia=self.shape_selector.area_referencia_mask,
+        )
+        self.shadow_photo_analysis = analisis_foto
+        self.cobertura_sombra = analisis_foto["coverage_pct"]
+        self.atenuacion_sombra = analisis_foto["attenuation_pct"]
+        self.porcentaje_sombra = self.cobertura_sombra
 
-            # CAMBIO PRINCIPAL: antes se graficaba directamente el nivel
-            # de gris de la foto (0-255), que no tiene unidad física ni
-            # es comparable entre dos fotos con distinta exposición o
-            # condiciones de luz. Ahora se calcula el % de sombra LOCAL
-            # de cada píxel (misma normalización que calcular_porcentaje_
-            # sombra, pero sin promediar) y se lo alimenta al modelo de
-            # Tmrt ya usado en "Calcular temperatura en sombra" — el
-            # contorno pasa a mostrar TEMPERATURA EN SOMBRA calculada en
-            # °C, punto por punto, según ubicación/fecha/hora y el propio
-            # % de sombra de cada zona de la imagen.
-            temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
-            mapa_sombra = self.image_processor.calcular_mapa_sombra(
-                self.shape_selector.area_seleccionada,
-                self.shape_selector.area_referencia,
+        # Mapa binario de cobertura (0=sol, 100=sombra) separado de la
+        # transmitancia óptica local. Así la Tmrt espacial usa la intensidad
+        # medida dentro de la sombra sin confundirla con área sombreada.
+        shadow_mask = np.asarray(analisis_foto["shadow_mask"], dtype=float)
+        mapa_sombra = shadow_mask * 100.0
+        mapa_sombra_volteado = np.flipud(mapa_sombra)
+        tau_photo_map = np.flipud(
+            np.asarray(analisis_foto["local_transmittance_map"], dtype=float)
+        )
+        attenuation_photo_map = np.flipud(
+            np.asarray(analisis_foto["local_attenuation_map"], dtype=float)
+        )
+
+        tz_offset = self._offset_timezone(fecha, hora)
+        calculador = Temperatura(
+            lat, lon, k_factor=self.k_factor, tz_offset_hours=tz_offset,
+            model_mode=self.tmrt_model_mode.get(),
+        )
+        solar_data = self._obtener_datos_solares(lat, lon, fecha, hora)
+        if solar_data.get("source_mode") == "observed_series" and solar_data.get("ta_c") is not None:
+            temp_ambient = float(solar_data["ta_c"])
+        resultado_mapa = calculador.calculate_tmrt_map(
+            temp_ambient,
+            mapa_sombra_volteado,
+            shadow_type="tree",
+            date_value=fecha,
+            time_value=hora,
+            radiation_override=solar_data["ghi"],
+            solar_altitude_override=solar_data["elevation"],
+            dni_override=solar_data.get("dni"),
+            dhi_override=solar_data.get("dhi"),
+            transmittance_map_override=tau_photo_map,
+        )
+        resultado_mapa["Fuente_solar"] = solar_data.get("source_label", solar_data.get("source", "fallback"))
+        resultado_mapa["Fuente_solar_codigo"] = solar_data.get("source_mode", "clear_sky")
+        resultado_mapa["Calidad_meteorologica"] = solar_data.get("quality")
+        resultado_mapa["Componentes_derivados"] = list(solar_data.get("derived_components", []))
+        mapa_temperatura = np.asarray(resultado_mapa["Tmrt_map"], dtype=float)
+
+        # Variables locales que se mostrarán en el hover. Se derivan del
+        # MISMO modelo que genera el mapa para evitar discrepancias entre
+        # tooltip, colorbar y curva.
+        tau_map = np.asarray(tau_photo_map, dtype=float)
+        radiacion_global = max(0.0, float(resultado_mapa["Radiacion_Wm2"]))
+        radiacion_efectiva = radiacion_global * tau_map
+        # Temperatura del aire local estimada bajo sombra. No se deriva de
+        # Tmrt: usa la radiación evitada respecto a pleno sol y un modelo
+        # empírico acotado (ver shadow_temp.Temperatura).
+        aire_local_estimado = calculador.estimate_local_air_temperature_map(
+            temp_ambient,
+            mapa_sombra_volteado,
+            radiacion_global,
+            shadow_type="tree",
+            cooling_coefficient=float(
+                self.settings.get("local_air_tree_coefficient", 0.0025)
+            ),
+            max_cooling=float(
+                self.settings.get("local_air_tree_max_cooling", 2.5)
+            ),
+            transmittance_map_override=tau_photo_map,
+        )
+        tmrt_sol_result = calculador.calculate_tmrt(
+            temp_ambient, 0.0, shadow_type="tree", date_value=fecha, time_value=hora,
+            radiation_override=solar_data["ghi"],
+            solar_altitude_override=solar_data["elevation"],
+            dni_override=solar_data.get("dni"),
+            dhi_override=solar_data.get("dhi"),
+        )
+        tmrt_sol = float(tmrt_sol_result["Tmrt_sol"])
+        delta_tmrt_map = tmrt_sol - mapa_temperatura
+
+        finite = mapa_temperatura[np.isfinite(mapa_temperatura)]
+        if finite.size == 0:
+            messagebox.showerror("Error", "El mapa Tmrt no contiene valores válidos.")
+            return
+        tmrt_min = float(np.min(finite))
+        tmrt_max = float(np.max(finite))
+
+        from plot_style import (
+            CMAP_CURVAS_NIVEL, CMAP_HISTOGRAMA,
+            agregar_colorbar_temperatura, anotar_estadisticas,
+            anotar_metadatos,
+        )
+
+        # Volvemos al FigureCanvasTkAgg real para que Matplotlib reciba
+        # motion_notify_event. La versión anterior convertía la figura en
+        # PNG y la mostraba dentro de un Label de Tk, lo que hacía
+        # imposible consultar el dato bajo el mouse de forma fiable.
+        if self.curva_label is not None:
+            self.curva_label.destroy()
+            self.curva_label = None
+            self.curva_photo = None
+
+        self.fig2.clf()
+        ax = self.fig2.add_subplot(111)
+        self.ax2 = ax
+
+        # Para mapas no constantes, los niveles empiezan y terminan en los
+        # extremos reales del mapa. En un mapa uniforme se crea una banda
+        # numéricamente mínima, pero la colorbar muestra un único valor.
+        span = tmrt_max - tmrt_min
+        if span > 1e-9:
+            niveles = np.linspace(tmrt_min, tmrt_max, 21)
+            relleno = ax.contourf(
+                mapa_temperatura,
+                levels=niveles,
+                cmap=CMAP_CURVAS_NIVEL,
+                vmin=tmrt_min,
+                vmax=tmrt_max,
+                antialiased=True,
             )
-            mapa_sombra_volteado = np.flipud(mapa_sombra)
-            calculador = Temperatura(lat, lon, k_factor=self.k_factor)
-            resultado_mapa = calculador.calculate_tmrt_map(
-                temp_ambient, mapa_sombra_volteado,
-                shadow_type="tree", date_value=fecha, time_value=hora,
+            ax.contour(
+                mapa_temperatura,
+                levels=niveles[::2],
+                colors="0.35",
+                linewidths=0.45,
+                alpha=0.55,
             )
-            mapa_temperatura = resultado_mapa["Tmrt_map"]
+            ticks = np.linspace(tmrt_min, tmrt_max, 6)
+        else:
+            eps = max(0.01, abs(tmrt_min) * 1e-6)
+            niveles = np.array([tmrt_min - eps, tmrt_min + eps])
+            relleno = ax.contourf(
+                mapa_temperatura,
+                levels=niveles,
+                cmap=CMAP_CURVAS_NIVEL,
+                vmin=tmrt_min - eps,
+                vmax=tmrt_min + eps,
+            )
+            ticks = np.array([tmrt_min])
 
-            # Crear las curvas de nivel en una figura local
-            #
-            # CAMBIOS: antes esta figura no tenía colorbar, ni ejes con
-            # unidades, ni título con metadatos — se veían "formas" pero
-            # no había forma de leer un valor concreto ni de saber cuándo
-            # ni de qué imagen salió. Y usaba "jet" (mala práctica para
-            # datos científicos: no es perceptualmente uniforme). Ver
-            # plot_style.py para el detalle de cada elección.
-            from plot_style import (
-                CMAP_CURVAS_NIVEL, CMAP_HISTOGRAMA,
-                agregar_colorbar_temperatura, anotar_estadisticas,
-                anotar_metadatos,
+        ax.set_xlabel("Posición X (px)")
+        ax.set_ylabel("Posición Y (px)")
+        ax.set_title(
+            "Tmrt estimada según distribución local de sombra\n"
+            f"T aire {temp_ambient:.1f} °C · rad. {radiacion_global:.0f} W/m² · "
+            f"alt. solar {resultado_mapa['Solar_altitude']:.1f}° · "
+            f"fuente {resultado_mapa.get('Fuente_solar', 'fallback')} · "
+            f"{resultado_mapa.get('Modelo_Tmrt_label', 'Modelo Tmrt')}",
+            fontsize=9,
+        )
+        cbar = agregar_colorbar_temperatura(
+            self.fig2, ax, relleno, unidad="°C", etiqueta="Tmrt", ticks=ticks
+        )
+        if span <= 1e-9:
+            cbar.ax.set_title(f"uniforme\n{tmrt_min:.2f} °C", fontsize=7)
+
+        # Indicación explícita del rango que puede aparecer en el hover.
+        ax.text(
+            0.01, 0.01,
+            f"Rango consultable con mouse: {tmrt_min:.2f}–{tmrt_max:.2f} °C",
+            transform=ax.transAxes,
+            fontsize=7.5,
+            va="bottom",
+            ha="left",
+            bbox=dict(boxstyle="round", fc="white", ec="0.75", alpha=0.82),
+        )
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        self.fig2.tight_layout(pad=0.8)
+        anotar_metadatos(
+            self.fig2,
+            f"Mover mouse: valores locales · clic izq.: fijar · clic der.: liberar  ·  "
+            f"Generado: {timestamp}",
+        )
+
+        # Guardamos exactamente las matrices que corresponden a la figura
+        # activa. El hover consulta estas matrices, no vuelve a estimar el
+        # valor a partir del color del gráfico.
+        self.tmrt_map = mapa_temperatura
+        self.tmrt_hover_data = {
+            "tmrt": mapa_temperatura,
+            "air_temp": float(temp_ambient),
+            "local_air_est": np.asarray(aire_local_estimado, dtype=float),
+            "shadow": np.asarray(mapa_sombra_volteado, dtype=float),
+            "attenuation": np.asarray(attenuation_photo_map, dtype=float),
+            "transmittance": np.asarray(tau_photo_map, dtype=float),
+            "shadow_coverage_pct": float(analisis_foto["coverage_pct"]),
+            "shadow_attenuation_pct": float(analisis_foto["attenuation_pct"]),
+            "effective_radiation": np.asarray(radiacion_efectiva, dtype=float),
+            "delta_tmrt": np.asarray(delta_tmrt_map, dtype=float),
+            "tmrt_sun": float(tmrt_sol),
+            "global_radiation": float(radiacion_global),
+            "tmrt_min": tmrt_min,
+            "tmrt_max": tmrt_max,
+        }
+        self.curvas_nivel_creadas = True
+        self._curve_pinned_pixel = None
+
+        canvas_widget = self.canvas2.get_tk_widget()
+        if not canvas_widget.winfo_ismapped():
+            canvas_widget.pack(fill="both", expand=True)
+        self._setup_hover_tmrt_map(ax, self.canvas2)
+        self.canvas2.draw_idle()
+
+        # Se conserva además una imagen estática para historial, PDF y
+        # restauración de proyectos. La interacción corresponde al canvas
+        # vivo mientras la curva está abierta/generada.
+        buf = BytesIO()
+        self.fig2.savefig(buf, format="png", dpi=150, bbox_inches="tight", pad_inches=0.1)
+        buf.seek(0)
+        self.curva_img_pil_original = Image.open(buf).copy()
+        buf.close()
+
+        project_root = self.project_manager.current_project.root_path
+        hist_dir = os.path.join(project_root, "resultados", "histogramas")
+        curve_dir = os.path.join(project_root, "resultados", "curvas_nivel")
+        excel_dir = os.path.join(project_root, "resultados", "excels")
+        os.makedirs(hist_dir, exist_ok=True)
+        os.makedirs(curve_dir, exist_ok=True)
+        os.makedirs(excel_dir, exist_ok=True)
+
+        curve_path = safe_path(curve_dir, f"{self.current_image_stem}_curva.png")
+        self.curva_img_pil_original.save(curve_path)
+        self.last_curve_path = str(curve_path)
+
+        hist_path = safe_path(hist_dir, f"{self.current_image_stem}_histo.png")
+        hist_fig, hist_ax = plt.subplots()
+        area_hist = np.asarray(self.shape_selector.area_seleccionada)
+        mask_hist = self.shape_selector.area_seleccionada_mask
+        if mask_hist is not None and np.asarray(mask_hist).shape == area_hist.shape:
+            values = area_hist[np.asarray(mask_hist, dtype=bool)]
+        else:
+            values = area_hist[np.isfinite(area_hist)]
+        counts, bins, patches = hist_ax.hist(values, bins=50, alpha=0.95)
+        cmap = plt.get_cmap(CMAP_HISTOGRAMA)
+        max_count = max(counts) if len(counts) else 1
+        for c, patch in zip(counts, patches):
+            patch.set_facecolor(cmap(c / max_count if max_count else 0))
+        hist_ax.set_xlabel("Nivel de gris")
+        hist_ax.set_ylabel("Frecuencia (cantidad de píxeles)")
+        hist_ax.set_title(f"Histograma — {self.current_image_stem}")
+        anotar_estadisticas(hist_ax, values)
+        hist_fig.tight_layout()
+        anotar_metadatos(hist_fig, f"Generado: {timestamp}")
+        hist_fig.savefig(hist_path, dpi=150)
+        plt.close(hist_fig)
+
+        self.last_histogram_path = str(hist_path)
+        self._registrar_histograma_en_carrusel()
+
+        excel_path = safe_path(excel_dir, f"{self.current_image_stem}.xlsx")
+        pd.DataFrame(self.shape_selector.area_seleccionada).to_excel(excel_path, index=False)
+        self.last_matrix_path = str(excel_path)
+        self.mark_dirty()
+
+    def _setup_hover_tmrt_map(self, ax, canvas):
+        """Activa lectura local del mapa Tmrt bajo el mouse.
+
+        El cuadro muestra únicamente las variables locales útiles:
+        Tmrt, temperatura del aire local estimada, clasificación sombra/sol,
+        atenuación óptica local y radiación efectiva. La anotación cambia de
+        cuadrante según la posición del cursor para mantenerse dentro del
+        área de datos y no invadir los ejes.
+
+        Clic izquierdo fija el punto; clic derecho lo libera.
+        """
+        if self._curve_hover_canvas is not None:
+            if self._curve_hover_cid is not None:
+                try:
+                    self._curve_hover_canvas.mpl_disconnect(self._curve_hover_cid)
+                except Exception:
+                    pass
+            if self._curve_click_cid is not None:
+                try:
+                    self._curve_hover_canvas.mpl_disconnect(self._curve_click_cid)
+                except Exception:
+                    pass
+
+        self._curve_hover_canvas = canvas
+        self._curve_pinned_pixel = None
+
+        annotation = ax.annotate(
+            "",
+            xy=(0, 0),
+            xytext=(0.02, 0.98),
+            textcoords="axes fraction",
+            fontsize=8,
+            ha="left",
+            va="bottom",
+            bbox=dict(boxstyle="round", fc="white", ec="0.35", alpha=0.94),
+            arrowprops=dict(arrowstyle="->", color="0.35", lw=0.7),
+            zorder=25,
+        )
+        annotation.set_visible(False)
+        self._curve_hover_annotation = annotation
+
+        marker, = ax.plot(
+            [], [],
+            marker="o", markersize=4.5,
+            markerfacecolor="white", markeredgecolor="black",
+            linestyle="none", zorder=20,
+        )
+        marker.set_visible(False)
+
+        def _valor_texto(x, y):
+            data = self.tmrt_hover_data
+            if not data:
+                return None
+            tmrt = data["tmrt"]
+            if not (0 <= y < tmrt.shape[0] and 0 <= x < tmrt.shape[1]):
+                return None
+            value = float(tmrt[y, x])
+            if not np.isfinite(value):
+                return None
+            sombra = float(data["shadow"][y, x])
+            atenuacion = float(data["attenuation"][y, x])
+            rad_eff = float(data["effective_radiation"][y, x])
+            aire_local = float(data["local_air_est"][y, x])
+            estado = "Sombra" if sombra >= 50.0 else "Sol"
+            return (
+                f"Tmrt local: {value:.2f} °C\n"
+                f"T aire local estimada: {aire_local:.2f} °C\n"
+                f"Clasificación: {estado}\n"
+                f"Atenuación local: {atenuacion:.1f} %\n"
+                f"Radiación efectiva: {rad_eff:.0f} W/m²"
             )
 
-            fig, ax = plt.subplots()
-            contorno = ax.contour(
-                mapa_temperatura, levels=20, cmap=CMAP_CURVAS_NIVEL,
-                linewidths=1.2, alpha=0.9,
-            )
-            ax.set_xlabel("Posición X (px)")
-            ax.set_ylabel("Posición Y (px)")
-            ax.set_title(
-                f"Temperatura en sombra calculada — {self.current_image_stem}\n"
-                f"(rad. {resultado_mapa['Radiacion_Wm2']:.0f} W/m², "
-                f"alt. solar {resultado_mapa['Solar_altitude']:.1f}°)",
-                fontsize=10,
-            )
-            agregar_colorbar_temperatura(fig, ax, contorno, unidad="°C")
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            fig.tight_layout(pad=0.6)
-            anotar_metadatos(fig, f"Generado: {timestamp}  ·  Fuente: {self.current_image_stem}")
+        def _posicionar_dentro_del_mapa(x, y):
+            """Mantiene el tooltip completamente dentro del área del mapa.
 
-            buf = BytesIO()
-            fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", pad_inches=0.1)
-            buf.seek(0)
-            plt.close(fig)
+            El texto usa coordenadas relativas a los ejes (0..1), no un
+            desplazamiento en píxeles. Se ubica en el cuadrante opuesto al
+            cursor; así la caja nunca invade ticks/etiquetas de los ejes y
+            además deja visible la zona que se está inspeccionando.
+            """
+            data = self.tmrt_hover_data or {}
+            tmrt = data.get("tmrt")
+            if tmrt is None:
+                return
+            h, w = tmrt.shape[:2]
 
-            img = Image.open(buf).copy()
-            buf.close()
-            self.curva_img_pil_original = img
-            resized_img = self._fit_image_to_frame(self.curva_img_pil_original, self.curva_frame)
-            photo = ImageTk.PhotoImage(resized_img)
-            if self.curva_label is None:
-                self.curva_label = tk.Label(self.curva_frame, image=photo, bg=self.curva_frame.cget("bg"))
-                self.curva_label.pack(expand=True, fill='both')
+            if x < (w - 1) / 2.0:
+                tx = 0.98
+                annotation.set_ha("right")
             else:
-                self.curva_label.configure(image=photo)
-            self.curva_photo = photo
-            self.curva_label.image = photo
-            if self.canvas2 is not None:
-                self.canvas2.get_tk_widget().pack_forget()
+                tx = 0.02
+                annotation.set_ha("left")
 
-            self.tmrt_map = area_volteada
-            self.curvas_nivel_creadas = True
+            if y < (h - 1) / 2.0:
+                ty = 0.98
+                annotation.set_va("top")
+            else:
+                ty = 0.02
+                annotation.set_va("bottom")
 
-            project_root = self.project_manager.current_project.root_path
-            # CAMBIO: "histograma" (singular) -> "histogramas" (plural),
-            # alineado con services/snapshot_service.py, que ya guardaba
-            # ahí — antes esta carpeta creada acá nunca era la que se
-            # usaba realmente.
-            hist_dir = os.path.join(project_root, "resultados", "histogramas")
-            curve_dir = os.path.join(project_root, "resultados", "curvas_nivel")
-            excel_dir = os.path.join(project_root, "resultados", "excels")
-            os.makedirs(hist_dir, exist_ok=True)
-            os.makedirs(curve_dir, exist_ok=True)
-            os.makedirs(excel_dir, exist_ok=True)
+            annotation.set_position((tx, ty))
 
-            curve_path = safe_path(curve_dir, f"{self.current_image_stem}_curva.png")
-            self.curva_img_pil_original.save(curve_path)
-            self.last_curve_path = str(curve_path)
+        def _mostrar(x, y):
+            text = _valor_texto(x, y)
+            if text is None:
+                annotation.set_visible(False)
+                marker.set_visible(False)
+                canvas.draw_idle()
+                return False
+            annotation.xy = (x, y)
+            _posicionar_dentro_del_mapa(x, y)
+            annotation.set_text(text)
+            annotation.set_visible(True)
+            marker.set_data([x], [y])
+            marker.set_visible(True)
+            canvas.draw_idle()
+            return True
 
-            hist_path = safe_path(hist_dir, f"{self.current_image_stem}_histo.png")
-            hist_fig, hist_ax = plt.subplots()
-            values = self.shape_selector.area_seleccionada.flatten()
-            counts, bins, patches = hist_ax.hist(values, bins=50, alpha=0.95)
-            cmap = plt.get_cmap(CMAP_HISTOGRAMA)
-            max_count = max(counts) if len(counts) else 1
-            for c, patch in zip(counts, patches):
-                patch.set_facecolor(cmap(c / max_count if max_count else 0))
-            hist_ax.set_xlabel("Nivel de gris")
-            hist_ax.set_ylabel("Frecuencia (cantidad de píxeles)")
-            hist_ax.set_title(f"Histograma — {self.current_image_stem}")
-            # CAMBIO: antes el histograma no tenía ningún resumen
-            # numérico (media, mediana, desvío, N) — solo la forma de
-            # la distribución, sin poder leer valores concretos.
-            anotar_estadisticas(hist_ax, values)
-            hist_fig.tight_layout()
-            anotar_metadatos(hist_fig, f"Generado: {timestamp}")
-            hist_fig.savefig(hist_path, dpi=150)
-            plt.close(hist_fig)
-            
-            self.last_histogram_path = str(hist_path)
-            self._registrar_histograma_en_carrusel()
+        def on_move(event):
+            # Si hay un punto fijado, mover el mouse no lo reemplaza.
+            if self._curve_pinned_pixel is not None:
+                _mostrar(*self._curve_pinned_pixel)
+                return
 
-            excel_path = safe_path(excel_dir, f"{self.current_image_stem}.xlsx")
-            pd.DataFrame(self.shape_selector.area_seleccionada).to_excel(excel_path, index=False)
-            self.last_matrix_path = str(excel_path)
-            self.mark_dirty()            
-            
+            if event.inaxes != ax or event.xdata is None or event.ydata is None:
+                if annotation.get_visible() or marker.get_visible():
+                    annotation.set_visible(False)
+                    marker.set_visible(False)
+                    canvas.draw_idle()
+                return
+            x = int(round(event.xdata))
+            y = int(round(event.ydata))
+            _mostrar(x, y)
+
+        def on_click(event):
+            if event.button == 3:
+                self._curve_pinned_pixel = None
+                if event.inaxes == ax and event.xdata is not None and event.ydata is not None:
+                    _mostrar(int(round(event.xdata)), int(round(event.ydata)))
+                else:
+                    annotation.set_visible(False)
+                    marker.set_visible(False)
+                    canvas.draw_idle()
+                return
+
+            if event.button != 1 or event.inaxes != ax or event.xdata is None or event.ydata is None:
+                return
+            x = int(round(event.xdata))
+            y = int(round(event.ydata))
+            if _valor_texto(x, y) is not None:
+                self._curve_pinned_pixel = (x, y)
+                _mostrar(x, y)
+
+        self._curve_hover_cid = canvas.mpl_connect("motion_notify_event", on_move)
+        self._curve_click_cid = canvas.mpl_connect("button_press_event", on_click)
+
     def _fit_image_to_frame(self, pil_img, frame, padding=8):
         if frame is None:
             return pil_img
@@ -2932,12 +4108,21 @@ class SombraApp:
             return        
         pdf_generator = PDFReportGenerator(self)
         pdf_generator.generate_report()    
-    def actualizar_dia(fecha_str, dia_var):
+    def actualizar_dia(self, fecha_str, dia_var):
         # Función para actualizar día del año desde fecha
         try:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
             dia_del_año = fecha.timetuple().tm_yday
             dia_var.set(dia_del_año)
+            # v14: conservar también la fecha calendario exacta para poder
+            # consultar series meteorológicas con año real.
+            for _vars in (getattr(self, "vars", {}), getattr(self, "vars_modelo", {})):
+                try:
+                    if _vars.get("dia") is dia_var:
+                        _vars["_date_iso"] = fecha.date().isoformat()
+                        _vars["_year"] = fecha.year
+                except Exception:
+                    pass
         except ValueError:
             messagebox.showerror("Error", "Formato de fecha inválido. Use AAAA-MM-DD")
     def render_grafico_en_frame(self, target_frame, grafico_fn, *args):
@@ -3027,7 +4212,7 @@ class SombraApp:
             else:
                 sombra = (ref_gray - gray) / ref_gray
                 sombra = max(0, min(sombra, 1)) * 100
-                text = f"% Sombra: {sombra:.2f}%"
+                text = f"Atenuación fotométrica local: {sombra:.2f}%"
 
             self._shadow_hover_annotation.xy = (event.xdata, event.ydata)
             self._shadow_hover_annotation.set_text(text)

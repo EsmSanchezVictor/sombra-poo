@@ -76,6 +76,78 @@ def setup_panel_1(app):
     )
     manual_hint.pack(fill="x", padx=10, pady=(0, 3))
 
+    # v14: la fuente radiativa es explícita y queda separada de la opción
+    # de motor solar. El default "clear_sky" reproduce el flujo histórico.
+    tk.Label(
+        panel, text="Fuente radiativa / meteorológica:",
+        bg=panel.cget("bg"), fg="black", font=("Arial", 8, "bold"), anchor="w",
+    ).pack(fill="x", padx=10, pady=(8, 2))
+    source_frame = tk.Frame(panel, bg=panel.cget("bg"))
+    source_frame.pack(fill="x", padx=10, pady=(0, 3))
+    for text, value in (
+        ("Cielo despejado modelado", "clear_sky"),
+        ("Medición puntual", "manual_measured"),
+        ("Escenario manual", "manual_scenario"),
+        ("Serie meteorológica CSV", "observed_series"),
+    ):
+        tk.Radiobutton(
+            source_frame, text=text, variable=app.radiation_source_mode, value=value,
+            bg=panel.cget("bg"), anchor="w", justify="left",
+            command=app._refresh_meteorology_status,
+        ).pack(fill="x", anchor="w")
+
+    pvlib_check = tk.Checkbutton(
+        panel, text="En cielo despejado: usar pvlib/Ineichen si está disponible",
+        variable=app.use_pvlib_engine, bg=panel.cget("bg"), fg="black",
+        anchor="w", justify="left", wraplength=210,
+        command=app._refresh_meteorology_status,
+    )
+    pvlib_check.pack(fill="x", padx=10, pady=(0, 4))
+
+    manual_frame = tk.Frame(panel, bg=panel.cget("bg"))
+    manual_frame.pack(fill="x", padx=10, pady=(0, 4))
+    tk.Label(manual_frame, text="GHI manual (W/m²)", bg=panel.cget("bg"), font=("Arial", 7)).grid(row=0, column=0, sticky="w")
+    tk.Entry(manual_frame, textvariable=app.manual_ghi, width=8).grid(row=0, column=1, sticky="ew", padx=(4, 0))
+    tk.Label(manual_frame, text="DNI opcional", bg=panel.cget("bg"), font=("Arial", 7)).grid(row=1, column=0, sticky="w")
+    tk.Entry(manual_frame, textvariable=app.manual_dni, width=8).grid(row=1, column=1, sticky="ew", padx=(4, 0))
+    tk.Label(manual_frame, text="DHI opcional", bg=panel.cget("bg"), font=("Arial", 7)).grid(row=2, column=0, sticky="w")
+    tk.Entry(manual_frame, textvariable=app.manual_dhi, width=8).grid(row=2, column=1, sticky="ew", padx=(4, 0))
+    manual_frame.grid_columnconfigure(1, weight=1)
+
+    tk.Button(
+        panel, text="Importar serie meteorológica CSV…",
+        command=app.cargar_serie_meteorologica,
+    ).pack(fill="x", padx=10, pady=(0, 3))
+    app.meteorology_status_label = tk.Label(
+        panel, bg=panel.cget("bg"), fg="#555555", font=("Arial", 7),
+        anchor="w", justify="left", wraplength=210,
+    )
+    app.meteorology_status_label.pack(fill="x", padx=10, pady=(0, 6))
+    app.radiation_source_mode.trace_add("write", lambda *_: app._refresh_meteorology_status())
+    app._refresh_meteorology_status()
+
+    tk.Label(
+        panel, text="Modelo Tmrt activo:", bg=panel.cget("bg"), fg="black",
+        font=("Arial", 8, "bold"), anchor="w",
+    ).pack(fill="x", padx=10, pady=(2, 0))
+    app.tmrt_model_status_label = tk.Label(
+        panel, bg=panel.cget("bg"), fg="#555555", font=("Arial", 8), anchor="w",
+        justify="left", wraplength=210,
+    )
+    app.tmrt_model_status_label.pack(fill="x", padx=10, pady=(0, 6))
+
+    def _refresh_tmrt_model_status(*_args):
+        if not app.tmrt_model_status_label.winfo_exists():
+            return
+        if app.tmrt_model_mode.get() == "advanced":
+            texto = "Avanzado · balance radiativo v1"
+        else:
+            texto = "Estándar · empírico calibrable (predeterminado)"
+        app.tmrt_model_status_label.config(text=texto)
+
+    app.tmrt_model_mode.trace_add("write", _refresh_tmrt_model_status)
+    _refresh_tmrt_model_status()
+
     app.calculate_temp_button = tk.Button(
         panel,
         text="Calcular temperatura en sombra",
@@ -146,7 +218,7 @@ def setup_panel_4(app):
     modo_frame.grid(row=1, column=0, sticky="w", pady=2)
     app.simple_mode_radio = tk.Radiobutton(
         modo_frame,
-        text="Modo Simple",
+        text="Entrada simple",
         variable=app.modo_modelo,
         value="simple",
         bg=panel.cget("bg"),
@@ -155,13 +227,20 @@ def setup_panel_4(app):
     app.simple_mode_radio.grid(row=0, column=0, sticky="w")
     app.advanced_mode_radio = tk.Radiobutton(
         modo_frame,
-        text="Modo Avanzado",
+        text="Entrada detallada",
         variable=app.modo_modelo,
         value="advanced",
         bg=panel.cget("bg"),
         command=app._toggle_modelo_mode,
     )
     app.advanced_mode_radio.grid(row=1, column=0, sticky="w", pady=(2, 0))
+
+    app.model_meteorology_status_label = tk.Label(
+        contenido, bg=panel.cget("bg"), fg="#555555", font=("Arial", 7),
+        anchor="w", justify="left", wraplength=220,
+    )
+    app.model_meteorology_status_label.grid(row=0, column=0, sticky="e", padx=(70, 12))
+    app._refresh_meteorology_status()
 
     acciones_frame = tk.Frame(contenido, bg=panel.cget("bg"))
     acciones_frame.grid(row=4, column=0, sticky="ew", pady=(6, 0))
@@ -429,6 +508,16 @@ def _apply_location(app, show_message):
         return
     app.vars_modelo["lat"].set(location["lat"])
     app.vars_modelo["lon"].set(location["lon"])
+    tz = location.get("tz") or "America/Argentina/Buenos_Aires"
+    if "timezone" in app.vars_modelo and hasattr(app.vars_modelo["timezone"], "set"):
+        app.vars_modelo["timezone"].set(tz)
+    if "timezone" in app.vars and hasattr(app.vars["timezone"], "set"):
+        app.vars["timezone"].set(tz)
+    app.current_location = dict(location)
+    try:
+        app.solar_engine.set_timezone(tz)
+    except Exception:
+        pass
     app.vars_modelo["_update_required"] = True
     if show_message:
         messagebox.showinfo("Ubicación aplicada",

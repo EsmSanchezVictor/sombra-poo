@@ -146,7 +146,27 @@ ESPECIES = {
 _DEFAULT = ESPECIES["Plátano (Platanus × acerifolia)"]
 
 _CAMPOS = ("rho_copa", "transmitancia", "caducifolio", "albedo_copa",
-           "altura_tipica", "radio_copa_tipico", "ref")
+           "altura_tipica", "radio_copa_tipico", "lai_tipico", "kc_et",
+           "transmitancia_sin_hojas", "veg_source_quality", "ref")
+
+
+def _completar_propiedades(props: dict) -> dict:
+    """Completa campos vegetativos nuevos sin romper bases históricas.
+
+    LAI=3 y Kc=1 son defaults genéricos deliberados, no valores específicos
+    de una especie. La calidad de fuente queda marcada para que el modelo
+    avanzado pueda informar cuándo está usando un supuesto.
+    """
+    out = dict(props or {})
+    out.setdefault("lai_tipico", 3.0)
+    out.setdefault("kc_et", 1.0)
+    tau = float(out.get("transmitancia", 0.30) or 0.30)
+    if out.get("caducifolio"):
+        out.setdefault("transmitancia_sin_hojas", max(0.65, tau))
+    else:
+        out.setdefault("transmitancia_sin_hojas", tau)
+    out.setdefault("veg_source_quality", "generic_default")
+    return out
 
 
 def _ruta_db() -> str:
@@ -178,9 +198,8 @@ def especies_db() -> dict:
 
 
 def propiedades_especie(nombre: str) -> dict:
-    """Devuelve las propiedades de una especie (con la del plátano como
-    valor por defecto para especies desconocidas)."""
-    return dict(especies_db().get(nombre, _DEFAULT))
+    """Devuelve propiedades completas, incluyendo campos vegetativos v13."""
+    return _completar_propiedades(especies_db().get(nombre, _DEFAULT))
 
 
 def nombres_especies() -> list[str]:
@@ -209,6 +228,29 @@ def validar_especie(nombre: str, props: dict) -> tuple[bool, str]:
             return False, f"{campo} debe ser un número."
         if valor <= 0:
             return False, f"{campo} debe ser mayor que 0."
+    # Campos vegetativos v13 son opcionales para compatibilidad con bases
+    # antiguas; si están presentes se validan.
+    if props.get("lai_tipico") not in (None, ""):
+        try:
+            lai = float(props.get("lai_tipico"))
+        except (TypeError, ValueError):
+            return False, "lai_tipico debe ser un número."
+        if not 0.1 <= lai <= 10.0:
+            return False, "lai_tipico debe estar entre 0.1 y 10."
+    if props.get("kc_et") not in (None, ""):
+        try:
+            kc = float(props.get("kc_et"))
+        except (TypeError, ValueError):
+            return False, "kc_et debe ser un número."
+        if not 0.1 <= kc <= 2.0:
+            return False, "kc_et debe estar entre 0.1 y 2."
+    if props.get("transmitancia_sin_hojas") not in (None, ""):
+        try:
+            tau_w = float(props.get("transmitancia_sin_hojas"))
+        except (TypeError, ValueError):
+            return False, "transmitancia_sin_hojas debe ser un número."
+        if not 0.0 <= tau_w <= 1.0:
+            return False, "transmitancia_sin_hojas debe estar entre 0 y 1."
     if not str(props.get("ref", "")).strip():
         return False, "La referencia bibliográfica no puede estar vacía."
     if props.get("caducifolio") not in (True, False):
@@ -224,8 +266,10 @@ def guardar_especie(nombre: str, props: dict) -> tuple[bool, str]:
     if not ok:
         return False, error
     custom = _cargar_custom()
+    completos = _completar_propiedades(props)
+    completos["veg_source_quality"] = "user_defined"
     custom[nombre] = {
-        campo: props.get(campo) for campo in _CAMPOS
+        campo: completos.get(campo) for campo in _CAMPOS
     }
     _guardar_custom(custom)
     return True, ""

@@ -1,0 +1,47 @@
+Auditoría científica v16
+Fecha: 2026-08-30T23:28:42
+Estado: APTO CON ADVERTENCIAS: listo para campaña, no para afirmar validación externa
+Conteos: {'pass': 14, 'warning': 6, 'fail': 0, 'info': 1}
+
+[OK] Dependencia requerida: numpy
+  Disponible.
+[OK] Dependencia requerida: pandas
+  Disponible.
+[OK] Dependencia requerida: opencv
+  Disponible.
+[OK] Dependencia requerida: openpyxl
+  Disponible.
+[OK] Dependencia requerida: matplotlib
+  Disponible.
+[OK] Dependencia requerida: Pillow
+  Disponible.
+[OK] Dependencia requerida: fpdf2
+  Disponible.
+[ADVERTENCIA] Dependencia opcional: pvlib
+  No disponible: las rutas asociadas quedan deshabilitadas o usan fallback. Antes de una liberación científica conviene ejecutar la suite también con esta dependencia.
+[ADVERTENCIA] Dependencia opcional: pythermalcomfort
+  No disponible: las rutas asociadas quedan deshabilitadas o usan fallback. Antes de una liberación científica conviene ejecutar la suite también con esta dependencia.
+[OK] Base de zonas horarias IANA
+  America/Argentina/Buenos_Aires disponible.
+[OK] Geometría solar analítica compartida
+  Sanity check Buenos Aires: elev=30.61°, az=15.13°.
+[OK] Invariantes de sombra
+  tau(0%)=1.000; tau(100%)=0.150.
+[OK] Cierre óptico de materiales
+  24 entradas cumplen α+ρ+τ=1.
+[ADVERTENCIA] Propiedades de materiales
+  La biblioteca avanzada usa valores representativos; para uso predictivo absoluto deben documentarse fabricante/literatura y rango de incertidumbre.
+[ADVERTENCIA] LAI/Kc específicos por especie
+  22/22 especies usan LAI/Kc genéricos. Es válido para comparación, pero requiere calibración/bibliografía antes de afirmar predicción específica por especie.
+[OK] Cierre del balance avanzado de superficie
+  Residual máximo=2.274e-13 W/m²; iteraciones=3.
+[OK] Diagnóstico de límites numéricos
+  El solver distingue saturación en límites de convergencia energética real.
+[INFO] Proyecto abierto
+  Auditoría estática: no se proporcionó carpeta de proyecto.
+[OK] Modos metodológicos
+  Tmrt=standard; superficie=standard; radiación=clear_sky.
+[ADVERTENCIA] Evidencia del proyecto
+  No hay snapshots formales guardados para auditar trazabilidad de resultados.
+[ADVERTENCIA] Validación experimental externa
+  No hay una campaña de validación asociada. El software está preparado, pero los resultados aún no constituyen validación empírica.

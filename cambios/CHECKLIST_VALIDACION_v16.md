@@ -1,0 +1,23 @@
+# Checklist antes de una campaña de validación
+
+- [ ] Ejecutar `Análisis → Auditoría científica / preparación para validación`.
+- [ ] Resolver cualquier ítem marcado como FALLA.
+- [ ] Instalar y probar pvlib si se utilizará cielo despejado pvlib.
+- [ ] Instalar pythermalcomfort si se reportará UTCI.
+- [ ] Verificar zona horaria del sitio.
+- [ ] Registrar marca/modelo y exactitud de todos los sensores.
+- [ ] Registrar diámetro y emisividad reales del globo.
+- [ ] Medir viento a la altura del globo para conversión Tg → Tmrt.
+- [ ] Definir previamente filas de calibración y validación.
+- [ ] No recalibrar con el conjunto de validación.
+- [ ] Conservar fotografías originales.
+- [ ] Registrar cobertura de sombra de control cuando sea posible.
+- [ ] Registrar superficie y temperatura superficial.
+- [ ] Registrar humedad/disponibilidad hídrica si se evalúa ET.
+- [ ] Registrar especie y estado fenológico.
+- [ ] Guardar snapshots de cada condición analizada.
+- [ ] Exportar auditoría junto con los resultados.
+- [ ] Informar MAE, RMSE, Bias, R² y n.
+- [ ] Informar fuente radiativa y componentes derivados.
+- [ ] Informar qué parámetros son medidos, bibliográficos, genéricos o calibrados.
+- [ ] No presentar P05–P95 operacional como intervalo de confianza instrumental.

@@ -1,0 +1,10 @@
+-r requirements.txt
+
+# Extensiones científicas opcionales.
+# pvlib: posición/radiación de cielo despejado de mayor fidelidad.
+pvlib>=0.10,<1
+
+# UTCI oficial. En entornos donde la resolución de dependencias de numpy
+# resulte conflictiva, puede instalarse por separado; la app degrada con
+# gracia si no está disponible.
+pythermalcomfort>=4.4

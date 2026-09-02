@@ -17,7 +17,7 @@ from shadow_temp import Temperatura
 
 def test_material_lookup_is_case_insensitive():
     X, Y = np.meshgrid(np.arange(3.0), np.arange(3.0))
-    estructura = Estructura("Galeria", 0, 0, 2, 2, material="Hormigón")
+    estructura = Estructura("Sendero", 0, 0, 2, 2, material="Hormigón")
     alpha, epsilon = asignar_materiales_grilla(X, Y, [estructura])
     assert np.all(alpha == materiales["Hormigón"].alpha)
     assert np.all(epsilon == materiales["Hormigón"].epsilon)
@@ -26,7 +26,7 @@ def test_material_lookup_is_case_insensitive():
 
 def test_unknown_material_falls_back_to_suelo_without_crashing():
     X, Y = np.meshgrid(np.arange(3.0), np.arange(3.0))
-    estructura = Estructura("Galeria", 0, 0, 2, 2, material="MaterialInexistente")
+    estructura = Estructura("Sendero", 0, 0, 2, 2, material="MaterialInexistente")
     alpha, epsilon = asignar_materiales_grilla(X, Y, [estructura])
     assert np.all(alpha == materiales["suelo"].alpha)
 
@@ -43,6 +43,18 @@ def test_material_properties_are_physical():
 def test_temperature_extrema_are_shifted():
     assert temperatura_ambiente(6, 280, 310) == pytest.approx(280)
     assert temperatura_ambiente(15, 280, 310) == pytest.approx(310)
+
+
+def test_temperature_does_not_reapproach_max_at_midnight():
+    """Regresión del bug (v4): la sinusoide de período fijo 18h, sin
+    recortar fuera de [hora_min, hora_max], volvía a acercarse a T_max
+    cerca de medianoche. Con T_min=18/T_max=30 el bug daba 27°C a las
+    0h — casi el máximo del día en el peor momento posible. Ahora debe
+    quedar acotada en [T_min, T_max] y bien cerca de T_min a esa hora.
+    """
+    valor = temperatura_ambiente(0, 18.0, 30.0)
+    assert 18.0 <= valor <= 30.0
+    assert valor < 25.0  # el bug original daba 27.0
 
 
 def test_convection_increases_with_wind():
@@ -126,17 +138,50 @@ def test_angulo_solar_y_shadow_temp_consistentes():
 
 # ---------------------------------------------------------- Tmrt (modelo)
 
-def test_shadow_transmittance_dentro_de_limites():
+def test_shadow_transmittance_semantica_cobertura():
     calc = Temperatura()
-    assert calc.shadow_transmittance(0, "tree") == pytest.approx(0.60)
+    # 0 % de sombra = pleno sol, nunca debe enfriar por sí solo.
+    assert calc.shadow_transmittance(0, "tree") == pytest.approx(1.0)
+    assert calc.shadow_transmittance(0, "structure") == pytest.approx(1.0)
     assert calc.shadow_transmittance(100, "tree") == pytest.approx(0.15)
-    assert calc.shadow_transmittance(0, "structure") == pytest.approx(0.30)
     assert calc.shadow_transmittance(100, "structure") == pytest.approx(0.05)
-    assert calc.shadow_transmittance(50, "tree") == pytest.approx(0.375)
-    assert calc.shadow_transmittance(50, "structure") == pytest.approx(0.175)
-    # Clamping fuera de rango
+    assert calc.shadow_transmittance(50, "tree") == pytest.approx(0.575)
+    assert calc.shadow_transmittance(50, "structure") == pytest.approx(0.525)
     assert calc.shadow_transmittance(150, "tree") == pytest.approx(0.15)
-    assert calc.shadow_transmittance(-10, "tree") == pytest.approx(0.60)
+    assert calc.shadow_transmittance(-10, "tree") == pytest.approx(1.0)
+
+
+def test_local_air_estimate_zero_shadow_equals_reference():
+    calc = Temperatura()
+    assert calc.estimate_local_air_temperature(25.0, 0.0, 883.0, "tree") == pytest.approx(25.0)
+
+
+def test_local_air_estimate_tree_is_moderate_and_bounded():
+    calc = Temperatura()
+    # Con 100 % de sombra y GHI=800 W/m², tau árbol=0.15:
+    # radiación evitada=680 W/m²; ΔTa=0.0025*680=1.70 °C.
+    result = calc.estimate_local_air_temperature(30.0, 100.0, 800.0, "tree")
+    assert result == pytest.approx(28.30, abs=0.01)
+    # Incluso con irradiancia extrema el descenso por defecto no supera 2.5 °C.
+    result_extreme = calc.estimate_local_air_temperature(30.0, 100.0, 5000.0, "tree")
+    assert result_extreme == pytest.approx(27.50, abs=0.01)
+
+
+def test_local_air_estimate_map_increases_cooling_with_shadow():
+    calc = Temperatura()
+    shade = np.array([[0.0, 50.0, 100.0]], dtype=float)
+    local = calc.estimate_local_air_temperature_map(25.0, shade, 900.0, "tree")
+    assert local.shape == shade.shape
+    assert local[0, 0] == pytest.approx(25.0)
+    assert local[0, 0] > local[0, 1] > local[0, 2]
+    assert local[0, 2] >= 22.5
+
+
+def test_shadow_zero_percent_no_changes_tmrt():
+    calc = Temperatura(-34.6, -58.4, k_factor=0.04, tz_offset_hours=-3)
+    r = calc.calculate_tmrt(30.0, 0.0, date_value=__import__("datetime").date(2026, 1, 15), time_value=12)
+    assert r["Tmrt_sombra"] == pytest.approx(r["Tmrt_sol"], abs=0.01)
+    assert r["Delta_Tmrt"] == pytest.approx(0.0, abs=0.01)
 
 
 def test_clear_sky_radiation_fisica():
@@ -200,3 +245,65 @@ def test_solar_fallback_matches_pvlib(fecha, lat, lon, tz):
     # de día; la diferencia máxima observada es ~0.5° en elevación.
     assert elev == pytest.approx(float(expected["elevation"]), abs=0.6)
     assert azim == pytest.approx(float(expected["azimuth"]), abs=2.0)
+
+def test_pared_diagonal_conserva_endpoints():
+    pared = Estructura("Pared", 0, 10, 10, 0, altura=3)
+    assert (pared.x1, pared.y1, pared.x2, pared.y2) == (0.0, 10.0, 10.0, 0.0)
+
+
+def test_galeria_proyecta_sombra_con_altura():
+    axis = np.linspace(-20, 20, 401)
+    X, Y = np.meshgrid(axis, axis)
+    gal = Estructura("Galeria", -2, -2, 2, 2, altura=4, opacidad=1)
+    theta = math.radians(45)
+    az = math.radians(90)
+    m = sombra_estructuras(X, Y, [gal], theta, az) > 0
+    # Con azimut 90° la sombra se desplaza hacia X negativa; el centro
+    # sombreado no puede quedar en x=0 como en la versión antigua.
+    xs = X[m]
+    assert xs.size > 0
+    assert float(xs.mean()) < -2.0
+
+
+def test_fallback_radiation_conserva_ghi():
+    from datetime import datetime
+    motor = SolarEngine(use_pvlib=False, tz="America/Argentina/Buenos_Aires")
+    dt = datetime(2026, 1, 15, 12, 0)
+    rad = motor.get_radiation(-34.6037, -58.3816, dt)
+    _, elev = motor.get_solar_position(-34.6037, -58.3816, dt)
+    recomposed = rad["dni"] * math.sin(math.radians(elev)) + rad["dhi"]
+    assert recomposed == pytest.approx(rad["ghi"], rel=1e-6)
+
+
+def test_tmrt_map_accepts_photometric_transmittance_override():
+    from shadow_temp import Temperatura
+    calc = Temperatura(-34.6, -58.4, k_factor=0.04)
+    shadow_map = np.array([[0.0, 100.0]], dtype=np.float32)
+    tau = np.array([[1.0, 0.5]], dtype=np.float32)
+    result = calc.calculate_tmrt_map(
+        25.0,
+        shadow_map,
+        radiation_override=800.0,
+        solar_altitude_override=45.0,
+        transmittance_map_override=tau,
+    )
+    values = result["Tmrt_map"]
+    assert values[0, 0] == pytest.approx(57.0, abs=1e-5)
+    assert values[0, 1] == pytest.approx(41.0, abs=1e-5)
+
+
+def test_local_air_map_uses_photometric_transmittance_override():
+    from shadow_temp import Temperatura
+    calc = Temperatura(-34.6, -58.4)
+    shadow_map = np.array([[0.0, 100.0]], dtype=np.float32)
+    tau = np.array([[1.0, 0.5]], dtype=np.float32)
+    result = calc.estimate_local_air_temperature_map(
+        25.0,
+        shadow_map,
+        800.0,
+        transmittance_map_override=tau,
+        cooling_coefficient=0.0025,
+        max_cooling=2.5,
+    )
+    assert result[0, 0] == pytest.approx(25.0, abs=1e-6)
+    assert result[0, 1] == pytest.approx(24.0, abs=1e-6)

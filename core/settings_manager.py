@@ -24,7 +24,27 @@ class SettingsManager:
             "default_cloudiness": "Despejado",
             "default_wind": "moderado",
             "k_factor": 0.04,
+            "tmrt_model_mode": "standard",
+            "surface_model_mode": "standard",
+            # Vegetación/ET v13: solo interviene si el usuario selecciona
+            # advanced_vegetation; el modo estándar sigue intacto.
+            "ground_vegetation_fraction": 0.50,
+            "vegetation_water_availability": 0.75,
+            "canopy_water_availability": 0.75,
+            # Fuente radiativa/meteorológica v14. El default conserva el
+            # comportamiento previo: cielo despejado modelado.
+            "radiation_source_mode": "clear_sky",
+            "clear_sky_use_pvlib": False,
+            "meteorology_max_gap_minutes": 90.0,
             "k_factor_info": None,
+            # Ta local estimada: defaults conservadores v8; solo cambian si
+            # el usuario aplica explícitamente una calibración de campaña.
+            "local_air_tree_coefficient": 0.0025,
+            "local_air_tree_max_cooling": 2.5,
+            "local_air_tree_calibration_info": None,
+            "local_air_structure_coefficient": 0.0012,
+            "local_air_structure_max_cooling": 1.2,
+            "local_air_structure_calibration_info": None,
             "last_project_path": None,
         }
 
@@ -51,6 +71,14 @@ class SettingsManager:
         if not settings:
             return
         app.modo_modelo.set(settings.get("ui_mode", "simple"))
+        if hasattr(app, "tmrt_model_mode"):
+            app.tmrt_model_mode.set(settings.get("tmrt_model_mode", "standard"))
+        if hasattr(app, "surface_model_mode"):
+            app.surface_model_mode.set(settings.get("surface_model_mode", "standard"))
+        if hasattr(app, "radiation_source_mode"):
+            app.radiation_source_mode.set(settings.get("radiation_source_mode", "clear_sky"))
+        if hasattr(app, "use_pvlib_engine"):
+            app.use_pvlib_engine.set(bool(settings.get("clear_sky_use_pvlib", False)))
         app.temp_unit.set(settings.get("temp_unit", settings.get("units", "C")))
         app.distance_unit.set(settings.get("distance_unit", "m"))
         app.simple_cloudiness.set(settings.get("default_cloudiness", "Despejado"))

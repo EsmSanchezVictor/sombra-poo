@@ -13,6 +13,7 @@ import numpy as np
 
 import diseño as design
 from core.scene_objects import ArbolEscena, EstructuraEscena
+from core.model_registry import methodology_manifest
 
 @dataclass
 class ProjectMeta:
@@ -77,6 +78,8 @@ class AppState:
                 "edit_mode": getattr(self.app, "modo_edicion", tk.StringVar(value="advanced")).get(),
                 "panel2_advanced": getattr(self.app, "panel2_advanced_mode", tk.BooleanVar(value=False)).get(),
                 "shadow_detector_enabled": getattr(self.app, "shadow_detector_enabled", tk.BooleanVar(value=False)).get(),
+                "radiation_source_mode": getattr(self.app, "radiation_source_mode", tk.StringVar(value="clear_sky")).get(),
+                "clear_sky_use_pvlib": getattr(self.app, "use_pvlib_engine", tk.BooleanVar(value=False)).get(),
                 "selected_city": self.app.simple_city.get(),
                 "selected_country": self.app.simple_country.get(),
                 "curve_button_state": str(getattr(self.app, "curve_button", {}).cget("state")) if hasattr(self.app, "curve_button") else "disabled",
@@ -89,6 +92,8 @@ class AppState:
                 "last_matrix_excel": self._rel(project.root_path, self.app.last_matrix_path),
                 "edit_excel": self._rel(project.root_path, self.app.last_edit_excel_path),
                 "model_excel": self._rel(project.root_path, self.app.last_model_excel_path),
+                "meteorology_csv": self._rel(project.root_path, getattr(self.app, "meteorology_series_path", None)),
+                "analysis_database": os.path.join("datos", "analisis.sqlite3"),
             },
             "last_results_meta": {
                 "tmrt_sun": self._to_float(getattr(self.app, "tmrt_result", {}).get("Tmrt_sol") if self.app.tmrt_result else None),
@@ -102,6 +107,9 @@ class AppState:
             },
             "snapshots": getattr(self.app, "snapshots", []),
             "resumen_estadistico": self._build_resumen_estadistico(getattr(self.app, "snapshots", [])),
+            "validation_summary": self.make_json_safe(getattr(self.app, "last_validation_summary", None)),
+            "scientific_audit": self.make_json_safe(getattr(self.app, "last_scientific_audit", None)),
+            "methodology": methodology_manifest(),
         }
 
     def apply_payload(self, payload: dict) -> None:
@@ -147,7 +155,11 @@ class AppState:
         if hasattr(self.app, "panel2_advanced_mode"):
             self.app.panel2_advanced_mode.set(ui.get("panel2_advanced", self.app.panel2_advanced_mode.get()))
         if hasattr(self.app, "shadow_detector_enabled"):
-            self.app.shadow_detector_enabled.set(ui.get("shadow_detector_enabled", self.app.shadow_detector_enabled.get()))        
+            self.app.shadow_detector_enabled.set(ui.get("shadow_detector_enabled", self.app.shadow_detector_enabled.get()))
+        if hasattr(self.app, "radiation_source_mode"):
+            self.app.radiation_source_mode.set(ui.get("radiation_source_mode", self.app.radiation_source_mode.get()))
+        if hasattr(self.app, "use_pvlib_engine"):
+            self.app.use_pvlib_engine.set(bool(ui.get("clear_sky_use_pvlib", self.app.use_pvlib_engine.get())))        
         self.app.simple_country.set(ui.get("selected_country", self.app.simple_country.get()))
         if self.app.locations_data:
             self.app._update_city_options()
@@ -172,6 +184,14 @@ class AppState:
         self.app.last_histogram_path = self._abs(root, paths.get("last_histogram"))
         self.app.last_edit_excel_path = self._abs(root, paths.get("edit_excel"))
         self.app.last_model_excel_path = self._abs(root, paths.get("model_excel"))
+        self.app.meteorology_series_path = self._abs(root, paths.get("meteorology_csv"))
+        if self.app.meteorology_series_path and os.path.exists(self.app.meteorology_series_path):
+            try:
+                self.app.meteorology_service.load_series(
+                    self.app.meteorology_series_path, timezone=self.app._timezone_actual()
+                )
+            except Exception as exc:
+                print(f"[proyecto] No se pudo restaurar la serie meteorológica: {exc}")
 
         last_meta = payload.get("last_results_meta", {})
         self.app.shadow_quality = last_meta.get("shadow_quality")
@@ -182,6 +202,8 @@ class AppState:
         # poblar el Listbox y cargar el último elemento automáticamente.
         snapshots = payload.get("snapshots", [])
         self.app.snapshots = snapshots if isinstance(snapshots, list) else []
+        self.app.last_validation_summary = payload.get("validation_summary") if isinstance(payload.get("validation_summary"), dict) else None
+        self.app.last_scientific_audit = payload.get("scientific_audit") if isinstance(payload.get("scientific_audit"), dict) else None
         
         target_panel = ui.get("active_panel")
         if isinstance(target_panel, int) and 0 <= target_panel < len(self.app.panel_frames):

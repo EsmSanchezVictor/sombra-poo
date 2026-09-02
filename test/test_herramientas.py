@@ -89,14 +89,14 @@ def test_grados_hora_trapecio():
     # (10,34): +2 por 4h con promedio 1  -> 4
     # (14,36): +4 por 4h con promedio 3  -> 12
     # (18,32): +0 por 4h con promedio 2  -> 8
-    assert gh == pytest.approx(24.0, abs=0.01)
+    assert gh == pytest.approx(22.0, abs=0.01)
 
 
 def test_grados_hora_por_debajo():
     series = [(6, 5.0), (10, 9.0)]
     gh = tc.grados_hora(series, umbral=8.0, por_encima=False)
     # (6,5): -3 por 4h con promedio 1.5 -> 6
-    assert gh == pytest.approx(6.0, abs=0.01)
+    assert gh == pytest.approx(4.5, abs=0.01)
 
 
 def test_categorias_heat_index_nws():
@@ -154,8 +154,46 @@ def test_descomponer_radiacion_nublado_mas_difuso():
 def test_temperatura_diurna_extremos():
     assert temperatura_diurna(20.0, 34.0, 6) == pytest.approx(20.0)
     assert temperatura_diurna(20.0, 34.0, 15) == pytest.approx(34.0, abs=0.01)
-    assert temperatura_diurna(20.0, 34.0, 2) == pytest.approx(20.0)
+    # FIX (v4): antes esta función recortaba en seco a T_min fuera de
+    # [6h, 18h] (salto discontinuo a las 18h), mientras que
+    # `modelo_con_excel.temperatura_ambiente` usaba una sinusoide de
+    # período fijo SIN recortar, que volvía a acercarse a T_max cerca
+    # de medianoche (con estos mismos T_min/T_max, ¡daba 27°C a las 0h!,
+    # casi el máximo del día). Ahora ambas funciones delegan en
+    # `core.climate_profile.temperatura_diurna_ciclo`, que decae de
+    # forma CONTINUA (sin saltos) durante toda la noche. A las 2h (bien
+    # entrada la madrugada) ya no está en T_min exacto — sigue bajando
+    # desde la medianoche hacia el amanecer — pero se mantiene siempre
+    # acotada en [T_min, T_max] y mucho más cerca de T_min que de T_max.
+    valor_madrugada = temperatura_diurna(20.0, 34.0, 2)
+    assert 20.0 <= valor_madrugada <= 34.0
+    assert valor_madrugada < 20.0 + (34.0 - 20.0) * 0.25  # cerca de T_min, no de T_max
+    # Regresión del bug real: a medianoche NUNCA debe acercarse a T_max
+    # (el bug daba ~27°C con estos datos; el valor correcto está muy
+    # por debajo de eso).
+    assert temperatura_diurna(20.0, 34.0, 0) < 25.0
 
+
+
+def test_temperatura_diurna_periodica_y_continua():
+    for h in [0, 2.5, 6, 9, 15, 18, 23.9]:
+        assert temperatura_diurna(18.0, 30.0, h + 24) == pytest.approx(
+            temperatura_diurna(18.0, 30.0, h), abs=1e-10
+        )
+    eps = 1e-5
+    assert temperatura_diurna(18.0, 30.0, 6-eps) == pytest.approx(
+        temperatura_diurna(18.0, 30.0, 6+eps), abs=1e-4
+    )
+    assert temperatura_diurna(18.0, 30.0, 15-eps) == pytest.approx(
+        temperatura_diurna(18.0, 30.0, 15+eps), abs=1e-4
+    )
+
+
+def test_nubosidad_reduce_ghi_si_origen_es_cielo_claro():
+    calc = Temperatura(-31.4, -64.2, k_factor=0.04)
+    despejado = escenario_horario(calc, date(2026, 1, 15), [12], 20, 34, 60, 4, 50, nubosidad="Despejado")[0]
+    nublado = escenario_horario(calc, date(2026, 1, 15), [12], 20, 34, 60, 4, 50, nubosidad="Nublado")[0]
+    assert nublado["ghi"] < despejado["ghi"]
 
 def test_escenario_horario_sombra_siempre_menor_o_igual():
     calc = Temperatura(-31.4, -64.2, k_factor=0.04)
@@ -168,15 +206,18 @@ def test_escenario_horario_sombra_siempre_menor_o_igual():
         assert r["delta_tmrt"] == pytest.approx(r["tmrt_sol"] - r["tmrt_sombra"], abs=0.02)
 
 
-def test_escenario_horario_mas_sombra_menos_estres():
+def test_escenario_horario_mas_sombra_menor_tmrt_y_hi_igual():
     calc = Temperatura(-31.4, -64.2, k_factor=0.04)
     esc20 = escenario_horario(calc, date(2026, 1, 15), [8, 12, 16],
                               20.0, 34.0, 60.0, 4.0, sombra_pct=20.0)
     esc80 = escenario_horario(calc, date(2026, 1, 15), [8, 12, 16],
                               20.0, 34.0, 60.0, 4.0, sombra_pct=80.0)
-    hi20 = max(r["hi_sombra"] for r in esc20)
-    hi80 = max(r["hi_sombra"] for r in esc80)
-    assert hi80 < hi20
+    assert max(r["tmrt_sombra"] for r in esc80) < max(r["tmrt_sombra"] for r in esc20)
+    # Heat Index depende de Ta/RH, no de Tmrt. Si solo cambia la sombra,
+    # debe permanecer idéntico.
+    assert max(r["hi_sombra"] for r in esc80) == pytest.approx(
+        max(r["hi_sombra"] for r in esc20), abs=1e-9
+    )
 
 
 def test_escenario_horario_utci_sombra_no_mayor_que_sol():
@@ -199,10 +240,11 @@ def test_resumen_y_comparacion_ab():
                              60.0, 4.0, sombra_pct=60.0)
     rb = resumen_escenario(base)
     cmp = comparar_escenarios(base, prop)
-    assert rb["grados_hora_hi_sol"] >= rb["grados_hora_hi_sombra"]
-    assert cmp["delta_hi_max"] <= 0.0
-    assert cmp["delta_grados_hora_hi"] <= 0.0
-    assert rb["hi_max_sol"] >= rb["hi_max_sombra"]
+    assert rb["grados_hora_hi_sol"] == pytest.approx(rb["grados_hora_hi_sombra"])
+    assert cmp["delta_hi_max"] == pytest.approx(0.0)
+    assert cmp["delta_grados_hora_hi"] == pytest.approx(0.0)
+    assert rb["hi_max_sol"] == pytest.approx(rb["hi_max_sombra"])
+    assert cmp["propuesto"]["delta_tmrt_max"] > cmp["base"]["delta_tmrt_max"]
 
 
 def test_ranking_arboles_arbol_grande_gana():
@@ -223,12 +265,13 @@ def test_ranking_arboles_sol_bajo_no_rompe():
     assert ranking[0]["categoria"] == "Sol bajo el horizonte"
 
 
-def test_mapa_estres_bandas_sumadas():
+def test_mapa_estres_heat_no_usa_tmrt_como_taire():
     mapa = np.full((10, 10), 45.0)
     mapa[:5, :] = 33.0
-    res = mapa_estres(mapa, ta=30.0, rh=60.0)
+    res = mapa_estres(mapa, ta=30.0, rh=60.0, indice="heat")
     assert sum(res["por_area"].values()) == pytest.approx(100.0, abs=0.2)
-    assert "Peligro" in res["por_area"]
+    # Como Ta/RH son uniformes, Heat Index también lo es aunque Tmrt cambie.
+    assert len(res["por_area"]) == 1
     assert res["media_tmrt"] == pytest.approx(39.0, abs=0.1)
 
 

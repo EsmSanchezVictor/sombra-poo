@@ -39,12 +39,24 @@ FONT_EJES = 10
 FONT_ANOTACION = 9
 
 
-def agregar_colorbar_temperatura(fig, ax, mappable, unidad: str = "°C"):
-    """Agrega una colorbar con etiqueta de unidad — antes varias figuras
-    (ej. curvas de nivel) no tenían colorbar, así que no se podía leer
-    ningún valor concreto del gráfico, solo la forma."""
+def agregar_colorbar_temperatura(
+    fig, ax, mappable, unidad: str = "°C", etiqueta: str = "Temperatura", ticks=None
+):
+    """Agrega una colorbar legible y, si se proveen ``ticks``, respeta
+    exactamente sus extremos.
+
+    En el mapa interactivo de Tmrt esto permite que el mínimo y máximo de
+    la escala coincidan con el mínimo y máximo que puede devolver el hover.
+    """
     cbar = fig.colorbar(mappable, ax=ax)
-    cbar.set_label(f"Temperatura ({unidad})", fontsize=FONT_EJES)
+    cbar.set_label(f"{etiqueta} ({unidad})", fontsize=FONT_EJES)
+    if ticks is not None:
+        ticks = np.asarray(ticks, dtype=float)
+        if ticks.size:
+            cbar.set_ticks(ticks)
+            span = float(np.max(ticks) - np.min(ticks)) if ticks.size > 1 else 0.0
+            decimals = 2 if span < 1.0 else 1
+            cbar.set_ticklabels([f"{v:.{decimals}f}" for v in ticks])
     cbar.ax.tick_params(labelsize=FONT_ANOTACION)
     return cbar
 

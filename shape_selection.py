@@ -10,6 +10,12 @@ class ShapeSelector:
         self.end_point = None
         self.area_seleccionada = None
         self.area_referencia = None
+        self.area_seleccionada_mask = None
+        self.area_referencia_mask = None
+        self.mask_calculo_full = None
+        self.mask_referencia_full = None
+        self._last_selection_mask = None
+        self._last_full_mask = None
         self.shape_patch_calculo = None
         self.shape_patch_referencia = None
         self.polygon_points = []  # Para almacenar los puntos del polígono
@@ -119,6 +125,8 @@ class ShapeSelector:
                 
                 if self.app.drawing_mode == "calculo":
                     self.area_seleccionada = selected_area
+                    self.area_seleccionada_mask = self._last_selection_mask
+                    self.mask_calculo_full = self._last_full_mask
                     self.app.area_calculo_done = True
                     
                     # Actualizar dimensiones
@@ -129,6 +137,8 @@ class ShapeSelector:
                     self.app.area_ref_button.config(state='normal')
                 elif self.app.drawing_mode == "referencia":
                     self.area_referencia = selected_area
+                    self.area_referencia_mask = self._last_selection_mask
+                    self.mask_referencia_full = self._last_full_mask
                     self.app.area_referencia_done = True
                     
                     # Actualizar dimensiones
@@ -138,7 +148,9 @@ class ShapeSelector:
                     self.app.lbl_dimensiones_referencia.config(text=f"Dimensiones del Área de Referencia: {width}x{height}")
                     
                     # Calcular promedio
-                    promedio_referencia = np.mean(self.area_referencia)
+                    promedio_referencia = self.app.image_processor.media_valida(
+                        self.area_referencia, self.area_referencia_mask
+                    )
                     self.app.lbl_promedio_referencia.config(text=f"Promedio Gris Referencia: {promedio_referencia:.2f}")
                     self.app.ref_gray_mean = promedio_referencia
                 self.redraw_selection()
@@ -186,7 +198,8 @@ class ShapeSelector:
             self.area_seleccionada = self.select_polygonal_area()
             if self.area_seleccionada is None:
                 return
-                
+            self.area_seleccionada_mask = self._last_selection_mask
+            self.mask_calculo_full = self._last_full_mask
             self.app.area_calculo_done = True
             
             # Calcular rectángulo delimitador
@@ -207,7 +220,8 @@ class ShapeSelector:
             self.area_referencia = self.select_polygonal_area()
             if self.area_referencia is None:
                 return
-                
+            self.area_referencia_mask = self._last_selection_mask
+            self.mask_referencia_full = self._last_full_mask
             self.app.area_referencia_done = True
             
             # Calcular rectángulo delimitador
@@ -222,7 +236,9 @@ class ShapeSelector:
             )
             
             # Calcular promedio
-            promedio_referencia = np.mean(self.area_referencia)
+            promedio_referencia = self.app.image_processor.media_valida(
+                self.area_referencia, self.area_referencia_mask
+            )
             self.app.lbl_promedio_referencia.config(text=f"Promedio Gris Referencia: {promedio_referencia:.2f}")
             self.app.ref_gray_mean = promedio_referencia
             
@@ -250,93 +266,87 @@ class ShapeSelector:
             print(f"Error al seleccionar área: {str(e)}")
             return None
 
+    def _convertir_crop(self, area_rgb, mask_crop, full_mask):
+        if area_rgb is None or area_rgb.size == 0:
+            return None
+        gris, mask_resized = self.app.image_processor.convertir_a_grises_con_mascara(
+            area_rgb, mask_crop, self.app.matriz_size.get()
+        )
+        if not np.any(mask_resized):
+            return None
+        self._last_selection_mask = mask_resized
+        self._last_full_mask = np.asarray(full_mask, dtype=bool)
+        return gris
+
     def select_rectangular_area(self):
-        """Selecciona y devuelve un área rectangular."""
+        """Selecciona un rectángulo y conserva su máscara espacial real."""
         try:
             x1, y1 = int(self.start_point[0]), int(self.start_point[1])
             x2, y2 = int(self.end_point[0]), int(self.end_point[1])
-            
-            # Asegurar que las coordenadas estén dentro de los límites
             height, width = self.app.img_rgb.shape[:2]
             x1, x2 = max(0, min(x1, x2)), min(width, max(x1, x2))
             y1, y2 = max(0, min(y1, y2)), min(height, max(y1, y2))
-            
-            # Verificar que el área no sea cero
             if x1 >= x2 or y1 >= y2:
                 print("Advertencia: Área de selección demasiado pequeña o inválida")
                 return None
-                
+
             area = self.app.img_rgb[y1:y2, x1:x2]
-            
-            # Verificar que el área no esté vacía
-            if area.size == 0:
-                print("Advertencia: Área de selección vacía")
-                return None
-                
-            return self.app.image_processor.convertir_a_grises(area, self.app.matriz_size.get())
+            mask_crop = np.ones((y2 - y1, x2 - x1), dtype=np.uint8)
+            full_mask = np.zeros((height, width), dtype=bool)
+            full_mask[y1:y2, x1:x2] = True
+            return self._convertir_crop(area, mask_crop, full_mask)
         except Exception as e:
             print(f"Error al seleccionar área rectangular: {str(e)}")
             return None
 
     def select_circular_area(self):
-        """Selecciona y devuelve un área circular."""
+        """Selecciona un círculo sin introducir negro artificial fuera de él."""
         try:
             center_x, center_y = int(self.start_point[0]), int(self.start_point[1])
-            radius = int(np.sqrt((self.end_point[0] - self.start_point[0])**2 + (self.end_point[1] - self.start_point[1])**2))
-
-            mask = np.zeros(self.app.img_rgb.shape[:2], dtype=np.uint8)
-            cv2.circle(mask, (center_x, center_y), radius, 1, thickness=-1)
-            area = cv2.bitwise_and(self.app.img_rgb, self.app.img_rgb, mask=mask)
-            
-            # Verificar que el área no esté vacía
-            if area.size == 0:
-                print("Advertencia: Área circular vacía")
+            radius = int(np.hypot(
+                self.end_point[0] - self.start_point[0],
+                self.end_point[1] - self.start_point[1],
+            ))
+            if radius <= 0:
                 return None
-                
-            return self.app.image_processor.convertir_a_grises(area, self.app.matriz_size.get())
+            height, width = self.app.img_rgb.shape[:2]
+            full_mask_u8 = np.zeros((height, width), dtype=np.uint8)
+            cv2.circle(full_mask_u8, (center_x, center_y), radius, 1, thickness=-1)
+
+            x1 = max(0, center_x - radius)
+            x2 = min(width, center_x + radius + 1)
+            y1 = max(0, center_y - radius)
+            y2 = min(height, center_y + radius + 1)
+            if x1 >= x2 or y1 >= y2:
+                return None
+            area = self.app.img_rgb[y1:y2, x1:x2]
+            mask_crop = full_mask_u8[y1:y2, x1:x2]
+            return self._convertir_crop(area, mask_crop, full_mask_u8.astype(bool))
         except Exception as e:
             print(f"Error al seleccionar área circular: {str(e)}")
             return None
 
     def select_polygonal_area(self):
-        """Selecciona y devuelve un área poligonal con su rectángulo delimitador."""
+        """Selecciona un polígono y excluye del cálculo sus esquinas externas."""
         try:
             if len(self.polygon_points) < 3:
                 return None
-                
-            # Crear máscara del polígono
-            mask = np.zeros(self.app.img_rgb.shape[:2], dtype=np.uint8)
+            height, width = self.app.img_rgb.shape[:2]
+            full_mask_u8 = np.zeros((height, width), dtype=np.uint8)
             pts = np.array([(int(x), int(y)) for x, y in self.polygon_points], dtype=np.int32)
-            cv2.fillPoly(mask, [pts], 1)
-            
-            # Aplicar máscara a la imagen
-            masked_img = cv2.bitwise_and(self.app.img_rgb, self.app.img_rgb, mask=mask)
-            
-            # Obtener rectángulo delimitador
+            cv2.fillPoly(full_mask_u8, [pts], 1)
+
             x_coords = [p[0] for p in self.polygon_points]
             y_coords = [p[1] for p in self.polygon_points]
-            min_x, max_x = int(min(x_coords)), int(max(x_coords))
-            min_y, max_y = int(min(y_coords)), int(max(y_coords))
-            
-            # Asegurar que las coordenadas estén dentro de los límites
-            height, width = self.app.img_rgb.shape[:2]
-            min_x, max_x = max(0, min_x), min(width, max_x)
-            min_y, max_y = max(0, min_y), min(height, max_y)
-            
-            # Verificar que el área no sea cero
+            min_x, max_x = max(0, int(min(x_coords))), min(width, int(max(x_coords)) + 1)
+            min_y, max_y = max(0, int(min(y_coords))), min(height, int(max(y_coords)) + 1)
             if min_x >= max_x or min_y >= max_y:
                 print("Advertencia: Área poligonal demasiado pequeña o inválida")
                 return None
-                
-            # Extraer región del rectángulo delimitador
-            bounded_area = masked_img[min_y:max_y, min_x:max_x]
-            
-            # Verificar que el área no esté vacía
-            if bounded_area.size == 0:
-                print("Advertencia: Área poligonal vacía")
-                return None
-                
-            return self.app.image_processor.convertir_a_grises(bounded_area, self.app.matriz_size.get())
+
+            area = self.app.img_rgb[min_y:max_y, min_x:max_x]
+            mask_crop = full_mask_u8[min_y:max_y, min_x:max_x]
+            return self._convertir_crop(area, mask_crop, full_mask_u8.astype(bool))
         except Exception as e:
             print(f"Error al seleccionar área poligonal: {str(e)}")
             return None
@@ -424,6 +434,12 @@ class ShapeSelector:
         self.disable_selection()
         self.area_seleccionada = None
         self.area_referencia = None
+        self.area_seleccionada_mask = None
+        self.area_referencia_mask = None
+        self.mask_calculo_full = None
+        self.mask_referencia_full = None
+        self._last_selection_mask = None
+        self._last_full_mask = None
         self.polygon_points = []
         self.polygon_points_aux = []
         self.polygon_closed = False

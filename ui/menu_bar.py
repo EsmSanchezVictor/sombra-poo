@@ -44,6 +44,7 @@ class MenuBar:
 
         importar_menu = tk.Menu(archivo_menu, tearoff=0)
         importar_menu.add_command(label="Importar imagen base…", command=self.app.cargar_imagen)
+        importar_menu.add_command(label="Importar serie meteorológica CSV…", command=self.app.cargar_serie_meteorologica)
         importar_menu.add_command(label="Importar proyecto (.3es)…", command=self.app.import_project_3es)
         archivo_menu.add_cascade(label="Importar…", menu=importar_menu)
 
@@ -116,8 +117,12 @@ class MenuBar:
             command=self.app._dialogo_escenario_ab,
         )
         analisis_menu.add_command(
-            label="Validar contra mediciones (CSV)…",
+            label="Calibración y validación científica (CSV)…",
             command=self.app._dialogo_validar_csv,
+        )
+        analisis_menu.add_command(
+            label="Auditoría científica / preparación para validación…",
+            command=self.app._dialogo_auditoria_cientifica,
         )
         analisis_menu.add_command(
             label="Biblioteca de especies…",

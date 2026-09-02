@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -9,6 +10,7 @@ import math
 from core.scene_objects import adaptar_objetos_escena
 from core.species import color_copa, nombres_especies, propiedades_especie
 from plot_style import CMAP_TEMPERATURA
+from core.excel_scene import save_scene_excel, load_scene_excel, apply_parameters_to_vars
 
 # Constantes físicas
 sigma = 5.67e-8  # Constante de Stefan-Boltzmann
@@ -27,19 +29,41 @@ archivo_actual = None
 # de materiales que fallaba con mayúsculas). Una sola fuente de verdad.
 from modelo_con_excel import (
     Arbol, Estructura, Material, materiales, MATERIALES_LOWER,
-    asignar_materiales_grilla,
+    asignar_materiales_grilla, calcular_campo_termico_superficie,
     angulo_solar as _angulo_solar,
     azimut_solar as _azimut_solar,
     temperatura_ambiente as _temperatura_ambiente,
     calcular_coeficiente_conveccion as _calcular_coeficiente_conveccion,
     calcular_sombra_arboles as _calcular_sombra_arboles,
     sombra_estructuras as _sombra_estructuras,
+    _huso_desde_timezone,
 )
 
 
 def _huso_horas(vars):
+    """Devuelve el huso real de la fecha si hay timezone disponible.
+
+    Edición y Modelo deben usar la misma geometría solar. Antes Edición
+    caía en la heurística por longitud mientras Modelo usaba timezone, por
+    lo que un mismo Excel podía cambiar de sombra/temperatura al recargarse.
+    """
     huso = vars.get("huso_horas")
-    return huso.get() if hasattr(huso, "get") else huso
+    huso_val = huso.get() if hasattr(huso, "get") else huso
+
+    tz = vars.get("timezone")
+    tz_name = tz.get() if hasattr(tz, "get") else tz
+    if tz_name:
+        dia = vars.get("dia")
+        hora = vars.get("hora")
+        dia_val = dia.get() if hasattr(dia, "get") else dia
+        hora_val = hora.get() if hasattr(hora, "get") else hora
+        try:
+            calculado = _huso_desde_timezone(str(tz_name), int(dia_val), float(hora_val))
+            if calculado is not None:
+                return calculado
+        except Exception:
+            pass
+    return huso_val
 
 
 def crear_area_grafico(vars,frame,app):
@@ -319,27 +343,19 @@ def actualizar_grafico(vars, frame):
     azimut_sol = azimut_solar(vars, theta_sol)
     I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
     
-    # Cálculo de sombras
-    vars["_scene_objects"] = adaptar_objetos_escena(vars.get("arboles", []), vars.get("estructuras", []))    
-    sombra_arboles = calcular_sombra_arboles(vars, X, Y, theta_sol, azimut_sol)
-    sombra_estruct = calcular_sombra_estructuras(vars, X, Y, theta_sol, azimut_sol)
-    sombra_total = np.clip(sombra_arboles * (1 - sombra_estruct), 0, 1)
-    
-    # Configuración de materiales
-    # CORRECCIÓN: antes el material se comparaba en minúsculas contra un
-    # dict con claves en mayúsculas ("Hormigón") y casi nunca matcheaba,
-    # cayendo en 'suelo' en silencio. asignar_materiales_grilla usa el
-    # índice normalizado MATERIALES_LOWER y avisa si no reconoce el nombre.
-    alpha, epsilon = asignar_materiales_grilla(X, Y, vars.get('estructuras', []))
-    
-    # Balance energético
+    # Cálculo térmico unificado con Modelo. El modo de superficie se lee
+    # de Preferencias; estándar preserva la física legacy y avanzado usa
+    # el balance no lineal/materiales ópticos de la v12.
+    vars["_scene_objects"] = adaptar_objetos_escena(vars.get("arboles", []), vars.get("estructuras", []))
     T_amb = temperatura_ambiente(vars)
-    q_solar = alpha * I_sol * sombra_total
-    h_c = coeficiente_conveccion(vars)
-    h_r = 4 * epsilon * sigma * (T_amb**3)
-    
-    # Cálculo final de temperatura (balance estacionario linealizado)
-    T = T_amb + q_solar / (h_c + h_r)
+    thermal = calcular_campo_termico_superficie(
+        vars, X, Y, theta_sol, azimut_sol, I_sol, T_amb, debug=False
+    )
+    T = thermal["T"]
+    sombra_total = thermal["tau"]
+    q_solar = thermal["q_solar"]
+    h_c = thermal["h_c"]
+    surface_model_label = thermal["model_label"]
     
     app_instance = vars.get('_app_instance')
     temp_unit = app_instance.get_temperature_unit_symbol() if app_instance else "K"
@@ -385,7 +401,7 @@ def actualizar_grafico(vars, frame):
     
     # Barra de color
     cbar = fig.colorbar(contorno, ax=ax, orientation='horizontal', pad=0.12)
-    cbar.set_label(f'Temperatura ({temp_unit})')
+    cbar.set_label(f'Temperatura superficial ({temp_unit})')
     
     # Dibujar elementos del modelo
     #
@@ -430,7 +446,7 @@ def actualizar_grafico(vars, frame):
             ))
     
     # Configuración adicional del gráfico
-    ax.set_title('Distribución de Temperatura')
+    ax.set_title(f'Distribución de temperatura superficial\n{surface_model_label}')
     ax.set_xlabel(f'Distancia ({distance_unit})')
     ax.set_ylabel(f'Distancia ({distance_unit})')
     # CAMBIO: la leyenda estaba comentada — las etiquetas 'Árboles',
@@ -449,7 +465,8 @@ def actualizar_grafico(vars, frame):
         f"Hora: { vars['hora'].get():.1f}\n"
         f"Radiación solar: {I_sol:.1f} W/m²\n"
         f"Viento: { vars['viento'].get()}\n"
-        f"Temp ambiente: {(app_instance.convert_temperature_for_display(T_amb) if app_instance else T_amb):.1f} {temp_unit}"
+        f"Temp ambiente: {(app_instance.convert_temperature_for_display(T_amb) if app_instance else T_amb):.1f} {temp_unit}\n"
+        f"Superficie: {surface_model_label}"
     )
     ax.text(0.02, 0.98, info_text, transform=ax.transAxes,
             verticalalignment='top', bbox=dict(facecolor='white', alpha=0.8))
@@ -608,77 +625,144 @@ def guardar_como(vars, app):
     )
     if filepath:
         archivo_actual = filepath
-        guardar(vars, app)
+        return guardar(vars, app)
+    return None
+
+
 def guardar(vars, app):
+    """Guarda escena + parámetros del cálculo en un único Excel reproducible.
+
+    Edición calcula hoy la temperatura con Tmin/Tmax (ciclo diario), incluso
+    cuando la interfaz lateral está en modo simple. Por eso se registra
+    ``modo_calculo=advanced``: al abrir este archivo en Modelo se reproduce
+    exactamente la física usada para generar el gráfico de Edición.
+    """
     global archivo_actual
-    if not  archivo_actual:
-        guardar_como(vars,app)
-        return
-    
+    if not archivo_actual:
+        return guardar_como(vars, app)
+
     try:
-        df_arboles = pd.DataFrame([{
-            'X': a.x,
-            'Y': a.y,
-            'Altura (m)': a.h,
-            'Densidad_copa (0-1)': a.rho_copa,
-            'Radio_copa (m)': a.radio_copa,
-            'Especie': getattr(a, 'especie', '')
-        } for a in  vars['arboles']])
-        
-        df_estructuras = pd.DataFrame([{
-            'Tipo': e.tipo,
-            'X_inicial': e.x1,
-            'Y_inicial': e.y1,
-            'X_final': e.x2,
-            'Y_final': e.y2,
-            'Altura (m)': e.altura,
-            'Opacidad (0-1)': e.opacidad,
-            'Material': e.material
-        } for e in  vars['estructuras']])
-        
-        with pd.ExcelWriter( archivo_actual) as writer:
-            df_arboles.to_excel(writer, sheet_name='Árboles', index=False)
-            df_estructuras.to_excel(writer, sheet_name='Estructuras', index=False)
-        
-        messagebox.showinfo("Éxito", "Archivo guardado correctamente")
+        modo_ui = app.modo_edicion.get() if hasattr(app, "modo_edicion") else "advanced"
+        save_scene_excel(
+            archivo_actual,
+            vars.get("arboles", []),
+            vars.get("estructuras", []),
+            vars,
+            calculation_mode="advanced",
+            origin="edicion",
+            app=app,
+            extra_parameters={
+                "modo_ui_origen": modo_ui,
+                "surface_model_mode": (app.surface_model_mode.get() if hasattr(app, "surface_model_mode") else "standard"),
+                "ground_vegetation_fraction": getattr(app, "settings", {}).get("ground_vegetation_fraction", 0.50),
+                "vegetation_water_availability": getattr(app, "settings", {}).get("vegetation_water_availability", 0.75),
+                "canopy_water_availability": getattr(app, "settings", {}).get("canopy_water_availability", 0.75),
+                "radiation_source_mode": getattr(getattr(app, "radiation_source_mode", None), "get", lambda: "clear_sky")(),
+                "radiation_source_label": (getattr(app, "last_meteorology_data", None) or {}).get("source_label", ""),
+                "radiation_quality": (getattr(app, "last_meteorology_data", None) or {}).get("quality", ""),
+                "meteorology_csv": os.path.basename(getattr(app, "meteorology_series_path", "") or ""),
+                "ghi_wm2": (getattr(app, "last_meteorology_data", None) or {}).get("ghi", ""),
+                "dni_wm2": (getattr(app, "last_meteorology_data", None) or {}).get("dni", ""),
+                "dhi_wm2": (getattr(app, "last_meteorology_data", None) or {}).get("dhi", ""),
+            },
+        )
+        if hasattr(app, "last_edit_excel_path"):
+            app.last_edit_excel_path = archivo_actual
+        messagebox.showinfo(
+            "Éxito",
+            "Archivo guardado correctamente.\n\n"
+            "Incluye Árboles, Estructuras y Parametros para reproducir el cálculo en Modelo."
+        )
+        return archivo_actual
     except Exception as e:
         messagebox.showerror("Error", f"Error al guardar:\n{str(e)}")
+        return None
+
+
 def abrir_archivo(vars, app, filepath=None):
+    global archivo_actual
     if filepath is None:
         filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
-    if filepath:
+    if not filepath:
+        return None
+
+    try:
+        libro = load_scene_excel(filepath)
+
+        vars['arboles'] = []
+        for _, row in libro.arboles.iterrows():
+            arbol = Arbol(
+                row['X'], row['Y'], row['Altura (m)'],
+                row['Densidad_copa (0-1)'], row['Radio_copa (m)']
+            )
+            especie = row.get('Especie', '')
+            if pd.notna(especie) and str(especie).strip():
+                arbol.especie = str(especie).strip()
+            vars['arboles'].append(arbol)
+
+        vars['estructuras'] = []
+        for _, row in libro.estructuras.iterrows():
+            vars['estructuras'].append(Estructura(
+                tipo=row['Tipo'],
+                x1=row['X_inicial'], y1=row['Y_inicial'],
+                x2=row['X_final'], y2=row['Y_final'],
+                altura=row['Altura (m)'],
+                opacidad=row['Opacidad (0-1)'],
+                material=row['Material'],
+            ))
+
+        # Archivos antiguos no tienen Parametros: en ese caso se conservan
+        # los valores actuales de la interfaz, exactamente como antes.
+        apply_parameters_to_vars(vars, libro.parametros)
+
+        if hasattr(app, "modo_edicion") and libro.parametros.get("modo_ui_origen"):
+            app.modo_edicion.set(str(libro.parametros["modo_ui_origen"]))
+            try:
+                app._toggle_edicion_mode()
+            except Exception:
+                pass
+
+        if hasattr(app, "surface_model_mode") and libro.parametros.get("surface_model_mode"):
+            mode = str(libro.parametros["surface_model_mode"]).lower()
+            if mode in {"standard", "advanced", "advanced_vegetation"}:
+                app.surface_model_mode.set(mode)
+
+        if hasattr(app, "settings"):
+            for key in ("ground_vegetation_fraction", "vegetation_water_availability", "canopy_water_availability"):
+                if key in libro.parametros:
+                    try:
+                        app.settings[key] = float(libro.parametros[key])
+                    except (TypeError, ValueError):
+                        pass
+
+        if libro.parametros.get("radiation_source_mode") and hasattr(app, "radiation_source_mode"):
+            mode_rad = str(libro.parametros["radiation_source_mode"]).strip().lower()
+            if mode_rad in {"clear_sky", "manual_measured", "manual_scenario", "observed_series"}:
+                app.radiation_source_mode.set(mode_rad)
+        met_name = str(libro.parametros.get("meteorology_csv", "") or "").strip()
+        if met_name and hasattr(app, "meteorology_service"):
+            candidates = [met_name]
+            project = getattr(getattr(app, "project_manager", None), "current_project", None)
+            if project is not None:
+                candidates.insert(0, os.path.join(project.root_path, "meteorologia", os.path.basename(met_name)))
+            for met_path in candidates:
+                if os.path.exists(met_path):
+                    try:
+                        app.meteorology_service.load_series(met_path, timezone=app._timezone_actual())
+                        app.meteorology_series_path = met_path
+                        break
+                    except Exception:
+                        pass
         try:
-            df_arboles = pd.read_excel(filepath, sheet_name='Árboles')
-            vars['arboles'] = [
-                Arbol(row['X'], row['Y'], row['Altura (m)'],row['Densidad_copa (0-1)'], row['Radio_copa (m)']) 
-                for _, row in df_arboles.iterrows()
-            ]
-            if 'Especie' in df_arboles.columns:
-                for arbol, row in zip(vars['arboles'], df_arboles.itertuples()):
-                    arbol.especie = row.Especie if getattr(row, "Especie", "") else ""
-            
-            df_estructuras = pd.read_excel(filepath, sheet_name='Estructuras')
-            vars['estructuras'] = []
-            for _, row in df_estructuras.iterrows():
-                estructura = Estructura(
-                    tipo=row['Tipo'],
-                    x1=row['X_inicial'],
-                    y1=row['Y_inicial'],
-                    x2=row['X_final'],
-                    y2=row['Y_final'],
-                    altura=row['Altura (m)'],
-                    opacidad=row['Opacidad (0-1)'],
-                    material=row['Material']
-                )
-                vars['estructuras'].append(estructura)
-            
-            archivo_actual = filepath
-            #actualizar_grafico(vars,app.frame2)
-            target_frame = getattr(app, "frame7", app.frame2)
-            actualizar_grafico(vars, target_frame)
-            messagebox.showinfo("Éxito", "Archivo cargado correctamente")
-            return filepath
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al cargar archivo:\n{str(e)}")
-            return None
-    return None
+            app._refresh_meteorology_status()
+        except Exception:
+            pass
+
+        archivo_actual = filepath
+        target_frame = getattr(app, "frame7", app.frame2)
+        actualizar_grafico(vars, target_frame)
+        messagebox.showinfo("Éxito", "Archivo cargado correctamente")
+        return filepath
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al cargar archivo:\n{str(e)}")
+        return None

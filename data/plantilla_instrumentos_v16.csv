@@ -1,0 +1,11 @@
+variable,instrumento,marca_modelo,numero_serie,resolucion,exactitud_declarada,rango,altura_m,fecha_calibracion,observaciones
+Ta,,,,,,,,,
+RH,,,,,,,,,
+viento,,,,,,,,,
+GHI,,,,,,,,,
+DNI,,,,,,,,,
+DHI,,,,,,,,,
+Tg,,,,,,,,,
+Tmrt_directa,,,,,,,,,
+T_superficie,,,,,,,,,
+humedad_suelo,,,,,,,,,

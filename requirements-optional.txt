@@ -1,0 +1,3 @@
+# Dependencias científicas opcionales
+pvlib>=0.10,<1
+pythermalcomfort>=4.4
