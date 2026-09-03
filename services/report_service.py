@@ -31,29 +31,28 @@ def generar_informe_proyecto(app, project, output_path: str) -> str:
     """Arma el PDF completo y lo guarda en output_path. Devuelve la
     ruta final (puede diferir si output_path ya existía y se versionó)."""
     from fpdf import FPDF
-    from core.file_versioning import safe_path
 
     snapshots = getattr(app, "snapshots", []) or []
     resumen = analysis_service.resumen_estadistico(snapshots)
 
-    analisis_dir = os.path.join(project.root_path, "resultados", "analisis")
+    analisis_dir = project.layout.project_results_dir
     os.makedirs(analisis_dir, exist_ok=True)
 
     comparativo_path = None
     if resumen["porcentaje_sombra"]["n"]:
         comparativo_path = analysis_service.grafico_comparativo(
-            snapshots, os.path.join(analisis_dir, "comparativo_elementos.png"),
+            snapshots, project.layout.comparison_chart,
         )
 
     dispersion_path, pendiente, r2 = analysis_service.dispersión_sombra_tmrt(
-        snapshots, os.path.join(analisis_dir, "dispersion_sombra_tmrt.png"),
+        snapshots, project.layout.scatter_chart,
     )
 
     # NUEVO: tabla también en Excel, junto al PDF en la misma carpeta.
     if snapshots:
         try:
             analysis_service.exportar_tabla_excel(
-                snapshots, os.path.join(analisis_dir, "elementos_proyecto.xlsx"),
+                snapshots, project.layout.elements_excel,
             )
         except Exception as exc:
             print(f"[informe] No se pudo exportar la tabla a Excel: {exc}")
@@ -68,7 +67,7 @@ def generar_informe_proyecto(app, project, output_path: str) -> str:
         )
         sensibilidad_path, _, _ = analysis_service.curva_sensibilidad(
             calculador, temp_ambient, fecha, hora,
-            os.path.join(analisis_dir, "sensibilidad_sombra.png"),
+            project.layout.sensitivity_chart,
         )
     except Exception as exc:
         print(f"[informe] No se pudo generar la curva de sensibilidad: {exc}")
@@ -308,6 +307,6 @@ def generar_informe_proyecto(app, project, output_path: str) -> str:
             pdf.cell(0, 7, txt="Clasificacion fotografica sombra / sol:", ln=True)
             pdf.image(classification_path, x=25, y=None, w=150)
 
-    final_path = safe_path(os.path.dirname(output_path), os.path.basename(output_path))
-    pdf.output(str(final_path))
-    return str(final_path)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    pdf.output(str(output_path))
+    return str(output_path)

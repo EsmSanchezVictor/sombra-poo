@@ -265,7 +265,7 @@ def setup_panel_4(app):
     ).grid(row=1, column=0, sticky="ew", padx=(0, 12), pady=3)
     tk.Button(
         acciones_frame,
-        text="Guardar Excel",
+        text="Respaldar Excel",
         command=app.guardar_excel_modelo,
         bg="#4CAF50",
         fg="white",

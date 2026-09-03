@@ -1,4 +1,3 @@
-from tkinter import filedialog
 from fpdf import FPDF
 import matplotlib.pyplot as plt
 import tempfile
@@ -28,11 +27,15 @@ class PDFReportGenerator:
         # Información sobre las áreas y sombra
         self.add_area_info(pdf)
 
-        # Guardar el PDF
-        file_name = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF files", "*.pdf")])
-        if file_name:
-            pdf.output(file_name)
-            print(f"Informe guardado en {file_name}")
+        # v19: Guardar informe nunca pregunta destino; forma parte del proyecto.
+        project = getattr(getattr(self.app, "project_manager", None), "current_project", None)
+        if project is None:
+            return None
+        file_name = project.layout.last_element_report
+        os.makedirs(os.path.dirname(file_name), exist_ok=True)
+        pdf.output(file_name)
+        print(f"Informe guardado en {file_name}")
+        return file_name
 
     def add_image_with_selection(self, pdf):
         # Guardar imagen temporal con las áreas de cálculo y referencia

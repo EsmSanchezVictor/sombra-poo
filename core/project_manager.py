@@ -9,7 +9,6 @@ import zipfile
 from datetime import datetime
 from tkinter import filedialog, messagebox, simpledialog
 
-from core.file_versioning import safe_path
 from core.project import Project
 from ui import dialogs
 
@@ -23,6 +22,9 @@ class ProjectManager:
         self.settings_manager = settings_manager or getattr(app, "settings_manager", None)
         self.current_project: Project | None = None
         self.projects_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "proyectos"))
+        self._autosave_after_id = None
+        self._autosave_in_progress = False
+        self._max_backups = 10
 
     def new_project(self) -> None:
         """Crea un proyecto con nombre y ubicación."""
@@ -43,11 +45,16 @@ class ProjectManager:
         project.ensure_structure()
         self.current_project = project
         self.app.current_project_path = project.state_path
-        self.app._reset_scene()
-        self.app._reset_vars_to_defaults()
-        self.app.apply_project_location(location)
+        previous_tracking = getattr(self.app, "_suspend_autosave_tracking", False)
+        self.app._suspend_autosave_tracking = True
+        try:
+            self.app._reset_scene()
+            self.app._reset_vars_to_defaults()
+            self.app.apply_project_location(location)
+        finally:
+            self.app._suspend_autosave_tracking = previous_tracking
         self.app.is_dirty = False
-        self._save_project_file(project.state_path)
+        self._save_project_file(project.state_path, autosave=True)
         self._update_last_project_path(project.state_path)
         self.app.on_project_loaded()
 
@@ -65,28 +72,115 @@ class ProjectManager:
             return False
         project = Project.from_config_path(file_path)
         project.ensure_structure()
+        payload = self._prepare_payload_for_layout(project, payload)
         project.next_n = int(payload.get("next_n", 1))
         self.current_project = project
-        self.app_state.apply_payload(payload)        
-        self.app.current_project_path = file_path
+        previous_tracking = getattr(self.app, "_suspend_autosave_tracking", False)
+        self.app._suspend_autosave_tracking = True
+        try:
+            self.app_state.apply_payload(payload)
+        finally:
+            self.app._suspend_autosave_tracking = previous_tracking
+        # Desde v19 la ruta canónica es siempre <proyecto>/<proyecto>.sombra,
+        # incluso cuando se abrió un config/project.json legacy.
+        self.app.current_project_path = project.state_path
         self.app.is_dirty = False
-        self._update_last_project_path(file_path)
+        self._update_last_project_path(project.state_path)
         self.app.on_project_loaded()
+        # Persistir inmediatamente la migración de rutas/estructura.
+        self._save_project_file(project.state_path, autosave=True)
         return True
+    def schedule_autosave(self, delay_ms: int = 900) -> None:
+        """Programa guardado automático consolidado sin abrir diálogos."""
+        if not self.current_project or self._autosave_in_progress:
+            return
+        root = getattr(self.app, "root", None)
+        if root is None:
+            return
+        if self._autosave_after_id is not None:
+            try:
+                root.after_cancel(self._autosave_after_id)
+            except Exception:
+                pass
+        self._autosave_after_id = root.after(delay_ms, self.autosave_project)
+
+    def autosave_project(self) -> bool:
+        """Actualiza estado + archivos de trabajo en sus rutas fijas."""
+        self._autosave_after_id = None
+        if not self.current_project or self._autosave_in_progress:
+            return False
+        self._autosave_in_progress = True
+        try:
+            self._save_workspace_files()
+            return self._save_project_file(self.current_project.state_path, autosave=True)
+        finally:
+            self._autosave_in_progress = False
+
     def save_project(self) -> bool:
-        """Guarda el proyecto actual o solicita un destino."""
-        if self.current_project:
-            return self._save_project_file(self.current_project.state_path)
-        self.save_project_as()
-        return False
+        """Guardar = consolidar y crear un respaldo local, sin preguntar ruta.
 
-    def save_project_as(self) -> None:
-        """NO-OP temporal para guardar como."""
-        messagebox.showinfo(
-            "Guardar como",
-            "Guardar como se implementará luego; use Exportar .3es",
+        El estado vivo ya se autosalva. Ctrl+S/botón Guardar actúa como
+        respaldo explícito y crea un .3es timestampado en ``respaldos/``.
+        """
+        if not self.current_project:
+            return bool(self.save_project_as())
+        self._save_workspace_files()
+        if not self._save_project_file(self.current_project.state_path, autosave=False):
+            return False
+        backup = self._create_backup()
+        if backup and hasattr(self.app, "status_saved_var"):
+            self.app.status_saved_var.set(
+                f"Último guardado: {datetime.now().isoformat(sep=' ', timespec='seconds')} · respaldo creado"
+            )
+        return True
+
+    def save_project_as(self) -> bool:
+        """Copia el proyecto completo a un nuevo destino y lo abre.
+
+        Esta es la única acción de guardado que solicita ubicación.
+        """
+        if not self.current_project:
+            messagebox.showwarning("Guardar como", "Primero cree o abra un proyecto.")
+            return False
+        selected = filedialog.asksaveasfilename(
+            title="Guardar proyecto como",
+            defaultextension=".sombra",
+            filetypes=[("Proyecto sombra", "*.sombra")],
+            initialfile=f"{self.current_project.name}.sombra",
         )
-
+        if not selected:
+            return False
+        self.autosave_project()
+        base_name = os.path.splitext(os.path.basename(selected))[0].strip() or "proyecto"
+        parent = os.path.dirname(os.path.abspath(selected))
+        target_root = os.path.join(parent, base_name)
+        if os.path.exists(target_root):
+            messagebox.showerror("Guardar como", f"Ya existe la carpeta:\n{target_root}")
+            return False
+        try:
+            shutil.copytree(
+                self.current_project.root_path, target_root,
+                ignore=shutil.ignore_patterns("respaldos"),
+            )
+            old_state = os.path.join(target_root, f"{self.current_project.name}.sombra")
+            new_project = Project(target_root)
+            copied_state = old_state if os.path.exists(old_state) else os.path.join(target_root, "config", "project.json")
+            payload = self._load_project_file(copied_state) if os.path.exists(copied_state) else {}
+            if os.path.exists(old_state) and os.path.abspath(old_state) != os.path.abspath(new_project.state_path):
+                os.remove(old_state)
+            new_project.ensure_structure()
+            payload = self._prepare_payload_for_layout(new_project, payload or {})
+            payload.setdefault("meta", {})["name"] = base_name
+            payload["name"] = base_name
+            payload["meta"]["saved_at"] = datetime.now().isoformat(timespec="seconds")
+            with open(new_project.state_path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2, ensure_ascii=False)
+            with open(new_project.config_path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            messagebox.showerror("Guardar como", f"No se pudo crear la copia:\n{exc}")
+            return False
+        return self.open_project_from_path(new_project.state_path)
 
     def duplicate_project(self) -> bool:
         """Duplica el proyecto actual bajo /proyectos."""
@@ -104,7 +198,10 @@ class ProjectManager:
         source_root = self.current_project.root_path
         target_dir = self._next_available_project_dir(new_name)
         try:
-            shutil.copytree(source_root, target_dir)
+            shutil.copytree(
+                source_root, target_dir,
+                ignore=shutil.ignore_patterns("respaldos"),
+            )
             # Limpiar el índice viejo (con el nombre del proyecto ORIGINAL)
             # que shutil.copytree trajo junto con el resto de la carpeta —
             # el nuevo va a llamarse como new_name, no como el proyecto de origen.
@@ -113,9 +210,11 @@ class ProjectManager:
                 os.remove(old_index)
 
             new_project = Project(target_dir)
+            new_project.ensure_structure()
             legacy_state = os.path.join(target_dir, "config", "estado.json")
             source_for_payload = legacy_state if os.path.exists(legacy_state) else new_project.config_path
             payload = self._load_project_file(source_for_payload) if os.path.exists(source_for_payload) else {}
+            payload = self._prepare_payload_for_layout(new_project, payload or {})
             meta = payload.get("meta", {}) if isinstance(payload, dict) else {}
             meta["name"] = new_name
             meta["cloned_from"] = self.current_project.name
@@ -142,7 +241,7 @@ class ProjectManager:
         if not self.current_project:
             messagebox.showerror("Exportar .3es", "No hay un proyecto abierto para exportar.")
             return False
-        if not self.save_project():
+        if not self.autosave_project():
             return False
         file_path = filedialog.asksaveasfilename(
             title="Exportar proyecto",
@@ -153,10 +252,18 @@ class ProjectManager:
             return False
         try:
             root_path = self.current_project.root_path
+            backups_dir = os.path.abspath(self.current_project.layout.backups_dir)
             with zipfile.ZipFile(file_path, "w", zipfile.ZIP_DEFLATED) as archive:
-                for folder, _dirs, files in os.walk(root_path):
+                for folder, dirs, files in os.walk(root_path):
+                    # Los respaldos locales no se anidan dentro de una exportación.
+                    dirs[:] = [
+                        d for d in dirs
+                        if os.path.abspath(os.path.join(folder, d)) != backups_dir
+                    ]
                     for filename in files:
                         full_path = os.path.join(folder, filename)
+                        if os.path.commonpath([os.path.abspath(full_path), backups_dir]) == backups_dir:
+                            continue
                         rel_path = os.path.relpath(full_path, root_path)
                         archive.write(full_path, arcname=rel_path)
             return True
@@ -203,7 +310,7 @@ class ProjectManager:
             messagebox.showerror("Importar .3es", f"No se pudo importar el proyecto: {exc}")
             return False
 
-    def _save_project_file(self, path: str) -> bool:
+    def _save_project_file(self, path: str, *, autosave: bool = False) -> bool:
         """Escribe el JSON de proyecto.
 
         BUG CORREGIDO: antes se escribía vía `safe_path(dirname, basename)`,
@@ -233,7 +340,8 @@ class ProjectManager:
                 json.dump(payload, handle, indent=2, ensure_ascii=False)
             with open(self.current_project.config_path, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2, ensure_ascii=False)
-            self._sync_excel_copies()
+            self.current_project.layout.write_structure_manifest()
+            self.current_project.layout.write_inventory()
             self.app.is_dirty = False
             self.app.current_project_path = str(path)
             self._update_last_project_path(str(path))
@@ -242,6 +350,63 @@ class ProjectManager:
         except Exception as exc:
             messagebox.showerror("Guardar proyecto", f"No se pudo guardar el proyecto: {exc}")
             return False
+
+    def _prepare_payload_for_layout(self, project: Project, payload: dict) -> dict:
+        """Adapta rutas legacy a la estructura v19 sin perder datos."""
+        payload = dict(payload or {})
+        paths = dict(payload.get("paths") or {})
+        root = project.root_path
+        layout = project.layout
+
+        def _src(key):
+            value = paths.get(key)
+            if not value:
+                return None
+            return value if os.path.isabs(value) else os.path.join(root, value)
+
+        def _copy_scene(key, target, legacy_dirs):
+            source = _src(key)
+            if not source or not os.path.exists(source):
+                candidates = []
+                for rel in legacy_dirs:
+                    folder = os.path.join(root, rel)
+                    if os.path.isdir(folder):
+                        candidates.extend(
+                            os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(".xlsx")
+                        )
+                source = max(candidates, key=os.path.getmtime) if candidates else None
+            if source and os.path.exists(source):
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                if os.path.abspath(source) != os.path.abspath(target):
+                    shutil.copy2(source, target)
+                paths[key] = os.path.relpath(target, root)
+
+        _copy_scene("edit_excel", layout.edit_excel, ("Planos", "excels"))
+        _copy_scene("model_excel", layout.model_excel, ("modelos", "excels"))
+
+        # Una vez consolidados los Excel activos, las carpetas antiguas ya no
+        # forman parte del esquema vivo. Se preservan completas para auditoría
+        # en _legacy_v18, sin borrar información silenciosamente.
+        for legacy_rel in ("Planos", "modelos", "excels"):
+            try:
+                layout.archive_legacy_folder(legacy_rel)
+            except Exception:
+                pass
+
+        image = paths.get("current_image")
+        if image:
+            candidate = os.path.join(layout.images_dir, os.path.basename(image))
+            if os.path.exists(candidate):
+                paths["current_image"] = os.path.relpath(candidate, root)
+        met = paths.get("meteorology_csv")
+        if met:
+            candidate = os.path.join(layout.meteorology_dir, os.path.basename(met))
+            if os.path.exists(candidate):
+                paths["meteorology_csv"] = os.path.relpath(candidate, root)
+        paths["analysis_database"] = os.path.relpath(layout.analysis_db, root)
+        payload["paths"] = paths
+        payload["layout_version"] = 2
+        return payload
 
     def _load_project_file(self, path: str) -> dict | None:
         """Lee un JSON de proyecto con control de errores."""
@@ -360,18 +525,58 @@ class ProjectManager:
             version += 1
 
 
-    def _sync_excel_copies(self) -> None:
+    def _save_workspace_files(self) -> None:
+        """Guarda Edición y Modelo en nombres estables sin mensajes."""
         if not self.current_project:
             return
-        planos_dir = os.path.join(self.current_project.root_path, "Planos")
-        modelos_dir = os.path.join(self.current_project.root_path, "modelos")
-        os.makedirs(planos_dir, exist_ok=True)
-        os.makedirs(modelos_dir, exist_ok=True)
-        if self.app.last_edit_excel_path and os.path.exists(self.app.last_edit_excel_path):
-            target = safe_path(planos_dir, os.path.basename(self.app.last_edit_excel_path))
-            shutil.copy2(self.app.last_edit_excel_path, target)
-            self.app.last_edit_excel_path = str(target)
-        if self.app.last_model_excel_path and os.path.exists(self.app.last_model_excel_path):
-            target = safe_path(modelos_dir, os.path.basename(self.app.last_model_excel_path))
-            shutil.copy2(self.app.last_model_excel_path, target)
-            self.app.last_model_excel_path = str(target)
+        self.current_project.ensure_structure()
+        try:
+            import diseño as design
+            path = design.guardar(
+                self.app.vars, self.app,
+                filepath=self.current_project.layout.edit_excel, notify=False,
+            )
+            if path:
+                self.app.last_edit_excel_path = path
+        except Exception as exc:
+            print(f"[autosave] Edición no guardada: {exc}")
+        try:
+            import modelo_con_excel as modelo
+            path = modelo.guardar_excel(
+                self.app.vars_modelo, filepath=self.current_project.layout.model_excel,
+                app=self.app, notify=False,
+            )
+            if path:
+                self.app.last_model_excel_path = path
+        except Exception as exc:
+            print(f"[autosave] Modelo no guardado: {exc}")
+
+    def _create_backup(self) -> str | None:
+        """Crea un .3es en respaldos/ sin incluir respaldos previos."""
+        if not self.current_project:
+            return None
+        layout = self.current_project.layout
+        layout.ensure()
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
+        target = os.path.join(layout.backups_dir, f"{self.current_project.name}_{stamp}.3es")
+        try:
+            with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+                for folder, dirs, files in os.walk(self.current_project.root_path):
+                    # Evitar backups recursivos.
+                    dirs[:] = [d for d in dirs if os.path.abspath(os.path.join(folder, d)) != os.path.abspath(layout.backups_dir)]
+                    for filename in files:
+                        full_path = os.path.join(folder, filename)
+                        if os.path.commonpath([os.path.abspath(full_path), os.path.abspath(layout.backups_dir)]) == os.path.abspath(layout.backups_dir):
+                            continue
+                        archive.write(full_path, arcname=os.path.relpath(full_path, self.current_project.root_path))
+            backups = sorted(
+                [os.path.join(layout.backups_dir, f) for f in os.listdir(layout.backups_dir) if f.lower().endswith(".3es")],
+                key=os.path.getmtime, reverse=True,
+            )
+            for old in backups[self._max_backups:]:
+                try: os.remove(old)
+                except OSError: pass
+            return target
+        except Exception as exc:
+            print(f"[respaldo] No se pudo crear respaldo: {exc}")
+            return None

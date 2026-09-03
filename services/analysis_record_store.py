@@ -13,7 +13,10 @@ import os
 import sqlite3
 import uuid
 import re
+import shutil
 from typing import Iterable
+
+from core.project_layout import ProjectLayout
 
 
 SCHEMA_VERSION = 1
@@ -24,10 +27,15 @@ class AnalysisRecordStore:
 
     def __init__(self, project_root: str):
         self.project_root = os.path.abspath(project_root)
-        data_dir = os.path.join(self.project_root, "datos")
-        os.makedirs(data_dir, exist_ok=True)
-        self.db_path = os.path.join(data_dir, "analisis.sqlite3")
+        self.layout = ProjectLayout(self.project_root)
+        self.layout.ensure()
+        old_db = os.path.join(self.project_root, "datos", "analisis.sqlite3")
+        if os.path.exists(old_db) and not os.path.exists(self.layout.analysis_db):
+            os.makedirs(os.path.dirname(self.layout.analysis_db), exist_ok=True)
+            shutil.move(old_db, self.layout.analysis_db)
+        self.db_path = self.layout.analysis_db
         self._ensure_schema()
+        self.migrate_artifacts_to_layout()
 
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
@@ -250,6 +258,83 @@ class AnalysisRecordStore:
             entry["complete"] = True
             self.upsert(entry, complete=True)
             migrated += 1
+        return migrated
+
+
+    def _resolve_existing_path(self, rel_or_abs: str | None) -> str | None:
+        if not rel_or_abs:
+            return None
+        path = rel_or_abs if os.path.isabs(rel_or_abs) else os.path.join(self.project_root, rel_or_abs)
+        if os.path.exists(path):
+            return path
+        rel = str(rel_or_abs).replace("\\", "/")
+        aliases = {
+            "imagenes/": "entradas/imagenes/",
+            "meteorologia/": "entradas/meteorologia/",
+        }
+        for old, new in aliases.items():
+            if rel.startswith(old):
+                candidate = os.path.join(self.project_root, new + rel[len(old):])
+                if os.path.exists(candidate):
+                    return candidate
+        return None
+
+    def migrate_artifacts_to_layout(self) -> int:
+        """Reubica artefactos v17/v18 por ``analysis_id`` y actualiza SQLite.
+
+        Es idempotente: si el destino ya existe solo corrige la ruta guardada.
+        La foto original queda compartida en ``entradas/imagenes``; todo lo
+        derivado de un análisis vive en su carpeta propia.
+        """
+        try:
+            entries = self.list_entries(complete_only=False)
+        except Exception:
+            return 0
+        migrated = 0
+        for entry in entries:
+            aid = entry.get("analysis_id")
+            if not aid:
+                continue
+            targets = self.layout.element_paths(aid)
+            changed = False
+
+            # Imagen compartida: actualizar prefijo después de migrar imagenes/.
+            image = entry.get("image")
+            src_image = self._resolve_existing_path(image)
+            if src_image:
+                rel_image = os.path.relpath(src_image, self.project_root)
+                if rel_image != image:
+                    entry["image"] = rel_image; changed = True
+
+            for key in ("curve", "matrix", "reference", "calc_data",
+                        "reference_data", "photo_analysis_data", "tmrt_data",
+                        "histogram", "shadow_classification", "temperature_summary"):
+                target = targets[key]
+                source = self._resolve_existing_path(entry.get(key))
+                if source and os.path.abspath(source) != os.path.abspath(target):
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    if not os.path.exists(target):
+                        shutil.move(source, target)
+                if os.path.exists(target):
+                    rel_target = os.path.relpath(target, self.project_root)
+                    if entry.get(key) != rel_target:
+                        entry[key] = rel_target; changed = True
+            if changed:
+                self.upsert(entry, complete=bool(entry.get("complete", True)))
+                migrated += 1
+        # Todo archivo viejo no referenciado queda preservado, pero separado
+        # del esquema activo para que la raíz del proyecto sea legible.
+        for rel in (
+            "curvas", "matrices", "mascaras", "datos",
+            os.path.join("resultados", "histogramas"),
+            os.path.join("resultados", "curvas_nivel"),
+            os.path.join("resultados", "excels"),
+            os.path.join("resultados", "mascaras_sombra"),
+        ):
+            try:
+                self.layout.archive_legacy_folder(rel)
+            except Exception:
+                pass
         return migrated
 
     def count(self, *, complete_only: bool = True) -> int:

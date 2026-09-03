@@ -10,59 +10,37 @@ from core.file_versioning import safe_path
 class DatasetSaver:
     def __init__(self, app):
         self.app = app
-        self.mask_data = {}
-        self.dataset_dir = "DataSetSombra"  # Nueva carpeta principal
-        os.makedirs(self.dataset_dir, exist_ok=True)  # Crear carpeta si no existe
-        self.load_existing_data()
-        
-    def load_existing_data(self):
-        """Carga los datos existentes del archivo mascaras.json si existe"""
-        try:
-            with open('mascaras.json', 'r') as f:
-                self.mask_data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            # Si el archivo no existe o está vacío, empezamos con una estructura básica
-            self.mask_data = {
-                "_via_settings": {
-                    "ui": {
-                        "annotation_editor_height": 25,
-                        "annotation_editor_fontsize": 0.8,
-                        "leftsidebar_width": 18,
-                        "image_grid": {
-                            "img_height": 80,
-                            "rshape_fill": "none",
-                            "rshape_fill_opacity": 0.3,
-                            "rshape_stroke": "yellow",
-                            "rshape_stroke_width": 2,
-                            "show_region_shape": True,
-                            "show_image_policy": "all"
-                        },
-                        "image": {
-                            "region_label": "__via_region_id__",
-                            "region_color": "__via_default_region_color__",
-                            "region_label_font": "10px Sans",
-                            "on_image_annotation_editor_placement": "NEAR_REGION"
-                        }
-                    },
-                    "core": {
-                        "buffer_size": "18",
-                        "filepath": {},
-                        "default_filepath": ""
-                    },
-                    "project": {
-                        "name": f"via_project_{datetime.now().strftime('%d%b%Y_%Hh%Mm')}"
-                    }
-                },
-                "_via_img_metadata": {},
-                "_via_attributes": {
-                    "region": {},
-                    "file": {}
-                },
-                "_via_data_format_version": "2.0.10",
-                "_via_image_id_list": []
-            }
+        self.mask_data = self._empty_via_data()
+        self._loaded_project_root = None
 
-    def save_dataset(self, img_filename=None, mask_filename=None, save_image=True):
+    @staticmethod
+    def _empty_via_data():
+        return {
+            "_via_settings": {"ui": {}, "core": {"filepath": {}, "default_filepath": ""},
+                              "project": {"name": "sombra_project"}},
+            "_via_img_metadata": {},
+            "_via_attributes": {"region": {}, "file": {}},
+            "_via_data_format_version": "2.0.10",
+            "_via_image_id_list": [],
+        }
+
+    def load_existing_data(self):
+        """Carga anotaciones VIA desde analisis/dataset del proyecto activo."""
+        project = getattr(getattr(self.app, "project_manager", None), "current_project", None)
+        if project is None:
+            self.mask_data = self._empty_via_data(); return
+        root = os.path.abspath(project.root_path)
+        if self._loaded_project_root == root:
+            return
+        path = project.layout.via_annotations
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                self.mask_data = json.load(fh)
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.mask_data = self._empty_via_data()
+        self._loaded_project_root = root
+
+    def save_dataset(self, img_filename=None, mask_filename=None, save_image=False):
         """Guarda la imagen y la máscara en los directorios correspondientes"""
         project = getattr(self.app, "project_manager", None)
         current_project = project.current_project if project else None
@@ -74,7 +52,8 @@ class DatasetSaver:
             
         try:
             current_project.ensure_structure()
-            image_root = os.path.join(current_project.root_path, "imagenes")
+            self.load_existing_data()
+            image_root = current_project.layout.images_dir
             os.makedirs(image_root, exist_ok=True)
             if img_filename is None or mask_filename is None:
                 n = current_project.allocate_n()
@@ -83,17 +62,25 @@ class DatasetSaver:
             img_filename = img_filename or f"elemento{n}.jpg"
             mask_filename = mask_filename or f"Melemento{n}.png"
             
-            # Guardar imagen original o reutilizar imagen actual validada
-            img_path = safe_path(image_root, img_filename)
-            img_path = str(img_path)
-            if save_image:
+            # La imagen original se importa una sola vez a entradas/imagenes.
+            # Guardar Dataset actualiza anotaciones/máscaras; nunca duplica una
+            # fotografía que ya pertenece al proyecto.
+            src_path = getattr(self.app, "current_image_path", None)
+            src_abs = os.path.abspath(src_path) if src_path and os.path.exists(src_path) else None
+            image_root_abs = os.path.abspath(image_root)
+            already_in_project = bool(
+                src_abs and os.path.commonpath([src_abs, image_root_abs]) == image_root_abs
+            )
+            if already_in_project:
+                img_path = src_abs
+            elif src_abs:
+                # Entrada externa: importación deduplicada por contenido.
+                img_path = current_project.layout.import_input_file(src_abs, image_root)
+            elif save_image:
+                img_path = str(safe_path(image_root, img_filename))
                 cv2.imwrite(img_path, cv2.cvtColor(self.app.img_rgb, cv2.COLOR_RGB2BGR))
             else:
-                src_path = getattr(self.app, "current_image_path", None)
-                if not src_path or not os.path.exists(src_path):
-                    raise FileNotFoundError(f"Imagen actual inexistente: {src_path}")
-                if os.path.abspath(src_path) != os.path.abspath(img_path):
-                    shutil.copy2(src_path, img_path)
+                raise FileNotFoundError(f"Imagen actual inexistente: {src_path}")
             if not os.path.exists(img_path):
                 raise FileNotFoundError(f"No existe imagen para dataset: {img_path}")
 
@@ -118,13 +105,17 @@ class DatasetSaver:
             print(f"Datos guardados correctamente: {img_filename}")
         except Exception as e:
             print(f"Error al guardar dataset: {str(e)}")
-            self.app.project_manager.save_project()
+            try:
+                self.app.project_manager.autosave_project()
+            except Exception:
+                pass
+            raise
 
     def update_mask_json(self, img_filename, mask_filename):
         """Actualiza el archivo JSON con los nuevos datos de la máscara"""
         try:
             current_project = self.app.project_manager.current_project
-            image_path = getattr(self.app, "current_image_path", None) or os.path.join(current_project.root_path, "imagenes", img_filename)
+            image_path = getattr(self.app, "current_image_path", None) or os.path.join(current_project.layout.images_dir, img_filename)
             if not os.path.exists(image_path):
                 raise FileNotFoundError(f"No se puede actualizar JSON sin imagen existente: {image_path}")
             img_filename = os.path.basename(image_path)            
@@ -199,9 +190,10 @@ class DatasetSaver:
             if file_id not in self.mask_data["_via_image_id_list"]:
                 self.mask_data["_via_image_id_list"].append(file_id)
             
-            # Guardar JSON
-            with open('mascaras.json', 'w') as f:
-                json.dump(self.mask_data, f, indent=2)
+            # Guardar JSON dentro del proyecto.
+            os.makedirs(current_project.layout.dataset_dir, exist_ok=True)
+            with open(current_project.layout.via_annotations, 'w', encoding='utf-8') as f:
+                json.dump(self.mask_data, f, indent=2, ensure_ascii=False)
                 
         except Exception as e:
             print(f"Error al actualizar JSON: {str(e)}")
@@ -273,11 +265,13 @@ class DatasetSaver:
             else:
                 raise ValueError(f"Tipo de selección no soportado: {selection_type}")
 
-            # Crear directorio si no existe
-            os.makedirs(os.path.join(current_project.root_path, "mascaras"), exist_ok=True)
-            
-            # Guardar máscara como imagen PNG binaria (blanco=selección, negro=fondo)
-            mask_path = safe_path(os.path.join(current_project.root_path, "mascaras"), mask_filename)
+            # v19: la máscara del dataset pertenece al análisis activo.
+            analysis_id = getattr(self.app, "current_analysis_id", None)
+            if analysis_id:
+                mask_path = current_project.layout.element_paths(analysis_id)["dataset_mask"]
+            else:
+                mask_path = os.path.join(current_project.layout.dataset_dir, mask_filename)
+            os.makedirs(os.path.dirname(mask_path), exist_ok=True)
             if not cv2.imwrite(str(mask_path), mask):
                 raise RuntimeError(f"No se pudo guardar la máscara en {mask_path}")
 

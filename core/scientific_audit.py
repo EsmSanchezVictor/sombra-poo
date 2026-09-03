@@ -223,8 +223,14 @@ def _check_project_structure(items: list[AuditItem], project_root: str | None) -
         items.append(_item("project.none", "info", "Proyecto abierto", "Auditoría estática: no se proporcionó carpeta de proyecto."))
         return
     required = [
-        "imagenes", "curvas", "matrices", "mascaras", "modelos", "excels",
-        "meteorologia", os.path.join("resultados", "analisis"), "config",
+        os.path.join("entradas", "imagenes"),
+        os.path.join("entradas", "meteorologia"),
+        "escena",
+        os.path.join("analisis", "elementos"),
+        os.path.join("resultados", "proyecto"),
+        os.path.join("resultados", "validacion"),
+        os.path.join("resultados", "informes"),
+        "respaldos", "config",
     ]
     missing = [rel for rel in required if not os.path.isdir(os.path.join(project_root, rel))]
     if missing:

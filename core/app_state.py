@@ -67,6 +67,7 @@ class AppState:
         vars_data = self._serialize_vars(self.app.vars)
         return {
             "version": 1,
+            "layout_version": 2,
             "meta": meta.__dict__,
             "name": project.name,
             "location": self.app.current_location or {},
@@ -93,7 +94,14 @@ class AppState:
                 "edit_excel": self._rel(project.root_path, self.app.last_edit_excel_path),
                 "model_excel": self._rel(project.root_path, self.app.last_model_excel_path),
                 "meteorology_csv": self._rel(project.root_path, getattr(self.app, "meteorology_series_path", None)),
-                "analysis_database": os.path.join("datos", "analisis.sqlite3"),
+                "analysis_database": os.path.join("analisis", "analisis.sqlite3"),
+                "comparative_chart": self._rel(project.root_path, getattr(self.app, "last_comparative_chart_path", None)),
+                "scatter_chart": self._rel(project.root_path, getattr(self.app, "last_scatter_chart_path", None)),
+                "sensitivity_chart": self._rel(project.root_path, getattr(self.app, "last_sensitivity_chart_path", None)),
+                "elements_excel": self._rel(project.root_path, getattr(self.app, "last_elements_excel_path", None)),
+                "full_report": self._rel(project.root_path, getattr(self.app, "last_report_path", None)),
+                "validation_report": self._rel(project.root_path, project.layout.validation_report if os.path.exists(project.layout.validation_report) else None),
+                "audit_json": self._rel(project.root_path, project.layout.audit_json if os.path.exists(project.layout.audit_json) else None),
             },
             "last_results_meta": {
                 "tmrt_sun": self._to_float(getattr(self.app, "tmrt_result", {}).get("Tmrt_sol") if self.app.tmrt_result else None),
@@ -184,6 +192,13 @@ class AppState:
         self.app.last_histogram_path = self._abs(root, paths.get("last_histogram"))
         self.app.last_edit_excel_path = self._abs(root, paths.get("edit_excel"))
         self.app.last_model_excel_path = self._abs(root, paths.get("model_excel"))
+        self.app.last_comparative_chart_path = self._abs(root, paths.get("comparative_chart"))
+        self.app.last_scatter_chart_path = self._abs(root, paths.get("scatter_chart"))
+        self.app.last_sensitivity_chart_path = self._abs(root, paths.get("sensitivity_chart"))
+        self.app.last_elements_excel_path = self._abs(root, paths.get("elements_excel"))
+        self.app.last_report_path = self._abs(root, paths.get("full_report"))
+        self.app.last_validation_report_path = self._abs(root, paths.get("validation_report"))
+        self.app.last_audit_json_path = self._abs(root, paths.get("audit_json"))
         self.app.meteorology_series_path = self._abs(root, paths.get("meteorology_csv"))
         if self.app.meteorology_series_path and os.path.exists(self.app.meteorology_series_path):
             try:
@@ -458,7 +473,28 @@ class AppState:
     def _abs(self, root: str, value: str | None) -> str | None:
         if not value:
             return None
-        return value if os.path.isabs(value) else os.path.join(root, value)
+        if os.path.isabs(value):
+            return value
+        candidate = os.path.join(root, value)
+        if os.path.exists(candidate):
+            return candidate
+        # Compatibilidad de lectura con proyectos <= v18 migrados a la
+        # estructura lógica v19.
+        rel = str(value).replace("\\", "/")
+        aliases = {
+            "imagenes/": "entradas/imagenes/",
+            "meteorologia/": "entradas/meteorologia/",
+            "Planos/": "escena/",
+            "modelos/": "escena/",
+            "datos/analisis.sqlite3": "analisis/analisis.sqlite3",
+            "resultados/analisis/": "resultados/proyecto/",
+        }
+        for old, new_prefix in aliases.items():
+            if rel.startswith(old):
+                mapped = os.path.join(root, new_prefix + rel[len(old):])
+                if os.path.exists(mapped):
+                    return mapped
+        return candidate
 
     def _to_float(self, value):
         try:

@@ -1,7 +1,7 @@
 """Persistencia de un análisis completo del Panel 2.
 
 Desde v17 el carrusel no es un historial de acciones: cada miniatura apunta a
-un registro estable en ``datos/analisis.sqlite3``. Recalcular o guardar el
+un registro estable en ``analisis/analisis.sqlite3``. Recalcular o guardar el
 mismo árbol actualiza ese registro (UPSERT) y seleccionar una miniatura solo
 lee/restaura datos; nunca vuelve a ejecutar el análisis.
 """
@@ -61,19 +61,22 @@ class SnapshotService:
             project.next_n = n + 1
             timestamp = pd.Timestamp.now().isoformat()
 
-        # Rutas estables por registro. No usamos safe_path: el mismo análisis
-        # debe sobrescribir SUS artefactos, no crear _v2/_v3 y otra miniatura.
-        curve_path = os.path.join(project.root_path, "curvas", f"Celemento{n}.png")
-        matrix_path = os.path.join(project.root_path, "matrices", f"MAelemento{n}.xlsx")
-        reference_path = os.path.join(project.root_path, "mascaras", f"MRelemento{n}.xlsx")
-        calc_data_path = os.path.join(project.root_path, "mascaras", f"ACelemento{n}.npz")
-        reference_data_path = os.path.join(project.root_path, "mascaras", f"ARelemento{n}.npz")
-        photo_analysis_path = os.path.join(project.root_path, "mascaras", f"PAelemento{n}.npz")
-        tmrt_data_path = os.path.join(project.root_path, "curvas", f"TCelemento{n}.npz")
-        histogram_path = os.path.join(project.root_path, "resultados", "histogramas", f"helemento{n}.png")
-        classification_path = os.path.join(project.root_path, "mascaras", f"SMelemento{n}.png")
-        model_excel = os.path.join(project.root_path, "excels", "modelo.xlsx")
-        edit_excel = os.path.join(project.root_path, "excels", "edicion.xlsx")
+        # v19: todos los artefactos derivados del árbol viven juntos bajo
+        # analisis/elementos/<analysis_id>/. El número ``n`` queda solo como
+        # orden visual/histórico y ya no determina la ubicación en disco.
+        paths = project.layout.element_paths(analysis_id)
+        curve_path = paths["curve"]
+        matrix_path = paths["matrix"]
+        reference_path = paths["reference"]
+        calc_data_path = paths["calc_data"]
+        reference_data_path = paths["reference_data"]
+        photo_analysis_path = paths["photo_analysis_data"]
+        tmrt_data_path = paths["tmrt_data"]
+        histogram_path = paths["histogram"]
+        classification_path = paths["shadow_classification"]
+        temperature_summary_path = paths["temperature_summary"]
+        model_excel = project.layout.model_excel
+        edit_excel = project.layout.edit_excel
 
         # La foto del registro es la FOTO ORIGINAL copiada al proyecto al
         # cargarla, no un screenshot de Matplotlib con ejes/overlays.
@@ -176,6 +179,7 @@ class SnapshotService:
             "tmrt_data": _rel(tmrt_data_path),
             "histogram": _rel(histogram_path),
             "shadow_classification": _rel(classification_path),
+            "temperature_summary": _rel(temperature_summary_path),
             "poly_calculo": self._serializar_patch(getattr(selector, "shape_patch_calculo", None) if selector else None),
             "poly_referencia": self._serializar_patch(getattr(selector, "shape_patch_referencia", None) if selector else None),
             "area_calculo_text": self._label_text("lbl_dimensiones_calculo"),
@@ -274,7 +278,8 @@ class SnapshotService:
         for key in ("shadow_mask", "local_transmittance_map", "local_attenuation_map", "ratio_map"):
             value = analysis.get(key)
             if value is not None:
-                arrays[key] = np.asarray(value)
+                arr = np.asarray(value)
+                arrays[key] = arr.astype(np.float32, copy=False) if np.issubdtype(arr.dtype, np.floating) else arr
         if arrays:
             np.savez_compressed(path, **arrays)
 
@@ -283,7 +288,7 @@ class SnapshotService:
         arrays = {}
         for key, value in data.items():
             if isinstance(value, np.ndarray):
-                arrays[key] = value
+                arrays[key] = value.astype(np.float32, copy=False) if np.issubdtype(value.dtype, np.floating) else value
             elif isinstance(value, (int, float, np.number)):
                 arrays[key] = np.asarray(value)
         if arrays:

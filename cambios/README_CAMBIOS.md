@@ -520,3 +520,68 @@ alto — pero el patrón de refactor recomendado es:
 
 Si querés, en la próxima vuelta armamos el primer controlador
 extraído (por ejemplo el de Tmrt) como ejemplo concreto del patrón.
+
+
+## v12 — Balance avanzado de superficies y materiales
+
+Se agregó un modelo de superficie optativo con Stefan–Boltzmann no lineal, onda larga atmosférica, convección, conducción al sustrato y materiales con alpha/rho/tau. El modelo estándar permanece predeterminado y compatible. Ver `CAMBIOS_BALANCE_SUPERFICIES_MATERIALES_v12.md`.
+
+## v13 — Vegetación y evapotranspiración
+Se agrega `advanced_vegetation`, FAO-56 Penman-Monteith horaria para suelo vegetado, ET de copa diagnóstica separada, fenología de caducifolias, LAI/Kc editables por especie y persistencia de disponibilidad hídrica. Los modos `standard` y `advanced` mantienen sus resultados previos.
+
+---
+
+## v16 — Consolidación final previa a validación
+
+- núcleo solar analítico único (`core/solar_math.py`);
+- solver avanzado exige cierre energético real y detecta saturación en límites;
+- validación Tg→Tmrt admite diámetro/emisividad reales del globo;
+- registro metodológico central v16;
+- auditoría científica integrada en el menú Análisis;
+- dependencias núcleo/opcionales reorganizadas;
+- protocolo, memoria metodológica y checklist de validación;
+- 128 tests aprobados + 5 omitidos por pvlib ausente en el entorno de prueba.
+
+## v17 — Carrusel asociado a base SQLite
+
+- Corregido duplicado al seleccionar una miniatura: el clic ya no recalcula ni registra.
+- Cada análisis tiene `analysis_id` estable y se guarda con UPSERT.
+- Nueva base portable `datos/analisis.sqlite3`.
+- Cada miniatura recupera foto, curva Tmrt, áreas/máscaras, promedio gris, cobertura, atenuación y transmitancia efectiva.
+- Nuevos bundles NPZ preservan máscaras reales de polígonos/círculos y mapas Tmrt/fotográficos.
+- El carrusel solo muestra análisis completos; las entradas provisionales v16 se excluyen al migrar.
+- Migración conservadora limpia el patrón conocido de duplicación `elementoN` generado por clicks v16.
+- Foto del carrusel: imagen original del árbol, no screenshot de Matplotlib.
+- Suite: 135 passed, 5 skipped (pvlib opcional).
+
+## v18 — RAM y rendimiento
+- una sola copia RGB de la foto activa;
+- gris con OpenCV sin temporal float64 de foto completa;
+- liberación explícita de figuras/canvases Matplotlib;
+- corrección del doble render de Modo Edición;
+- mapas Tmrt/hover en float32;
+- `contourf` sobre malla de visualización reducida manteniendo datos/hover a resolución completa;
+- cierre correcto de PIL y vistas 3D;
+- diagnóstico RSS opcional con `SOMBRA_MEMORY_DEBUG=1`.
+- 141 tests aprobados, 5 opcionales omitidos.
+
+
+## v18 — Optimización de RAM y renderizado
+- Se elimina la copia BGR persistente de la fotografía y la GUI conserva una sola matriz RGB.
+- Conversión a gris con OpenCV sin temporal `float64` de tamaño foto completa.
+- Mapas Tmrt/hover en `float32`; `contourf` usa malla reducida solo para render.
+- Figuras Matplotlib temporales/persistentes se liberan o dejan de registrarse en `pyplot`.
+- El carrusel sigue cargando solo miniaturas y al cambiar de árbol se liberan arrays/figuras del anterior.
+- Se corrigió la selección de áreas para trabajar con `img_rgb` después de eliminar el buffer BGR.
+- Diagnóstico opcional de RSS con `SOMBRA_MEMORY_DEBUG=1`.
+- Suite: 142 aprobados, 5 omitidos por `pvlib` opcional.
+
+## v19 — organización del proyecto y autosave
+
+- Estructura canónica única mediante `core/project_layout.py`.
+- Autosave de estado, escenas y parámetros sin diálogos.
+- Cada análisis vive bajo `analisis/elementos/<analysis_id>/` y SQLite enlaza el carrusel.
+- Resultados globales se actualizan en rutas estables.
+- `Ctrl+S` crea respaldo `.3es` en `respaldos/`; `Guardar como…` es la única acción de guardado que solicita destino.
+- Inventario automático en `config/inventario.json`.
+- Migración conservadora desde esquemas v18/v17 y anteriores.

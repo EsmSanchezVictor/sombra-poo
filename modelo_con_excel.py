@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 from datetime import datetime, timedelta
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.figure import Figure
 import pandas as pd
 import math
 from core.scene_objects import adaptar_objetos_escena
@@ -789,7 +790,7 @@ def _aplicar_parametros_app_desde_excel(vars, parametros):
         candidates = [met_name]
         project = getattr(getattr(app, "project_manager", None), "current_project", None)
         if project is not None:
-            candidates.insert(0, os.path.join(project.root_path, "meteorologia", os.path.basename(met_name)))
+            candidates.insert(0, os.path.join(project.layout.meteorology_dir, os.path.basename(met_name)))
         for met_path in candidates:
             if os.path.exists(met_path):
                 try:
@@ -865,16 +866,20 @@ def cargar_excel(vars, filepath=None):
         return None
 
 
-def guardar_excel(vars, filepath=None, app=None):
+def guardar_excel(vars, filepath=None, app=None, notify=True):
     """Guarda el estado ACTUAL del modelo, no una mera copia del Excel fuente."""
     if app is None and isinstance(vars, dict):
         app = vars.get('_app_instance')
 
     if filepath is None:
-        filepath = filedialog.asksaveasfilename(
-            defaultextension='.xlsx',
-            filetypes=[('Excel files', '*.xlsx')],
-        )
+        project = getattr(getattr(app, "project_manager", None), "current_project", None) if app is not None else None
+        if project is not None:
+            filepath = project.layout.model_excel
+        else:
+            filepath = filedialog.asksaveasfilename(
+                defaultextension='.xlsx',
+                filetypes=[('Excel files', '*.xlsx')],
+            )
     if not filepath:
         return None
 
@@ -911,10 +916,11 @@ def guardar_excel(vars, filepath=None, app=None):
                 'dhi_wm2': (getattr(app, 'last_meteorology_data', None) or {}).get('dhi', '' ) if app else '',
             },
         )
-        messagebox.showinfo(
-            'Modelo',
-            'Excel guardado con la escena y los parámetros actuales del cálculo.'
-        )
+        if notify:
+            messagebox.showinfo(
+                'Modelo',
+                'Excel guardado con la escena y los parámetros actuales del cálculo.'
+            )
         return filepath
     except Exception as e:
         messagebox.showerror('Error', f'Error al guardar archivo:\n{str(e)}')
@@ -934,7 +940,8 @@ def generar_grafico(vars, frame):
     if fig_anterior is not None:
         plt.close(fig_anterior)
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig = Figure(figsize=(8, 6))
+    ax = fig.add_subplot(111)
     vars['_current_fig'] = fig
     canvas = FigureCanvasTkAgg(fig, master=frame)
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -1297,6 +1304,11 @@ def generar_3d(vars):
     toolbar = NavigationToolbar2Tk(canvas, ventana_3d)
     toolbar.update()
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _cerrar_3d():
+        plt.close(fig)
+        ventana_3d.destroy()
+    ventana_3d.protocol("WM_DELETE_WINDOW", _cerrar_3d)
 
 
 def cargar_preset(config, vars):

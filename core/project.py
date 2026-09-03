@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import os
 
+from core.project_layout import ProjectLayout
+
 
 class Project:
     """Gestiona rutas, carpeta base y numeración incremental."""
@@ -53,33 +55,24 @@ class Project:
             root_path = os.path.dirname(config_dir)
         else:
             root_path = os.path.dirname(config_path)
-        return cls(root_path, config_path)
+        # Desde v19, una vez resuelta la raíz todas las rutas de estado son
+        # canónicas. El archivo recibido se usa solo para localizar/cargar el
+        # proyecto; no debe convertirse en la ruta secundaria permanente.
+        return cls(root_path)
 
     @property
     def name(self) -> str:
         """Nombre legible del proyecto."""
         return os.path.basename(self.root_path) or "Proyecto"
 
+    @property
+    def layout(self) -> ProjectLayout:
+        return ProjectLayout(self.root_path)
+
     def ensure_structure(self) -> None:
-        """Crea la estructura estándar de carpetas."""
-        folders = (
-            "imagenes",
-            "curvas",
-            "matrices",   # NUEVO: faltaba — acá guarda snapshot_service la matriz de selección
-            "mascaras",
-            "Planos",
-            "modelos",
-            "excels",     # NUEVO: faltaba — acá copia snapshot_service el excel de modelo/edición
-            "meteorologia", # v14: copia reproducible de series meteorológicas importadas
-            "datos",        # v17: base SQLite y artefactos persistentes del carrusel
-            os.path.join("resultados", "histogramas"),  # antes: "histograma" (singular) — corregido
-            os.path.join("resultados", "curvas_nivel"),
-            os.path.join("resultados", "excels"),
-            os.path.join("resultados", "analisis"),  # NUEVO: gráficos comparativos, curva de sensibilidad, informes PDF
-            "config",
-        )
-        for folder in folders:
-            os.makedirs(os.path.join(self.root_path, folder), exist_ok=True)
+        """Crea/migra la estructura lógica v19 del proyecto."""
+        self.layout.ensure()
+        self.layout.migrate_basic_legacy()
 
     def allocate_n(self) -> int:
         """Obtiene el siguiente índice incremental para snapshots."""

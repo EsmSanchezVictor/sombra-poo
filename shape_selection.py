@@ -57,7 +57,7 @@ class ShapeSelector:
         """Maneja el evento de clic del ratón para iniciar la selección del área."""
         if not self.selection_enabled or self.app.drawing_mode not in ("calculo", "referencia"):
             return
-        if self.app.img is not None and event.inaxes == self.app.ax1:
+        if getattr(self.app, "img_rgb", None) is not None and event.inaxes == self.app.ax1:
             if self.app.selection_type.get() == "Polígono":
                 if not self.polygon_points:  # Primer punto del polígono
                     self.polygon_points = [(event.xdata, event.ydata)]

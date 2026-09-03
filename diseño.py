@@ -5,6 +5,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.figure import Figure
 import pandas as pd
 import math
 from core.scene_objects import adaptar_objetos_escena
@@ -66,17 +67,16 @@ def _huso_horas(vars):
     return huso_val
 
 
-def crear_area_grafico(vars,frame,app):
-    frame.grid(row=1, column=1, sticky="nsew")
-    actualizar_grafico(vars,frame)
-    # Crear figura y canvas
-    fig, ax = plt.subplots(figsize=(8, 6))
-    canvas = FigureCanvasTkAgg(fig, master=frame)
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+def crear_area_grafico(vars, frame, app):
+    """Crea una única figura de edición.
 
-    actualizar_grafico(vars, frame)
-    #canvas.mpl_connect('button_press_event', lambda e: manejar_click(e, app))
-    return fig, ax, canvas  # Devuelve estos valores correctamente    
+    v17 ejecutaba ``actualizar_grafico`` dos veces y además creaba una
+    figura intermedia que quedaba retenida por pyplot. v18 delega todo en
+    una sola actualización y devuelve exactamente el canvas visible.
+    """
+    frame.grid(row=1, column=1, sticky="nsew")
+    vars['_app_instance'] = app
+    return actualizar_grafico(vars, frame)
 """ def crear_menu(self):
     menubar = tk.Menu(self.root)
     archivo_menu = tk.Menu(menubar, tearoff=0)
@@ -327,10 +327,14 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
     ttk.Button(dialogo, text="Guardar", command=guardar).grid(row=len(campos)+1, column=0)
     ttk.Button(dialogo, text="Eliminar", command=eliminar).grid(row=len(campos)+1, column=1)
 def actualizar_grafico(vars, frame):
-    #if not force and not self.vars['_update_required']:
-    #    return
-    
-    # Limpiar frame del gráfico
+    # Cerrar figura anterior ANTES de destruir el widget Tk. Esto rompe las
+    # referencias de artistas/canvas y evita crecimiento de RAM al editar.
+    fig_anterior = vars.pop('_current_fig', None)
+    if fig_anterior is not None:
+        try:
+            plt.close(fig_anterior)
+        except Exception:
+            pass
     for widget in frame.winfo_children():
         widget.destroy()
     
@@ -381,7 +385,9 @@ def actualizar_grafico(vars, frame):
     niveles = np.sort(np.unique(niveles))
     
     # Configurar el gráfico
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig = Figure(figsize=(8, 6))
+    ax = fig.add_subplot(111)
+    vars['_current_fig'] = fig
     canvas = FigureCanvasTkAgg(fig, master=frame)
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     
@@ -482,6 +488,7 @@ def actualizar_grafico(vars, frame):
     vars["X"] = X
     vars["Y"] = Y
     vars["T"] = T
+    return fig, ax, canvas
 def angulo_solar(vars):
     return _angulo_solar(
         vars["lat"].get(), vars["lon"].get(), vars["dia"].get(),
@@ -617,19 +624,24 @@ def generar_3d(vars):
     toolbar = NavigationToolbar2Tk(canvas, ventana_3d)
     toolbar.update()
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _cerrar_3d():
+        plt.close(fig)
+        ventana_3d.destroy()
+    ventana_3d.protocol("WM_DELETE_WINDOW", _cerrar_3d)
 def guardar_como(vars, app):
+    """Exporta una copia de la escena a una ubicación elegida por el usuario."""
     global archivo_actual
     filepath = filedialog.asksaveasfilename(
         defaultextension=".xlsx",
         filetypes=[("Excel files", "*.xlsx")]
     )
     if filepath:
-        archivo_actual = filepath
-        return guardar(vars, app)
+        return guardar(vars, app, filepath=filepath, notify=True)
     return None
 
 
-def guardar(vars, app):
+def guardar(vars, app, filepath=None, notify=True):
     """Guarda escena + parámetros del cálculo en un único Excel reproducible.
 
     Edición calcula hoy la temperatura con Tmin/Tmax (ciclo diario), incluso
@@ -638,8 +650,14 @@ def guardar(vars, app):
     exactamente la física usada para generar el gráfico de Edición.
     """
     global archivo_actual
+    if filepath is not None:
+        archivo_actual = str(filepath)
     if not archivo_actual:
-        return guardar_como(vars, app)
+        project = getattr(getattr(app, "project_manager", None), "current_project", None)
+        if project is not None:
+            archivo_actual = project.layout.edit_excel
+        else:
+            return guardar_como(vars, app)
 
     try:
         modo_ui = app.modo_edicion.get() if hasattr(app, "modo_edicion") else "advanced"
@@ -668,11 +686,12 @@ def guardar(vars, app):
         )
         if hasattr(app, "last_edit_excel_path"):
             app.last_edit_excel_path = archivo_actual
-        messagebox.showinfo(
-            "Éxito",
-            "Archivo guardado correctamente.\n\n"
-            "Incluye Árboles, Estructuras y Parametros para reproducir el cálculo en Modelo."
-        )
+        if notify:
+            messagebox.showinfo(
+                "Éxito",
+                "Archivo guardado correctamente.\n\n"
+                "Incluye Árboles, Estructuras y Parametros para reproducir el cálculo en Modelo."
+            )
         return archivo_actual
     except Exception as e:
         messagebox.showerror("Error", f"Error al guardar:\n{str(e)}")
@@ -744,7 +763,7 @@ def abrir_archivo(vars, app, filepath=None):
             candidates = [met_name]
             project = getattr(getattr(app, "project_manager", None), "current_project", None)
             if project is not None:
-                candidates.insert(0, os.path.join(project.root_path, "meteorologia", os.path.basename(met_name)))
+                candidates.insert(0, os.path.join(project.layout.meteorology_dir, os.path.basename(met_name)))
             for met_path in candidates:
                 if os.path.exists(met_path):
                     try:

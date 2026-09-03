@@ -11,8 +11,30 @@ class ImageProcessor:
     exposición, el color del material y los reflejos pueden afectar el valor.
     """
 
+    def load_image_rgb(self, file_path):
+        """Carga una sola copia RGB de la fotografía.
+
+        OpenCV decodifica inicialmente en BGR. La conversión RGB crea otro
+        buffer; por eso la aplicación v18 no conserva ambos. El BGR queda
+        como temporal local y se libera al retornar. En una foto de 12 MP
+        esto evita retener ~36 MB adicionales de RAM.
+        """
+        img_bgr = cv2.imread(file_path, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            raise ValueError("No se pudo leer la imagen seleccionada.")
+        try:
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        except cv2.error as exc:
+            raise ValueError("El archivo seleccionado no es una imagen válida.") from exc
+        return img_rgb
+
     def load_image(self, file_path):
-        img = cv2.imread(file_path)
+        """API legacy: devuelve BGR+RGB.
+
+        Se mantiene para compatibilidad externa, pero la GUI v18 usa
+        :meth:`load_image_rgb` para no conservar dos copias de la foto.
+        """
+        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError("No se pudo leer la imagen seleccionada.")
         try:

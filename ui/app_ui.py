@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta
 import zoneinfo
-from io import BytesIO
 import os
 import shutil
 import tkinter as tk
@@ -17,13 +16,13 @@ from DatasetSaver import DatasetSaver
 from core.app_state import AppState
 from core.settings_manager import SettingsManager
 from core.project_manager import ProjectManager
-from core.file_versioning import safe_path
 from core import scenario as scenario_tools
 from core import thermal_comfort
 from core.climate_profile import viento_categoria_a_ms
 from core.species import ESPECIES as CATALOGO_ESPECIES, nombres_especies
 from core.validation import k_factor_desde_mediciones, leer_csv_mediciones, metricas
 from core.uncertainty import estimate_tmrt_uncertainty
+from core.memory_utils import collect_and_log
 from image_processor import ImageProcessor
 #from mouse_pixel_value import MouseHoverPixelValueWithTooltip
 from save_pdf import PDFReportGenerator
@@ -103,6 +102,7 @@ class SombraApp:
         self.current_project_path = self.settings.get("last_project_path")
         self.current_location = None        
         self.is_dirty = False
+        self._suspend_autosave_tracking = False
         self.last_T = None
         self.last_shadow = None
         self.last_meta = None
@@ -345,6 +345,8 @@ class SombraApp:
         self.curva_label = None
         self.curva_photo = None
         self.curva_img_pil_original = None
+        self._temp_graph_figure = None
+        self._temp_graph_canvas = None
         #self.frame1 = frame1
 
         # --- Ancho del panel desplegable -----------------------------
@@ -433,6 +435,7 @@ class SombraApp:
         self.setup_panel_3()
         self.setup_panel_4()
         self.apply_settings(self.settings)
+        self._install_autosave_variable_traces()
         
         # Para recordar cuál panel está abierto
         self.active_panel = None
@@ -733,9 +736,9 @@ class SombraApp:
         else:
             # Proyecto sin snapshots todavía: mantener el comportamiento
             # anterior por si hay rutas sueltas guardadas.
-            self.last_image_path = self._resolve_artifact_path(self.last_image_path, "imagenes")
-            self.last_curve_path = self._resolve_artifact_path(self.last_curve_path, os.path.join("resultados", "curvas_nivel"))
-            self.last_mask_path = self._resolve_artifact_path(self.last_mask_path, "mascaras")
+            self.last_image_path = self._resolve_artifact_path(self.last_image_path, os.path.join("entradas", "imagenes"))
+            self.last_curve_path = self._resolve_artifact_path(self.last_curve_path, os.path.join("analisis", "elementos"))
+            self.last_mask_path = self._resolve_artifact_path(self.last_mask_path, os.path.join("analisis", "elementos"))
             if self.last_image_path and os.path.exists(self.last_image_path):
                 self._load_image_from_path(self.last_image_path)
             if self.last_curve_path and os.path.exists(self.last_curve_path):
@@ -745,8 +748,12 @@ class SombraApp:
         self._restore_excel_files()
 
     def _restore_excel_files(self):
-        self.last_edit_excel_path = self._resolve_artifact_path(self.last_edit_excel_path, "Planos")
-        self.last_model_excel_path = self._resolve_artifact_path(self.last_model_excel_path, "modelos")
+        project = self.project_manager.current_project
+        if project is not None:
+            if os.path.exists(project.layout.edit_excel):
+                self.last_edit_excel_path = project.layout.edit_excel
+            if os.path.exists(project.layout.model_excel):
+                self.last_model_excel_path = project.layout.model_excel
         if self.last_edit_excel_path and os.path.exists(self.last_edit_excel_path):
             # abrir_archivo ya regenera el gráfico de edición internamente
             # (llama a actualizar_grafico al final) — no hace falta nada más acá.
@@ -844,6 +851,7 @@ class SombraApp:
         tmrt_data_path = _abs(entry.get("tmrt_data"))
         histogram_path = _abs(entry.get("histogram"))
         classification_path = _abs(entry.get("shadow_classification"))
+        temperature_summary_path = _abs(entry.get("temperature_summary"))
 
         if image_path and os.path.exists(image_path):
             self._load_image_from_path(image_path)
@@ -952,6 +960,8 @@ class SombraApp:
             self.shadow_mask_button.config(state=tk.NORMAL)
         if classification_path and os.path.exists(classification_path):
             self.last_shadow_classification_path = classification_path
+        if temperature_summary_path and os.path.exists(temperature_summary_path):
+            self.last_temp_graph_path = temperature_summary_path
         if histogram_path and os.path.exists(histogram_path):
             self.last_histogram_path = histogram_path
 
@@ -984,12 +994,41 @@ class SombraApp:
             if hasattr(self, "lbl_delta_tmrt") and entry.get("delta_tmrt") is not None:
                 self.lbl_delta_tmrt.config(text=f"ΔTmrt (impacto sombra): {entry['delta_tmrt']:.2f} °C")
             if hasattr(self, "graph_frame"):
-                for widget in self.graph_frame.winfo_children():
-                    widget.destroy()
-                TemperatureGraph(valor_sol_grafico, tmrt_sombra, self.graph_frame).plot_temperature_scale()
+                self._show_temperature_graph(valor_sol_grafico, tmrt_sombra)
 
         self.curve_button.config(state=tk.NORMAL if self.area_calculo_done else tk.DISABLED)
         self._carrusel_marcar(index)
+
+    def _clear_temperature_graph(self):
+        """Libera canvas/figura de la barra Tmrt anterior.
+
+        Destruir solo el widget Tk no libera necesariamente el árbol de
+        artistas de Matplotlib. v18 conserva una única figura y la limpia de
+        forma explícita al reemplazarla.
+        """
+        canvas = getattr(self, "_temp_graph_canvas", None)
+        if canvas is not None:
+            try:
+                widget = canvas.get_tk_widget()
+                if widget.winfo_exists():
+                    widget.destroy()
+            except Exception:
+                pass
+        fig = getattr(self, "_temp_graph_figure", None)
+        if fig is not None:
+            try:
+                fig.clear()
+            except Exception:
+                pass
+        self._temp_graph_canvas = None
+        self._temp_graph_figure = None
+
+    def _show_temperature_graph(self, tmrt_sol, tmrt_sombra):
+        self._clear_temperature_graph()
+        fig, canvas = TemperatureGraph(tmrt_sol, tmrt_sombra, self.graph_frame).plot_temperature_scale()
+        self._temp_graph_figure = fig
+        self._temp_graph_canvas = canvas
+        return fig
 
     def _load_area_bundle(self, file_path, kind: str) -> bool:
         if not file_path or not os.path.exists(file_path):
@@ -1046,12 +1085,17 @@ class SombraApp:
                 restored = {}
                 for key in data.files:
                     value = np.asarray(data[key])
-                    restored[key] = float(value) if value.ndim == 0 else value
+                    if value.ndim == 0:
+                        restored[key] = float(value)
+                    elif np.issubdtype(value.dtype, np.floating):
+                        restored[key] = value.astype(np.float32, copy=False)
+                    else:
+                        restored[key] = value
             tmrt = restored.get("tmrt")
             if tmrt is None:
                 return False
             self.tmrt_hover_data = restored
-            self.tmrt_map = np.asarray(tmrt, dtype=float)
+            self.tmrt_map = np.asarray(tmrt, dtype=np.float32)
             self.curvas_nivel_creadas = True
             self._curve_pinned_pixel = None
             return True
@@ -1059,9 +1103,26 @@ class SombraApp:
             print(f"[carrusel] no se pudo cargar datos Tmrt: {exc}")
             return False
 
+    @staticmethod
+    def _contour_display_grid(mapa, max_side=320):
+        """Malla reducida solo para dibujar contourf.
+
+        El mapa científico y el hover siguen usando la matriz completa.
+        Matplotlib contourf construye paths vectoriales y su consumo crece
+        mucho con 480x480; dibujar una malla <=320 por lado reduce RAM sin
+        alterar los valores guardados ni consultados.
+        """
+        arr = np.asarray(mapa, dtype=np.float32)
+        h, w = arr.shape
+        stride = max(1, int(np.ceil(max(h, w) / float(max_side))))
+        display = arr[::stride, ::stride]
+        xs = np.arange(0, w, stride, dtype=np.float32)[:display.shape[1]]
+        ys = np.arange(0, h, stride, dtype=np.float32)[:display.shape[0]]
+        return xs, ys, display, stride
+
     def _render_stored_tmrt_map(self, entry):
         """Redibuja la curva guardada a partir de sus matrices, sin física."""
-        mapa = np.asarray(self.tmrt_map, dtype=float)
+        mapa = np.asarray(self.tmrt_map, dtype=np.float32)
         finite = mapa[np.isfinite(mapa)]
         if not finite.size:
             return
@@ -1074,17 +1135,20 @@ class SombraApp:
         self.fig2.clf()
         ax = self.fig2.add_subplot(111)
         self.ax2 = ax
+        x_disp, y_disp, mapa_disp, _stride = self._contour_display_grid(mapa)
         tmin, tmax = float(np.min(finite)), float(np.max(finite))
         span = tmax - tmin
         if span > 1e-9:
             niveles = np.linspace(tmin, tmax, 21)
-            relleno = ax.contourf(mapa, levels=niveles, cmap=CMAP_CURVAS_NIVEL, vmin=tmin, vmax=tmax, antialiased=True)
-            ax.contour(mapa, levels=niveles[::2], colors="0.35", linewidths=0.45, alpha=0.55)
+            relleno = ax.contourf(x_disp, y_disp, mapa_disp, levels=niveles, cmap=CMAP_CURVAS_NIVEL, vmin=tmin, vmax=tmax, antialiased=True)
+            ax.contour(x_disp, y_disp, mapa_disp, levels=niveles[::2], colors="0.35", linewidths=0.45, alpha=0.55)
             ticks = np.linspace(tmin, tmax, 6)
         else:
             eps = max(0.01, abs(tmin) * 1e-6)
-            relleno = ax.contourf(mapa, levels=[tmin-eps, tmin+eps], cmap=CMAP_CURVAS_NIVEL, vmin=tmin-eps, vmax=tmin+eps)
+            relleno = ax.contourf(x_disp, y_disp, mapa_disp, levels=[tmin-eps, tmin+eps], cmap=CMAP_CURVAS_NIVEL, vmin=tmin-eps, vmax=tmin+eps)
             ticks = np.array([tmin])
+        ax.set_xlim(0, mapa.shape[1] - 1)
+        ax.set_ylim(0, mapa.shape[0] - 1)
         ax.set_xlabel("Posición X (px)")
         ax.set_ylabel("Posición Y (px)")
         ax.set_title(f"Tmrt guardada — {entry.get('label', 'elemento')}\nregistro {entry.get('analysis_id', '')[:8]}", fontsize=9)
@@ -1118,9 +1182,9 @@ class SombraApp:
         return None
 
     def _load_image_from_path(self, file_path: str):
-        #self.img, self.img_rgb = self.image_processor.load_image(file_path)
         try:
-            self.img, self.img_rgb = self.image_processor.load_image(file_path)
+            self.img = None
+            self.img_rgb = self.image_processor.load_image_rgb(file_path)
         except ValueError as exc:
             messagebox.showerror("Error", str(exc))
             return        
@@ -1143,13 +1207,10 @@ class SombraApp:
         if project is None:
             raise RuntimeError("No hay proyecto abierto")
         project.ensure_structure()
-        basename = os.path.basename(source_path)
-        image_dir = os.path.join(project.root_path, "imagenes")
+        image_dir = project.layout.images_dir
         os.makedirs(image_dir, exist_ok=True)
-        destination_path = safe_path(image_dir, basename)
-        print(f"[panel2] Copiando imagen a proyecto: {source_path} -> {destination_path}")
-        if os.path.abspath(source_path) != os.path.abspath(str(destination_path)):
-            shutil.copy2(source_path, destination_path)
+        destination_path = project.layout.import_input_file(source_path, image_dir)
+        print(f"[panel2] Imagen registrada en proyecto: {source_path} -> {destination_path}")
         if not os.path.exists(destination_path):
             raise FileNotFoundError(f"No se pudo copiar la imagen a {destination_path}")
 
@@ -1162,12 +1223,15 @@ class SombraApp:
         return destination_str
 
     def _copy_excel_to_project(self, source_path: str, folder: str) -> str:
+        """Importa un Excel externo como archivo de trabajo estable v19."""
         project = self.project_manager.current_project
         if project is None:
             raise RuntimeError("No hay proyecto abierto")
-        target_dir = os.path.join(project.root_path, folder)
-        destination = safe_path(target_dir, os.path.basename(source_path))
-        shutil.copy2(source_path, destination)
+        low = str(folder).lower()
+        destination = project.layout.model_excel if "model" in low else project.layout.edit_excel
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        if os.path.abspath(source_path) != os.path.abspath(destination):
+            shutil.copy2(source_path, destination)
         return str(destination)
 
     def _reset_panel2_for_new_image(self):
@@ -1185,6 +1249,14 @@ class SombraApp:
         self.ref_gray_mean = None
         self.tmrt_map = None
         self.tmrt_hover_data = None
+        # Liberar la fotografía pesada del elemento anterior antes de leer
+        # la siguiente. Matplotlib conserva su propia referencia hasta clear.
+        if hasattr(self, "ax1") and self.ax1 is not None:
+            self.ax1.clear()
+        self.img = None
+        self.img_rgb = None
+        self.original_rgb = None
+        self._clear_temperature_graph()
         self._curve_pinned_pixel = None
         self.curvas_nivel_creadas = False
         self.lbl_porcentaje_sombra.config(text="Cobertura de sombra: N/A")
@@ -1230,6 +1302,7 @@ class SombraApp:
             if widget.winfo_exists():
                 widget.pack(fill="both", expand=True)
                 self.canvas2.draw_idle()
+        collect_and_log("panel2 liberado")
                 
     def _load_curve_from_path(self, file_path: str):
         if not self.curva_frame:
@@ -1243,8 +1316,8 @@ class SombraApp:
         # blanco de la captura.
         if self.canvas2 is not None:
             self.canvas2.get_tk_widget().pack_forget()
-        img = Image.open(file_path)
-        self.curva_img_pil_original = img
+        with Image.open(file_path) as img:
+            self.curva_img_pil_original = img.copy()
         resized_img = self._fit_image_to_frame(self.curva_img_pil_original, self.curva_frame)
         photo = ImageTk.PhotoImage(resized_img)
         if self.curva_label is None:
@@ -1263,7 +1336,8 @@ class SombraApp:
                 self.shape_selector.area_referencia = data.to_numpy()
                 self.shape_selector.area_referencia_mask = np.ones_like(self.shape_selector.area_referencia, dtype=bool)
             elif ext in (".png", ".jpg", ".jpeg"):
-                self.shape_selector.area_referencia = np.array(Image.open(file_path).convert("L"))
+                with Image.open(file_path) as img:
+                    self.shape_selector.area_referencia = np.asarray(img.convert("L"), dtype=np.uint8).copy()
                 self.shape_selector.area_referencia_mask = np.ones_like(self.shape_selector.area_referencia, dtype=bool)
         except Exception:
             return
@@ -1313,6 +1387,56 @@ class SombraApp:
 
     def mark_dirty(self):
         self.is_dirty = True
+        manager = getattr(self, "project_manager", None)
+        if manager is not None:
+            manager.schedule_autosave()
+
+    def _install_autosave_variable_traces(self):
+        """Observa parámetros editables y dispara autosave con debounce.
+
+        Los resultados pesados (imágenes, matrices, máscaras, SQLite) se
+        persisten en el momento en que se generan. Este rastreo cubre el otro
+        caso: cambios de campos/combos que antes podían quedar solo en RAM
+        hasta que el usuario pulsara Guardar.
+        """
+        if getattr(self, "_autosave_trace_tokens", None):
+            return
+        self._autosave_trace_tokens = []
+        seen = set()
+
+        def register(var):
+            if not isinstance(var, tk.Variable) or id(var) in seen:
+                return
+            seen.add(id(var))
+            try:
+                token = var.trace_add("write", self._on_project_variable_changed)
+                self._autosave_trace_tokens.append((var, token))
+            except Exception:
+                pass
+
+        for mapping in (getattr(self, "vars", {}), getattr(self, "vars_modelo", {})):
+            if isinstance(mapping, dict):
+                for value in mapping.values():
+                    register(value)
+
+        for name in (
+            "selection_type", "matriz_size", "panel2_advanced_mode",
+            "tmrt_model_mode", "surface_model_mode", "modo_modelo",
+            "modo_edicion", "simple_country", "simple_city",
+            "simple_cloudiness", "simple_temp_air_c", "simple_rh",
+            "temp_unit", "distance_unit", "shadow_detector_enabled",
+            "use_pvlib_engine", "radiation_source_mode", "manual_ghi",
+            "manual_dni", "manual_dhi",
+        ):
+            register(getattr(self, name, None))
+
+    def _on_project_variable_changed(self, *_args):
+        if getattr(self, "_suspend_autosave_tracking", False):
+            return
+        manager = getattr(self, "project_manager", None)
+        if manager is None or getattr(manager, "current_project", None) is None:
+            return
+        self.mark_dirty()
 
     def _build_vars(self):
         return {
@@ -1402,7 +1526,7 @@ class SombraApp:
         self.curve_button = tk.Button(panel, text="Generar curva de nivel", command=self.mostrar_curvas_nivel, state=tk.DISABLED)
         self.curve_button.pack(fill="x",padx=20, pady=4)
         
-        self.save_dataset_button = tk.Button(panel, text="Guardar Dataset", command=self.save_dataset, state=tk.DISABLED)
+        self.save_dataset_button = tk.Button(panel, text="Respaldar Dataset", command=self.save_dataset, state=tk.DISABLED)
         self.save_dataset_button.pack(fill="x", padx=20, pady=4)
 
         self._toggle_panel2_advanced()
@@ -1473,8 +1597,11 @@ class SombraApp:
 
         guardar = tk.Button(
             acciones,
-            text="Guardar como",
-            command=lambda: self._run_with_project("guardar el archivo de edición", lambda: design.guardar_como(self.vars, self)),
+            text="Respaldar Excel",
+            command=lambda: self._run_with_project(
+                "respaldar el archivo de edición",
+                lambda: design.guardar(self.vars, self, filepath=self.project_manager.current_project.layout.edit_excel),
+            ),
             bg='#4CAF50',
             fg='white',
             font=("Arial", 8, "bold"),
@@ -2298,17 +2425,24 @@ class SombraApp:
         tk.Button(actions, text="Cancelar", command=preferences.destroy).grid(row=0, column=1)
 
     def _confirm_discard_changes(self, action_label):
+        """Vacía primero el autosave; solo pregunta si el guardado falla."""
         if not self.is_dirty:
             return True
+        manager = getattr(self, "project_manager", None)
+        if manager is not None and getattr(manager, "current_project", None) is not None:
+            try:
+                if manager.autosave_project():
+                    return True
+            except Exception as exc:
+                print(f"[autosave] No se pudo guardar antes de {action_label}: {exc}")
         response = messagebox.askyesnocancel(
             "Cambios sin guardar",
-            f"{action_label}: hay cambios sin guardar. ¿Desea guardarlos?",
+            f"{action_label}: el guardado automático no pudo completarse. ¿Desea reintentar?",
         )
         if response is None:
             return False
         if response:
-            self.save_project()
-            return not self.is_dirty
+            return bool(self.save_project())
         return True
 
     def _reset_scene(self):
@@ -2369,7 +2503,7 @@ class SombraApp:
             return
         filepath = modelo.cargar_excel(self.vars_modelo)
         if filepath:
-            self.last_model_excel_path = filepath
+            self.last_model_excel_path = self._copy_excel_to_project(filepath, "modelos")
             # El archivo nuevo contiene también los parámetros del cálculo.
             # Regeneramos inmediatamente para que cargar el Excel signifique
             # realmente reproducir la escena guardada, sin exigir tocar otro
@@ -2385,29 +2519,11 @@ class SombraApp:
             self.mark_dirty()
 
     def guardar_excel_modelo(self):
+        """Guarda Modelo directamente en escena/modelo.xlsx, sin preguntar."""
         if not self.require_project("guardar Excel de modelo"):
             return
-
         project = self.project_manager.current_project
-        target_dir = os.path.join(project.root_path, "modelos")
-        os.makedirs(target_dir, exist_ok=True)
-
-        # Si ya trabajamos sobre un Excel dentro de la carpeta del proyecto,
-        # lo actualizamos. Si vino de afuera, creamos una copia de trabajo en
-        # /modelos. Si todavía no existe ninguno, usamos un nombre estable.
-        current = self.last_model_excel_path
-        if current and os.path.exists(current):
-            try:
-                same_dir = os.path.commonpath([os.path.abspath(current), os.path.abspath(target_dir)]) == os.path.abspath(target_dir)
-            except ValueError:
-                same_dir = False
-            if same_dir:
-                target = current
-            else:
-                target = str(safe_path(target_dir, os.path.basename(current)))
-        else:
-            target = str(safe_path(target_dir, "modelo.xlsx"))
-
+        target = project.layout.model_excel
         saved = modelo.guardar_excel(self.vars_modelo, filepath=target, app=self)
         if saved:
             self.last_model_excel_path = saved
@@ -2457,9 +2573,9 @@ class SombraApp:
 
         resumen = analysis_service.resumen_estadistico(self.snapshots)
         project = self.project_manager.current_project
-        analisis_dir = os.path.join(project.root_path, "resultados", "analisis")
+        analisis_dir = project.layout.project_results_dir
         os.makedirs(analisis_dir, exist_ok=True)
-        chart_path = safe_path(analisis_dir, "comparativo_elementos.png")
+        chart_path = project.layout.comparison_chart
         resultado = analysis_service.grafico_comparativo(self.snapshots, str(chart_path))
         if resultado is None:
             messagebox.showinfo(
@@ -2468,6 +2584,13 @@ class SombraApp:
             )
             return
         self.last_comparative_chart_path = str(chart_path)
+        # La tabla consolidada forma parte del resultado del análisis y se
+        # actualiza automáticamente; el botón visible queda como respaldo manual.
+        try:
+            analysis_service.exportar_tabla_excel(self.snapshots, str(project.layout.elements_excel))
+        except Exception as exc:
+            print(f"[autosave] No se pudo actualizar elementos_proyecto.xlsx: {exc}")
+        self.mark_dirty()
 
         ventana = tk.Toplevel(self.root)
         ventana.title("Análisis comparativo del proyecto")
@@ -2504,7 +2627,7 @@ class SombraApp:
 
         # Dispersión entre cobertura fotográfica y ΔTmrt modelada. No se
         # denomina "dato real": ambas magnitudes son derivadas/modeladas.
-        scatter_path = safe_path(analisis_dir, "dispersion_sombra_tmrt.png")
+        scatter_path = project.layout.scatter_chart
         scatter_result, pendiente, r2 = analysis_service.dispersión_sombra_tmrt(
             self.snapshots, str(scatter_path),
         )
@@ -2525,18 +2648,20 @@ class SombraApp:
             ).pack(pady=5)
 
         tk.Button(
-            ventana, text="Exportar tabla a Excel…",
+            ventana, text="Respaldar tabla Excel",
             command=lambda: self._exportar_tabla_elementos_excel(analisis_dir),
         ).pack(pady=(4, 12))
 
     def _exportar_tabla_elementos_excel(self, analisis_dir: str):
-        """NUEVO. Exporta self.snapshots a Excel en resultados/analisis/."""
+        """Actualiza la tabla consolidada en resultados/proyecto/."""
         if not self.snapshots:
             messagebox.showinfo("Exportar tabla", "No hay elementos para exportar.")
             return
-        chart_path = safe_path(analisis_dir, "elementos_proyecto.xlsx")
+        chart_path = self.project_manager.current_project.layout.elements_excel
         try:
             resultado = analysis_service.exportar_tabla_excel(self.snapshots, str(chart_path))
+            self.last_elements_excel_path = str(resultado)
+            self.mark_dirty()
         except Exception as exc:
             messagebox.showerror("Exportar tabla", f"No se pudo exportar: {exc}")
             return
@@ -2555,13 +2680,14 @@ class SombraApp:
         )
 
         project = self.project_manager.current_project
-        analisis_dir = os.path.join(project.root_path, "resultados", "analisis")
+        analisis_dir = project.layout.project_results_dir
         os.makedirs(analisis_dir, exist_ok=True)
-        chart_path = safe_path(analisis_dir, "sensibilidad_sombra.png")
+        chart_path = project.layout.sensitivity_chart
         resultado_path, _, _ = analysis_service.curva_sensibilidad(
             calculador, temp_ambient, fecha, hora, str(chart_path),
         )
         self.last_sensitivity_chart_path = str(resultado_path)
+        self.mark_dirty()
 
         ventana = tk.Toplevel(self.root)
         ventana.title("Sensibilidad sombra–temperatura")
@@ -2577,18 +2703,19 @@ class SombraApp:
         """NUEVO. Informe PDF consolidado de TODO el proyecto: resumen
         estadístico, tabla de elementos, comparación entre ellos, curva
         de sensibilidad del modelo y últimos artefactos visuales.
-        Se guarda directamente en resultados/analisis/ del proyecto
+        Se guarda directamente en resultados/informes/ del proyecto
         (sin diálogo de guardado) para que quede siempre junto con el
         resto de los resultados del proyecto."""
         if not self.require_project("generar el informe completo"):
             return
         project = self.project_manager.current_project
-        analisis_dir = os.path.join(project.root_path, "resultados", "analisis")
+        analisis_dir = project.layout.reports_dir
         os.makedirs(analisis_dir, exist_ok=True)
-        nombre = f"informe_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        destino = os.path.join(analisis_dir, nombre)
+        destino = project.layout.full_report
         try:
             ruta_final = report_service.generar_informe_proyecto(self, project, destino)
+            self.last_report_path = str(ruta_final)
+            self.mark_dirty()
         except Exception as exc:
             messagebox.showerror("Informe completo", f"No se pudo generar el informe: {exc}")
             return
@@ -2921,13 +3048,15 @@ class SombraApp:
             if not path or not os.path.exists(path):
                 continue
             try:
-                img = Image.open(path)
+                with Image.open(path) as img:
+                    ancho, alto = img.size
+                    alto_t = 50
+                    ancho_t = max(1, int(ancho * alto_t / alto))
+                    thumb = img.resize((ancho_t, alto_t), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(thumb)
+                    thumb.close()
             except Exception:
                 continue
-            ancho, alto = img.size
-            alto_t = 50
-            ancho_t = max(1, int(ancho * alto_t / alto))
-            photo = ImageTk.PhotoImage(img.resize((ancho_t, alto_t), Image.LANCZOS))
             self._carrusel_photos.append(photo)
             marco = tk.Frame(
                 self.carrusel_inner, bg=self.palette["panel"],
@@ -3049,7 +3178,9 @@ class SombraApp:
         """Configura el área de visualización de imágenes."""
         img_frame = self.create_card(frame)
         img_frame.pack(expand=True, fill='both', pady=5)
-        self.fig1, self.ax1 = plt.subplots() 
+        from matplotlib.figure import Figure
+        self.fig1 = Figure()
+        self.ax1 = self.fig1.add_subplot(111)
         self.canvas1 = FigureCanvasTkAgg(self.fig1, master=img_frame)
         # fill+expand: la foto ocupa TODO el frame (que mantiene su
         # tamaño fijo de ~2/3 del alto de la ventana) y se ve grande
@@ -3062,7 +3193,9 @@ class SombraApp:
         self.curva_frame = nivel_frame
         self.curva_frame.bind("<Configure>", self._on_curva_frame_resize)
 
-        self.fig2, self.ax2 = plt.subplots()
+        from matplotlib.figure import Figure
+        self.fig2 = Figure()
+        self.ax2 = self.fig2.add_subplot(111)
         self.canvas2 = FigureCanvasTkAgg(self.fig2, master=nivel_frame)
         self.canvas2.get_tk_widget().pack(fill="both", expand=True)
     def cargar_imagen(self):
@@ -3083,7 +3216,8 @@ class SombraApp:
                 # de cargar la foto. Recalcular/guardar ese mismo árbol hace
                 # UPDATE sobre este ID, nunca agrega otra miniatura.
                 self.current_analysis_id = AnalysisRecordStore.new_analysis_id()
-                self.img, self.img_rgb = self.image_processor.load_image(saved_image_path)
+                self.img = None
+                self.img_rgb = self.image_processor.load_image_rgb(saved_image_path)
             except ValueError as exc:
                 messagebox.showerror("Error", str(exc))
                 return
@@ -3190,7 +3324,7 @@ class SombraApp:
     def cargar_serie_meteorologica(self):
         """Importa una serie CSV y, si hay proyecto, guarda una copia dentro.
 
-        La copia en ``meteorologia/`` hace que el proyecto .3es sea reproducible
+        La copia en ``entradas/meteorologia/`` hace que el proyecto .3es sea reproducible
         y no dependa de una ruta externa que pueda desaparecer.
         """
         file_path = filedialog.askopenfilename(
@@ -3204,11 +3338,9 @@ class SombraApp:
             target = file_path
             project = getattr(self.project_manager, "current_project", None)
             if project is not None:
-                folder = os.path.join(project.root_path, "meteorologia")
+                folder = project.layout.meteorology_dir
                 os.makedirs(folder, exist_ok=True)
-                target = os.path.join(folder, os.path.basename(file_path))
-                if os.path.abspath(file_path) != os.path.abspath(target):
-                    shutil.copy2(file_path, target)
+                target = project.layout.import_input_file(file_path, folder)
             summary = self.meteorology_service.load_series(target, timezone=tz)
             self.meteorology_series_path = target
             self.radiation_source_mode.set("observed_series")
@@ -3395,23 +3527,16 @@ class SombraApp:
                     )
                 else:
                     self.lbl_tmrt_uncertainty.config(text="Incertidumbre operativa Tmrt sombra: N/D")
-            # Limpiar el frame anterior si existe (evita sobreposición de gráficos)
-            for widget in self.graph_frame.winfo_children():
-                widget.destroy()
-
-            # Crear un objeto de la clase TemperatureGraph y mostrar la gráfica dentro del frame
-            # FIX: antes se pasaba temp_ambient (temperatura de aire cruda,
-            # sin el aporte de radiación) como extremo "Sol" del gráfico,
-            # mientras el label de arriba mostraba Tmrt_sol (que sí lo
-            # incluye) — dos números distintos para lo que parecía el
-            # mismo dato. Ahora el gráfico usa Tmrt_sol, igual que el label.
-            graph = TemperatureGraph(result["Tmrt_sol"], result["Tmrt_sombra"], self.graph_frame)
-            graph.plot_temperature_scale()  # Dibujar la gráfica en el frame
+            # v18: una sola figura de escala Tmrt; la anterior se libera
+            # explícitamente antes de crear la siguiente.
+            temp_fig = self._show_temperature_graph(result["Tmrt_sol"], result["Tmrt_sombra"])
             if self.project_manager.current_project:
-                temp_img_dir = os.path.join(self.project_manager.current_project.root_path, "resultados")
-                temp_img_path = safe_path(temp_img_dir, "temp_ambiente_last.png")
-                plt.gcf().savefig(temp_img_path, dpi=120, bbox_inches="tight")
+                if not self.current_analysis_id:
+                    self.current_analysis_id = AnalysisRecordStore.new_analysis_id()
+                temp_img_path = self.project_manager.current_project.layout.element_paths(self.current_analysis_id)["temperature_summary"]
+                temp_fig.savefig(temp_img_path, dpi=120, bbox_inches="tight")
                 self.last_temp_graph_path = str(temp_img_path)
+                self.mark_dirty()
                 
         except ValueError as e:
             messagebox.showerror("Error", f"Error al ingresar los datos: {e}")
@@ -3472,6 +3597,7 @@ class SombraApp:
             self.shape_selector.disable_selection()
             self.area_calc_button.config(state=tk.DISABLED)
             self.area_ref_button.config(state=tk.DISABLED)
+            self.mark_dirty()
         else:
             print("Error: No se ha seleccionado un área válida.")
 
@@ -3481,16 +3607,17 @@ class SombraApp:
         project = self.project_manager.current_project
         if not analisis or project is None:
             return None
-        mask = np.asarray(analisis.get("shadow_mask"), dtype=float)
+        mask = np.asarray(analisis.get("shadow_mask"), dtype=np.float32)
         if mask.size == 0:
             return None
         valid = np.isfinite(mask)
         if not np.any(valid):
             return None
 
-        out_dir = os.path.join(project.root_path, "resultados", "mascaras_sombra")
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = safe_path(out_dir, f"{self.current_image_stem}_sombra_sol.png")
+        if not self.current_analysis_id:
+            self.current_analysis_id = AnalysisRecordStore.new_analysis_id()
+        out_path = project.layout.element_paths(self.current_analysis_id)["shadow_classification"]
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
         fig, ax = plt.subplots(figsize=(6, 5))
         display = np.ma.masked_invalid(mask)
@@ -3528,8 +3655,8 @@ class SombraApp:
         dlg.configure(bg=self.palette["background"])
 
         fig, axes = plt.subplots(1, 2, figsize=(9, 4.5))
-        mask = np.asarray(analisis["shadow_mask"], dtype=float)
-        att = np.asarray(analisis["local_attenuation_map"], dtype=float)
+        mask = np.asarray(analisis["shadow_mask"], dtype=np.float32)
+        att = np.asarray(analisis["local_attenuation_map"], dtype=np.float32)
 
         m0 = np.ma.masked_invalid(mask)
         im0 = axes[0].imshow(m0, cmap="gray_r", vmin=0, vmax=1, interpolation="nearest")
@@ -3577,12 +3704,17 @@ class SombraApp:
         dlg.protocol("WM_DELETE_WINDOW", _close)
 
     def exportar_a_excel(self):
-        if not self.require_project("exportar a Excel"):
+        """Guarda la matriz actual en el análisis activo, sin pedir destino."""
+        if not self.require_project("guardar la matriz en Excel"):
             return
         if self.shape_selector.area_seleccionada is not None:
-            file_path = export_to_excel(self.shape_selector.area_seleccionada)
-            if file_path:
-                self.last_matrix_path = file_path
+            if not self.current_analysis_id:
+                self.current_analysis_id = AnalysisRecordStore.new_analysis_id()
+            file_path = self.project_manager.current_project.layout.element_paths(self.current_analysis_id)["matrix"]
+            pd.DataFrame(self.shape_selector.area_seleccionada).to_excel(file_path, index=False)
+            self.last_matrix_path = file_path
+            self.mark_dirty()
+            messagebox.showinfo("Excel", f"Matriz guardada en:\n{file_path}")
     def _leer_parametros_tmrt(self):
         """Lee temp. ambiente / hora / fecha / lat / lon desde el Panel 1,
         con valores por defecto razonables si están vacíos.
@@ -3680,14 +3812,14 @@ class SombraApp:
         # Mapa binario de cobertura (0=sol, 100=sombra) separado de la
         # transmitancia óptica local. Así la Tmrt espacial usa la intensidad
         # medida dentro de la sombra sin confundirla con área sombreada.
-        shadow_mask = np.asarray(analisis_foto["shadow_mask"], dtype=float)
-        mapa_sombra = shadow_mask * 100.0
+        shadow_mask = np.asarray(analisis_foto["shadow_mask"], dtype=np.float32)
+        mapa_sombra = (shadow_mask * np.float32(100.0)).astype(np.float32, copy=False)
         mapa_sombra_volteado = np.flipud(mapa_sombra)
         tau_photo_map = np.flipud(
-            np.asarray(analisis_foto["local_transmittance_map"], dtype=float)
+            np.asarray(analisis_foto["local_transmittance_map"], dtype=np.float32)
         )
         attenuation_photo_map = np.flipud(
-            np.asarray(analisis_foto["local_attenuation_map"], dtype=float)
+            np.asarray(analisis_foto["local_attenuation_map"], dtype=np.float32)
         )
 
         tz_offset = self._offset_timezone(fecha, hora)
@@ -3714,14 +3846,14 @@ class SombraApp:
         resultado_mapa["Fuente_solar_codigo"] = solar_data.get("source_mode", "clear_sky")
         resultado_mapa["Calidad_meteorologica"] = solar_data.get("quality")
         resultado_mapa["Componentes_derivados"] = list(solar_data.get("derived_components", []))
-        mapa_temperatura = np.asarray(resultado_mapa["Tmrt_map"], dtype=float)
+        mapa_temperatura = np.asarray(resultado_mapa["Tmrt_map"], dtype=np.float32)
 
         # Variables locales que se mostrarán en el hover. Se derivan del
         # MISMO modelo que genera el mapa para evitar discrepancias entre
         # tooltip, colorbar y curva.
-        tau_map = np.asarray(tau_photo_map, dtype=float)
+        tau_map = np.asarray(tau_photo_map, dtype=np.float32)
         radiacion_global = max(0.0, float(resultado_mapa["Radiacion_Wm2"]))
-        radiacion_efectiva = radiacion_global * tau_map
+        radiacion_efectiva = (np.float32(radiacion_global) * tau_map).astype(np.float32, copy=False)
         # Temperatura del aire local estimada bajo sombra. No se deriva de
         # Tmrt: usa la radiación evitada respecto a pleno sol y un modelo
         # empírico acotado (ver shadow_temp.Temperatura).
@@ -3746,7 +3878,7 @@ class SombraApp:
             dhi_override=solar_data.get("dhi"),
         )
         tmrt_sol = float(tmrt_sol_result["Tmrt_sol"])
-        delta_tmrt_map = tmrt_sol - mapa_temperatura
+        delta_tmrt_map = (np.float32(tmrt_sol) - mapa_temperatura).astype(np.float32, copy=False)
 
         finite = mapa_temperatura[np.isfinite(mapa_temperatura)]
         if finite.size == 0:
@@ -3774,14 +3906,14 @@ class SombraApp:
         ax = self.fig2.add_subplot(111)
         self.ax2 = ax
 
-        # Para mapas no constantes, los niveles empiezan y terminan en los
-        # extremos reales del mapa. En un mapa uniforme se crea una banda
-        # numéricamente mínima, pero la colorbar muestra un único valor.
+        # Para dibujar se usa una malla reducida; los datos científicos y
+        # el hover permanecen en resolución completa.
+        x_disp, y_disp, mapa_disp, _display_stride = self._contour_display_grid(mapa_temperatura)
         span = tmrt_max - tmrt_min
         if span > 1e-9:
             niveles = np.linspace(tmrt_min, tmrt_max, 21)
             relleno = ax.contourf(
-                mapa_temperatura,
+                x_disp, y_disp, mapa_disp,
                 levels=niveles,
                 cmap=CMAP_CURVAS_NIVEL,
                 vmin=tmrt_min,
@@ -3789,7 +3921,7 @@ class SombraApp:
                 antialiased=True,
             )
             ax.contour(
-                mapa_temperatura,
+                x_disp, y_disp, mapa_disp,
                 levels=niveles[::2],
                 colors="0.35",
                 linewidths=0.45,
@@ -3800,13 +3932,15 @@ class SombraApp:
             eps = max(0.01, abs(tmrt_min) * 1e-6)
             niveles = np.array([tmrt_min - eps, tmrt_min + eps])
             relleno = ax.contourf(
-                mapa_temperatura,
+                x_disp, y_disp, mapa_disp,
                 levels=niveles,
                 cmap=CMAP_CURVAS_NIVEL,
                 vmin=tmrt_min - eps,
                 vmax=tmrt_min + eps,
             )
             ticks = np.array([tmrt_min])
+        ax.set_xlim(0, mapa_temperatura.shape[1] - 1)
+        ax.set_ylim(0, mapa_temperatura.shape[0] - 1)
 
         ax.set_xlabel("Posición X (px)")
         ax.set_ylabel("Posición Y (px)")
@@ -3850,14 +3984,14 @@ class SombraApp:
         self.tmrt_hover_data = {
             "tmrt": mapa_temperatura,
             "air_temp": float(temp_ambient),
-            "local_air_est": np.asarray(aire_local_estimado, dtype=float),
-            "shadow": np.asarray(mapa_sombra_volteado, dtype=float),
-            "attenuation": np.asarray(attenuation_photo_map, dtype=float),
-            "transmittance": np.asarray(tau_photo_map, dtype=float),
+            "local_air_est": np.asarray(aire_local_estimado, dtype=np.float32),
+            "shadow": np.asarray(mapa_sombra_volteado, dtype=np.float32),
+            "attenuation": np.asarray(attenuation_photo_map, dtype=np.float32),
+            "transmittance": np.asarray(tau_photo_map, dtype=np.float32),
             "shadow_coverage_pct": float(analisis_foto["coverage_pct"]),
             "shadow_attenuation_pct": float(analisis_foto["attenuation_pct"]),
-            "effective_radiation": np.asarray(radiacion_efectiva, dtype=float),
-            "delta_tmrt": np.asarray(delta_tmrt_map, dtype=float),
+            "effective_radiation": np.asarray(radiacion_efectiva, dtype=np.float32),
+            "delta_tmrt": np.asarray(delta_tmrt_map, dtype=np.float32),
             "tmrt_sun": float(tmrt_sol),
             "global_radiation": float(radiacion_global),
             "tmrt_min": tmrt_min,
@@ -3872,28 +4006,17 @@ class SombraApp:
         self._setup_hover_tmrt_map(ax, self.canvas2)
         self.canvas2.draw_idle()
 
-        # Se conserva además una imagen estática para historial, PDF y
-        # restauración de proyectos. La interacción corresponde al canvas
-        # vivo mientras la curva está abierta/generada.
-        buf = BytesIO()
-        self.fig2.savefig(buf, format="png", dpi=150, bbox_inches="tight", pad_inches=0.1)
-        buf.seek(0)
-        self.curva_img_pil_original = Image.open(buf).copy()
-        buf.close()
+        project = self.project_manager.current_project
+        if not self.current_analysis_id:
+            self.current_analysis_id = AnalysisRecordStore.new_analysis_id()
+        artifact_paths = project.layout.element_paths(self.current_analysis_id)
 
-        project_root = self.project_manager.current_project.root_path
-        hist_dir = os.path.join(project_root, "resultados", "histogramas")
-        curve_dir = os.path.join(project_root, "resultados", "curvas_nivel")
-        excel_dir = os.path.join(project_root, "resultados", "excels")
-        os.makedirs(hist_dir, exist_ok=True)
-        os.makedirs(curve_dir, exist_ok=True)
-        os.makedirs(excel_dir, exist_ok=True)
-
-        curve_path = safe_path(curve_dir, f"{self.current_image_stem}_curva.png")
-        self.curva_img_pil_original.save(curve_path)
+        curve_path = artifact_paths["curve"]
+        self.fig2.savefig(curve_path, format="png", dpi=150, bbox_inches="tight", pad_inches=0.1)
+        self.curva_img_pil_original = None
         self.last_curve_path = str(curve_path)
 
-        hist_path = safe_path(hist_dir, f"{self.current_image_stem}_histo.png")
+        hist_path = artifact_paths["histogram"]
         hist_fig, hist_ax = plt.subplots()
         area_hist = np.asarray(self.shape_selector.area_seleccionada)
         mask_hist = self.shape_selector.area_seleccionada_mask
@@ -3918,7 +4041,7 @@ class SombraApp:
         self.last_histogram_path = str(hist_path)
         self._registrar_histograma_en_carrusel()
 
-        excel_path = safe_path(excel_dir, f"{self.current_image_stem}.xlsx")
+        excel_path = artifact_paths["matrix"]
         pd.DataFrame(self.shape_selector.area_seleccionada).to_excel(excel_path, index=False)
         self.last_matrix_path = str(excel_path)
         self.mark_dirty()
@@ -4104,10 +4227,15 @@ class SombraApp:
         self.curva_label.image = self.curva_photo
 
     def exportar_a_pdf(self):
-        if not self.require_project("exportar a PDF"):
-            return        
+        """Respalda el informe del elemento actual en resultados/informes/."""
+        if not self.require_project("respaldar el informe PDF"):
+            return
         pdf_generator = PDFReportGenerator(self)
-        pdf_generator.generate_report()    
+        path = pdf_generator.generate_report()
+        if path:
+            self.last_element_report_path = path
+            self.mark_dirty()
+            messagebox.showinfo("Informe", f"Informe respaldado en:\n{path}")
     def actualizar_dia(self, fecha_str, dia_var):
         # Función para actualizar día del año desde fecha
         try:
@@ -4162,8 +4290,12 @@ class SombraApp:
             return
             
         try:
-            self.dataset_saver.save_dataset()
-            messagebox.showinfo("Éxito", "Dataset guardado correctamente")
+            self.dataset_saver.save_dataset(save_image=False)
+            self.mark_dirty()
+            messagebox.showinfo(
+                "Respaldo de dataset",
+                f"Dataset actualizado en:\n{self.project_manager.current_project.layout.dataset_dir}"
+            )
         except Exception as e:
                         messagebox.showerror("Error", f"No se pudo guardar el dataset: {str(e)}")
 

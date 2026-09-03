@@ -9,6 +9,7 @@ Panel 4 no cambien.
 from __future__ import annotations
 
 import os
+import shutil
 from datetime import datetime
 
 import numpy as np
@@ -629,24 +630,21 @@ class HerramientasDialogs:
         return {"hora": hora, "fecha": fecha, "lat": lat, "lon": lon, "timezone": tz}
 
     def _validar_guardar_plantilla(self, dlg):
-        path = filedialog.asksaveasfilename(
-            parent=dlg,
-            title="Guardar plantilla de campaña",
-            defaultextension=".csv",
-            filetypes=[("CSV", "*.csv")],
-            initialfile="plantilla_validacion_termica.csv",
-        )
-        if not path:
+        """Crea/actualiza la plantilla dentro de entradas/validacion/."""
+        project = getattr(getattr(self.app, "project_manager", None), "current_project", None)
+        if project is None:
+            messagebox.showwarning("Plantilla", "Abra o cree un proyecto primero.", parent=dlg)
             return
+        path = os.path.join(project.layout.validation_inputs_dir, "plantilla_validacion_termica.csv")
         try:
             guardar_plantilla_csv(path)
+            self.app.mark_dirty()
         except OSError as exc:
             messagebox.showerror("Plantilla", str(exc), parent=dlg)
             return
         messagebox.showinfo(
             "Plantilla creada",
-            "Se creó una plantilla vacía con las columnas recomendadas.\n"
-            "No contiene datos de ejemplo para evitar incorporar valores ficticios.",
+            "La plantilla se actualizó dentro del proyecto:\n" + path,
             parent=dlg,
         )
 
@@ -661,6 +659,10 @@ class HerramientasDialogs:
         )
         if not path:
             return
+        project = getattr(getattr(self.app, "project_manager", None), "current_project", None)
+        if project is not None:
+            os.makedirs(project.layout.validation_inputs_dir, exist_ok=True)
+            path = project.layout.import_input_file(path, project.layout.validation_inputs_dir)
         try:
             filas = leer_csv_mediciones(path)
             report = evaluar_modelos(
@@ -687,6 +689,12 @@ class HerramientasDialogs:
             "metricas_aire_local": report.get("metricas_aire_local"),
             "advertencias": list(report.get("advertencias", [])),
         }
+        if project is not None:
+            try:
+                exportar_reporte_validacion(project.layout.validation_report, report)
+            except Exception as exc:
+                print(f"[validacion] No se pudo autoguardar reporte: {exc}")
+            self.app.mark_dirty()
         archivo_lbl.config(text=os.path.basename(path))
 
         for item in tabla.get_children():
@@ -814,24 +822,18 @@ class HerramientasDialogs:
         )
 
     def _validar_exportar_v10(self, dlg):
+        """Actualiza el reporte de validación en su carpeta fija del proyecto."""
         report = getattr(dlg, "validation_report", None)
-        if not report:
+        project = getattr(getattr(self.app, "project_manager", None), "current_project", None)
+        if not report or project is None:
             return
-        path = filedialog.asksaveasfilename(
-            parent=dlg,
-            title="Exportar validación científica",
-            defaultextension=".xlsx",
-            filetypes=[("Excel", "*.xlsx")],
-            initialfile="validacion_modelos_termicos.xlsx",
-        )
-        if not path:
-            return
+        path = project.layout.validation_report
         try:
             exportar_reporte_validacion(path, report)
         except Exception as exc:
-            messagebox.showerror("Exportación", str(exc), parent=dlg)
+            messagebox.showerror("Validación", str(exc), parent=dlg)
             return
-        messagebox.showinfo("Exportación", f"Validación exportada en:\n{path}", parent=dlg)
+        messagebox.showinfo("Validación", f"Reporte actualizado en:\n{path}", parent=dlg)
 
     # Métodos históricos conservados como aliases internos para plugins/código
     # que pudiera invocarlos directamente.
@@ -852,6 +854,12 @@ class HerramientasDialogs:
             validation_summary=getattr(self.app, "last_validation_summary", None),
         )
         self.app.last_scientific_audit = report.to_dict()
+        if project is not None:
+            os.makedirs(project.layout.validation_results_dir, exist_ok=True)
+            save_audit_json(project.layout.audit_json, report)
+            with open(project.layout.audit_txt, "w", encoding="utf-8") as handle:
+                handle.write(format_audit_text(report))
+            self.app.mark_dirty()
 
         dlg = tk.Toplevel(self.app.root)
         dlg.title("Auditoría científica y preparación para validación")
@@ -888,34 +896,20 @@ class HerramientasDialogs:
         pie.pack(fill="x", padx=12, pady=(0, 10))
 
         def export_json():
-            path = filedialog.asksaveasfilename(
-                parent=dlg,
-                title="Guardar auditoría científica",
-                defaultextension=".json",
-                filetypes=[("JSON", "*.json")],
-                initialfile="auditoria_cientifica_v16.json",
-            )
-            if not path:
+            if project is None:
                 return
-            save_audit_json(path, report)
-            messagebox.showinfo("Auditoría", f"Auditoría guardada en:\n{path}", parent=dlg)
+            save_audit_json(project.layout.audit_json, report)
+            messagebox.showinfo("Auditoría", f"Auditoría actualizada en:\n{project.layout.audit_json}", parent=dlg)
 
         def export_txt():
-            path = filedialog.asksaveasfilename(
-                parent=dlg,
-                title="Guardar auditoría científica",
-                defaultextension=".txt",
-                filetypes=[("Texto", "*.txt")],
-                initialfile="auditoria_cientifica_v16.txt",
-            )
-            if not path:
+            if project is None:
                 return
-            with open(path, "w", encoding="utf-8") as handle:
+            with open(project.layout.audit_txt, "w", encoding="utf-8") as handle:
                 handle.write(format_audit_text(report))
-            messagebox.showinfo("Auditoría", f"Auditoría guardada en:\n{path}", parent=dlg)
+            messagebox.showinfo("Auditoría", f"Auditoría actualizada en:\n{project.layout.audit_txt}", parent=dlg)
 
-        tk.Button(pie, text="Exportar JSON…", command=export_json).pack(side="left")
-        tk.Button(pie, text="Exportar TXT…", command=export_txt).pack(side="left", padx=6)
+        tk.Button(pie, text="Guardar JSON", command=export_json).pack(side="left")
+        tk.Button(pie, text="Guardar TXT", command=export_txt).pack(side="left", padx=6)
         tk.Button(pie, text="Cerrar", command=dlg.destroy).pack(side="right")
 
     # ---------------------------------------------------------------- especies y ranking

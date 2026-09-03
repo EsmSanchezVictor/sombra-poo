@@ -50,7 +50,7 @@ def test_legacy_migration_is_idempotent(tmp_path):
 
 def test_database_lives_inside_project_and_is_portable(tmp_path):
     store = AnalysisRecordStore(str(tmp_path))
-    assert Path(store.db_path) == tmp_path / "datos" / "analisis.sqlite3"
+    assert Path(store.db_path) == tmp_path / "analisis" / "analisis.sqlite3"
     assert Path(store.db_path).exists()
 
 
@@ -95,9 +95,11 @@ def test_snapshot_capture_upserts_same_tree_and_persists_required_payload(tmp_pa
 
     project = Project(str(tmp_path / "proyecto"))
     project.ensure_structure()
-    image = Path(project.root_path) / "imagenes" / "arbol.jpg"
-    curve = Path(project.root_path) / "resultados" / "curvas_nivel" / "arbol_curva.png"
-    hist = Path(project.root_path) / "resultados" / "histogramas" / "arbol_histo.png"
+    aid = AnalysisRecordStore.new_analysis_id()
+    image = Path(project.layout.images_dir) / "arbol.jpg"
+    paths = project.layout.element_paths(aid)
+    curve = Path(paths["curve"])
+    hist = Path(paths["histogram"])
     Image.new("RGB", (20, 10), "white").save(image)
     Image.new("RGB", (20, 10), "white").save(curve)
     Image.new("RGB", (20, 10), "white").save(hist)
@@ -115,7 +117,7 @@ def test_snapshot_capture_upserts_same_tree_and_persists_required_payload(tmp_pa
 
     store = AnalysisRecordStore(project.root_path)
     app = SimpleNamespace(
-        current_analysis_id=AnalysisRecordStore.new_analysis_id(),
+        current_analysis_id=aid,
         current_image_path=str(image), last_image_path=str(image), current_image_stem="arbol",
         last_curve_path=str(curve), last_histogram_path=str(hist),
         last_shadow_classification_path=None,
@@ -150,7 +152,7 @@ def test_snapshot_capture_upserts_same_tree_and_persists_required_payload(tmp_pa
     first = service.capture_analysis_record(auto=True)
     assert first is not None
     assert store.count() == 1
-    assert first["image"] == os.path.join("imagenes", "arbol.jpg")
+    assert first["image"] == os.path.join("entradas", "imagenes", "arbol.jpg")
     assert first["promedio_gris"] == 180.0
     assert first["cobertura_sombra"] == 40.0
     assert first["atenuacion_sombra"] == 50.0

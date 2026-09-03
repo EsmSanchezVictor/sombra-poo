@@ -66,12 +66,20 @@ class ShadowDetector:
         if isinstance(image_path_or_pil, Image.Image):
             img = image_path_or_pil
         elif isinstance(image_path_or_pil, str):
-            img = Image.open(image_path_or_pil)
+            # No dejar un decoder/descriptor PIL abierto durante sesiones largas.
+            with Image.open(image_path_or_pil) as img:
+                return np.asarray(img.convert("L"), dtype=np.uint8)
         else:
             arr = np.asarray(image_path_or_pil)
             if arr.ndim == 2:
-                return arr.astype(np.uint8)
-            return np.mean(arr[..., :3], axis=2).astype(np.uint8)
+                return arr.astype(np.uint8, copy=False)
+            arr3 = np.ascontiguousarray(arr[..., :3], dtype=np.uint8)
+            # np.mean(..., axis=2) promovía una foto completa a float64 y
+            # podía crear ~96 MB temporales en 12 MP. OpenCV convierte
+            # directamente uint8 -> uint8 sin ese buffer intermedio.
+            if cv2 is not None:
+                return cv2.cvtColor(arr3, cv2.COLOR_RGB2GRAY)
+            return np.asarray(Image.fromarray(arr3, mode="RGB").convert("L"), dtype=np.uint8)
         return np.asarray(img.convert("L"), dtype=np.uint8)
 
     def _otsu_threshold(self, gray: np.ndarray) -> int:
