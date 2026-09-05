@@ -9,7 +9,10 @@ Panel 4 no cambien.
 from __future__ import annotations
 
 import os
+import queue
 import shutil
+import threading
+import time
 from datetime import datetime
 
 import numpy as np
@@ -267,10 +270,12 @@ class HerramientasDialogs:
     # ---------------------------------------------------------------- confort
 
     def _dialogo_confort(self):
-        """Confort térmico con variables físicamente compatibles.
+        """Confort térmico con UTCI espacial vectorizado (v20).
 
-        Heat Index y Temperatura Aparente se calculan con temperatura del aire;
-        el efecto radiativo de la sombra se expresa mediante Tmrt y UTCI.
+        La ventana se muestra antes del cálculo del mapa. Los índices puntuales
+        se obtienen de inmediato y la distribución espacial UTCI se procesa en
+        un hilo de trabajo con una única evaluación vectorizada de
+        pythermalcomfort, evitando bloquear el event loop de Tkinter.
         """
         temp_ambient, hora, fecha, lat, lon = self.app._leer_parametros_tmrt()
         rh = float(self.app.simple_rh.get() or 60.0)
@@ -290,7 +295,7 @@ class HerramientasDialogs:
         if self.app.porcentaje_sombra is not None:
             sombra_pct = float(self.app.porcentaje_sombra)
         elif self.app.last_shadow is not None:
-            sombra_pct = (1 - np.asarray(self.app.last_shadow, dtype=float)).mean() * 100
+            sombra_pct = (1 - np.asarray(self.app.last_shadow, dtype=np.float32)).mean() * 100
 
         result = calculador.calculate_tmrt(
             temp_ambient,
@@ -318,6 +323,7 @@ class HerramientasDialogs:
             f"Heat Index (aire) = {hi_air:.1f} °C ({thermal_comfort.categoria_estres(hi_air, 'heat')})",
             f"T. aparente (aire) = {at_air:.1f} °C ({thermal_comfort.categoria_estres(at_air, 'at')})",
         ]
+
         if thermal_comfort.UTCI_DISPONIBLE:
             utci_sol = thermal_comfort.utci(temp_ambient, tmrt_sol, v_ms, rh)
             utci_sombra = thermal_comfort.utci(temp_ambient, tmrt_sombra, v_ms, rh)
@@ -325,35 +331,92 @@ class HerramientasDialogs:
                 f"UTCI sol = {utci_sol:.1f} °C ({thermal_comfort.categoria_utci(utci_sol)})",
                 f"UTCI sombra = {utci_sombra:.1f} °C ({thermal_comfort.categoria_utci(utci_sombra)})",
             ]
-            if self.app.tmrt_map is not None:
-                try:
-                    mapa = scenario_tools.mapa_estres(
-                        np.asarray(self.app.tmrt_map, dtype=float),
-                        temp_ambient,
-                        rh,
-                        indice="utci",
-                        v_ms=v_ms,
-                    )
-                    por_area = ", ".join(f"{k}: {v}%" for k, v in mapa["por_area"].items())
-                    lineas += ["", f"Mapa UTCI derivado del mapa Tmrt: {por_area}"]
-                except ValueError:
-                    pass
         else:
             lineas += [
                 "UTCI: no disponible — falta pythermalcomfort (pip install pythermalcomfort).",
             ]
+
         lineas += [
             "",
             "Nota: Heat Index y Temperatura Aparente no se calculan con Tmrt. "
             "La comparación sol/sombra se realiza con Tmrt y UTCI.",
         ]
+
+        # La ventana se crea ANTES del análisis espacial. Así Confort responde
+        # de inmediato aunque haya un mapa de alta resolución.
         dlg = tk.Toplevel(self.app.root)
         dlg.title("Confort térmico")
-        dlg.geometry("620x460")
+        dlg.geometry("680x500")
         dlg.transient(self.app.root)
-        tk.Label(dlg, text="\n".join(lineas), justify="left", anchor="w").pack(
-            fill="both", expand=True, padx=14, pady=12)
-        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=8)
+
+        text_var = tk.StringVar(value="\n".join(lineas))
+        tk.Label(dlg, textvariable=text_var, justify="left", anchor="nw").pack(
+            fill="both", expand=True, padx=14, pady=(12, 4)
+        )
+        status_var = tk.StringVar(value="")
+        status_label = tk.Label(dlg, textvariable=status_var, justify="left", anchor="w", fg="#555555")
+        status_label.pack(fill="x", padx=14, pady=(2, 6))
+        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=(0, 8))
+        dlg.update_idletasks()
+
+        if not thermal_comfort.UTCI_DISPONIBLE or self.app.tmrt_map is None:
+            return
+
+        # Copia compacta y estable para el worker; como máximo 640x640 en v20
+        # (~1.6 MB en float32). No se leen variables Tk desde el hilo.
+        tmrt_map = np.asarray(self.app.tmrt_map, dtype=np.float32).copy()
+        n_validos = int(np.count_nonzero(np.isfinite(tmrt_map)))
+        status_var.set(
+            f"Calculando distribución espacial UTCI… {tmrt_map.shape[0]}×{tmrt_map.shape[1]} "
+            f"({n_validos:,} celdas)".replace(",", ".")
+        )
+
+        result_queue = queue.Queue(maxsize=1)
+
+        def worker():
+            inicio = time.perf_counter()
+            try:
+                mapa = scenario_tools.mapa_estres(
+                    tmrt_map,
+                    temp_ambient,
+                    rh,
+                    indice="utci",
+                    v_ms=v_ms,
+                )
+                result_queue.put((mapa, time.perf_counter() - inicio, None))
+            except Exception as exc:
+                result_queue.put((None, time.perf_counter() - inicio, str(exc)))
+
+        def poll_worker():
+            # Solo el hilo principal toca Tk. El worker se limita a NumPy /
+            # pythermalcomfort y entrega su resultado mediante Queue.
+            try:
+                mapa, elapsed, error = result_queue.get_nowait()
+            except queue.Empty:
+                try:
+                    if dlg.winfo_exists():
+                        dlg.after(40, poll_worker)
+                except tk.TclError:
+                    pass
+                return
+
+            try:
+                if not dlg.winfo_exists():
+                    return
+                if error is not None:
+                    status_var.set(f"No se pudo calcular el mapa UTCI: {error}")
+                    return
+                por_area = ", ".join(f"{k}: {v}%" for k, v in mapa["por_area"].items())
+                text_var.set("\n".join(lineas + ["", f"Mapa UTCI derivado del mapa Tmrt: {por_area}"]))
+                status_var.set(
+                    f"Distribución espacial calculada con UTCI vectorizado · "
+                    f"{mapa['n_pixeles']:,} celdas · {elapsed:.2f} s".replace(",", ".")
+                )
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, name="utci-map-v20", daemon=True).start()
+        dlg.after(40, poll_worker)
 
     # ---------------------------------------------------------------- escenario A/B
 

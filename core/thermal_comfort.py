@@ -32,6 +32,7 @@ en lugar de fabricar un valor.
 from __future__ import annotations
 
 import math
+import numpy as np
 
 UTCI_DISPONIBLE = False
 try:  # dependencia opcional — la app funciona sin ella
@@ -118,10 +119,25 @@ def temperatura_aparente(ta: float, rh: float, v: float) -> float:
     return ta + 0.33 * e - 0.70 * v - 4.00
 
 
+def _extraer_resultado_utci(resultado):
+    """Extrae el valor/array UTCI de distintas versiones de pythermalcomfort.
+
+    pythermalcomfort 4.x devuelve un objeto con atributo ``utci``; versiones
+    anteriores podían devolver DataFrame/Series. Esta función conserva
+    compatibilidad y, a diferencia del wrapper histórico, también acepta
+    resultados vectoriales.
+    """
+    if hasattr(resultado, "utci"):
+        return np.asarray(resultado.utci, dtype=np.float64)
+    if hasattr(resultado, "columns") and "utci" in getattr(resultado, "columns", []):
+        return np.asarray(resultado["utci"], dtype=np.float64)
+    if isinstance(resultado, dict) and "utci" in resultado:
+        return np.asarray(resultado["utci"], dtype=np.float64)
+    return np.asarray(resultado, dtype=np.float64)
+
+
 def utci(ta: float, tmrt: float, v: float, rh: float) -> float | None:
-    """UTCI oficial (Bröde et al. 2012, modelo de Fiala) delegado en
-    `pythermalcomfort`. Devuelve None si la librería no está instalada
-    (la app funciona sin ella y la UI lo informa)."""
+    """UTCI oficial delegado en :mod:`pythermalcomfort` para un punto."""
     if _utci_pkg is None:
         return None
     if v < 0:
@@ -129,14 +145,57 @@ def utci(ta: float, tmrt: float, v: float, rh: float) -> float | None:
     if rh < 0 or rh > 100:
         raise ValueError("RH debe estar entre 0 y 100.")
     resultado = _utci_pkg(tdb=float(ta), tr=float(tmrt), v=float(v), rh=float(rh))
-    # pythermalcomfort 4.x devuelve un objeto UTCI (atributo `.utci`);
-    # las 3.x devolvían un DataFrame — se aceptan todos para no romper
-    # con ninguna versión instalada.
-    if hasattr(resultado, "utci"):
-        return float(resultado.utci)
-    if hasattr(resultado, "iloc"):
-        return float(resultado["utci"].iloc[0])
-    return float(resultado)
+    valores = _extraer_resultado_utci(resultado)
+    if valores.size == 0:
+        raise ValueError("pythermalcomfort no devolvió un valor UTCI.")
+    return float(valores.reshape(-1)[0])
+
+
+def utci_array(ta: float, tmrt, v: float, rh: float):
+    """UTCI vectorizado para un mapa completo de Tmrt.
+
+    v20 elimina el cuello de botella del cálculo píxel-a-píxel: se entrega el
+    array completo a pythermalcomfort en una única llamada. El resultado
+    conserva la forma de ``tmrt`` y se devuelve como ``float32`` para limitar
+    RAM. Si una versión antigua de pythermalcomfort no acepta arrays, se usa
+    un fallback escalar de compatibilidad; las versiones actuales siguen la
+    ruta vectorizada.
+    """
+    if _utci_pkg is None:
+        return None
+    if v < 0:
+        raise ValueError("La velocidad del viento no puede ser negativa.")
+    if rh < 0 or rh > 100:
+        raise ValueError("RH debe estar entre 0 y 100.")
+
+    tmrt_arr = np.asarray(tmrt, dtype=np.float32)
+    if tmrt_arr.size == 0:
+        return np.asarray(tmrt_arr, dtype=np.float32)
+
+    try:
+        resultado = _utci_pkg(
+            tdb=float(ta),
+            tr=tmrt_arr,
+            v=float(v),
+            rh=float(rh),
+        )
+        valores = _extraer_resultado_utci(resultado)
+        if valores.ndim == 0:
+            valores = np.full(tmrt_arr.shape, float(valores), dtype=np.float32)
+        elif valores.shape != tmrt_arr.shape:
+            if valores.size == tmrt_arr.size:
+                valores = valores.reshape(tmrt_arr.shape)
+            else:
+                valores = np.broadcast_to(valores, tmrt_arr.shape)
+        return np.asarray(valores, dtype=np.float32)
+    except (TypeError, ValueError, AttributeError):
+        # Compatibilidad con versiones antiguas que solo aceptan escalares.
+        flat = tmrt_arr.ravel()
+        salida = np.empty(flat.shape, dtype=np.float32)
+        for i, tr in enumerate(flat):
+            valor = utci(float(ta), float(tr), float(v), float(rh))
+            salida[i] = np.nan if valor is None else float(valor)
+        return salida.reshape(tmrt_arr.shape)
 
 
 def categoria_utci(valor: float | None) -> str:

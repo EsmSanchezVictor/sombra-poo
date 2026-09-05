@@ -22,6 +22,7 @@ from core.thermal_comfort import (
     indice_calor,
     temperatura_aparente,
     utci,
+    utci_array,
 )
 from modelo_con_excel import calcular_sombra_arboles
 
@@ -237,13 +238,33 @@ def mapa_estres(
         raise ValueError("El mapa no tiene valores válidos.")
 
     if indice == "utci":
-        ind = np.array([utci(ta, float(tmrt), v_ms, rh) for tmrt in validos], dtype=object)
-        if any(v is None for v in ind):
+        ind = utci_array(ta, validos.astype(np.float32, copy=False), v_ms, rh)
+        if ind is None:
             raise ValueError("UTCI no disponible: instale pythermalcomfort.")
+        ind = np.asarray(ind, dtype=np.float32).reshape(-1)
+        ind = ind[np.isfinite(ind)]
+        if ind.size == 0:
+            raise ValueError("El cálculo UTCI no produjo valores válidos.")
+
+        # Clasificación completamente vectorizada: no se llama a Python una
+        # vez por píxel. El orden sigue las bandas estándar de UTCI.
+        bandas = (
+            ("Estrés por frío extremo", -np.inf, -40.0),
+            ("Estrés por frío muy fuerte", -40.0, -27.0),
+            ("Estrés por frío fuerte", -27.0, -13.0),
+            ("Estrés por frío moderado", -13.0, 0.0),
+            ("Estrés por frío leve", 0.0, 9.0),
+            ("Sin estrés térmico", 9.0, 26.0),
+            ("Estrés de calor moderado", 26.0, 32.0),
+            ("Estrés de calor fuerte", 32.0, 38.0),
+            ("Estrés de calor muy fuerte", 38.0, 46.0),
+            ("Estrés de calor extremo", 46.0, np.inf),
+        )
         categorias = {}
-        for v in ind:
-            cat = categoria_utci(float(v))
-            categorias[cat] = categorias.get(cat, 0) + 1
+        for nombre, inferior, superior in bandas:
+            n = int(np.count_nonzero((ind >= inferior) & (ind < superior)))
+            if n:
+                categorias[nombre] = n
     elif indice == "heat":
         valor = indice_calor(float(ta), rh)
         categorias = {categoria_estres(valor, "heat"): int(validos.size)}
@@ -253,9 +274,9 @@ def mapa_estres(
     else:
         raise ValueError("indice debe ser 'utci', 'heat' o 'at'.")
 
-    total = validos.size
+    total = int(ind.size) if indice == "utci" else int(validos.size)
     return {
-        "por_area": {cat: round(n / total * 100, 1) for cat, n in sorted(categorias.items())},
+        "por_area": {cat: round(n / total * 100, 1) for cat, n in categorias.items()},
         "media_tmrt": round(float(np.mean(validos)), 2),
         "min_tmrt": round(float(np.min(validos)), 2),
         "max_tmrt": round(float(np.max(validos)), 2),

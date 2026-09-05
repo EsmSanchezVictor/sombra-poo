@@ -78,6 +78,7 @@ class AppState:
                 "model_mode": self.app.modo_modelo.get(),
                 "edit_mode": getattr(self.app, "modo_edicion", tk.StringVar(value="advanced")).get(),
                 "panel2_advanced": getattr(self.app, "panel2_advanced_mode", tk.BooleanVar(value=False)).get(),
+                "matrix_size": int(getattr(self.app, "matriz_size", tk.IntVar(value=128)).get()),
                 "shadow_detector_enabled": getattr(self.app, "shadow_detector_enabled", tk.BooleanVar(value=False)).get(),
                 "radiation_source_mode": getattr(self.app, "radiation_source_mode", tk.StringVar(value="clear_sky")).get(),
                 "clear_sky_use_pvlib": getattr(self.app, "use_pvlib_engine", tk.BooleanVar(value=False)).get(),
@@ -162,6 +163,12 @@ class AppState:
             self.app.modo_edicion.set(ui.get("edit_mode", self.app.modo_edicion.get()))
         if hasattr(self.app, "panel2_advanced_mode"):
             self.app.panel2_advanced_mode.set(ui.get("panel2_advanced", self.app.panel2_advanced_mode.get()))
+        if hasattr(self.app, "matriz_size"):
+            try:
+                from image_processor import normalize_matrix_size
+                self.app.matriz_size.set(normalize_matrix_size(ui.get("matrix_size", 128)))
+            except Exception:
+                self.app.matriz_size.set(128)
         if hasattr(self.app, "shadow_detector_enabled"):
             self.app.shadow_detector_enabled.set(ui.get("shadow_detector_enabled", self.app.shadow_detector_enabled.get()))
         if hasattr(self.app, "radiation_source_mode"):

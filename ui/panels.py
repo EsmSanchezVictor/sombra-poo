@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 import modelo_con_excel as modelo
+from image_processor import DEFAULT_MATRIX_SIZE
 
 
 def _build_controles(vars_dict):
@@ -470,7 +471,7 @@ def _toggle_panel2_advanced(app):
     if app.panel2_advanced_mode.get():
         app.matrix_size_combo.config(state="readonly")
     else:
-        app.matriz_size.set(480)
+        app.matriz_size.set(DEFAULT_MATRIX_SIZE)
         app.matrix_size_combo.config(state="disabled")
 
 

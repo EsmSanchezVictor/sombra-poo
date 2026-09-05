@@ -184,6 +184,7 @@ class SnapshotService:
             "poly_referencia": self._serializar_patch(getattr(selector, "shape_patch_referencia", None) if selector else None),
             "area_calculo_text": self._label_text("lbl_dimensiones_calculo"),
             "area_referencia_text": self._label_text("lbl_dimensiones_referencia"),
+            "matrix_size": int(getattr(getattr(self.app, "matriz_size", None), "get", lambda: 128)()),
             "area_calculo_px": area_calc_px,
             "area_referencia_px": area_ref_px,
             "promedio_gris": self._to_float(getattr(self.app, "ref_gray_mean", None)),

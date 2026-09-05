@@ -23,7 +23,9 @@ from core.species import ESPECIES as CATALOGO_ESPECIES, nombres_especies
 from core.validation import k_factor_desde_mediciones, leer_csv_mediciones, metricas
 from core.uncertainty import estimate_tmrt_uncertainty
 from core.memory_utils import collect_and_log
-from image_processor import ImageProcessor
+from image_processor import (
+    ImageProcessor, DEFAULT_MATRIX_SIZE, MATRIX_SIZE_OPTIONS, normalize_matrix_size,
+)
 #from mouse_pixel_value import MouseHoverPixelValueWithTooltip
 from save_pdf import PDFReportGenerator
 from services.location_service import LocationService
@@ -879,6 +881,25 @@ class SombraApp:
 
         self.area_calculo_done = self.shape_selector.area_seleccionada is not None
         self.area_referencia_done = self.shape_selector.area_referencia is not None
+
+        # Cada análisis puede haberse calculado con una resolución distinta.
+        # Al seleccionarlo, el control refleja la resolución REAL del bundle
+        # restaurado; esto no recalcula nada ni modifica sus resultados.
+        matrix_n = entry.get("matrix_size")
+        if self.area_calculo_done:
+            arr_calc = np.asarray(self.shape_selector.area_seleccionada)
+            if arr_calc.ndim == 2 and arr_calc.shape[0] == arr_calc.shape[1]:
+                matrix_n = int(arr_calc.shape[0])
+        matrix_n = normalize_matrix_size(matrix_n if matrix_n is not None else DEFAULT_MATRIX_SIZE)
+        previous_suspend = getattr(self, "_suspend_autosave_tracking", False)
+        self._suspend_autosave_tracking = True
+        try:
+            self.matriz_size.set(matrix_n)
+            self.panel2_advanced_mode.set(matrix_n != DEFAULT_MATRIX_SIZE)
+            self._toggle_panel2_advanced()
+        finally:
+            self._suspend_autosave_tracking = previous_suspend
+
         if self.area_calculo_done:
             self.area_ref_button.config(state=tk.NORMAL)
         if self.area_calculo_done and self.area_referencia_done:
@@ -1109,7 +1130,7 @@ class SombraApp:
 
         El mapa científico y el hover siguen usando la matriz completa.
         Matplotlib contourf construye paths vectoriales y su consumo crece
-        mucho con 480x480; dibujar una malla <=320 por lado reduce RAM sin
+        mucho en resoluciones altas; dibujar una malla <=320 por lado reduce RAM sin
         alterar los valores guardados ni consultados.
         """
         arr = np.asarray(mapa, dtype=np.float32)
@@ -1345,7 +1366,7 @@ class SombraApp:
     def setup_variables(self):
         """Inicializa las variables de control para la aplicación"""
         self.selection_type = tk.StringVar(value="Polígono")
-        self.matriz_size = tk.IntVar(value=480)
+        self.matriz_size = tk.IntVar(value=DEFAULT_MATRIX_SIZE)
         self.panel2_advanced_mode = tk.BooleanVar(value=False)        
         self.tmrt_model_mode = tk.StringVar(value=self.settings.get("tmrt_model_mode", "standard"))
         self.surface_model_mode = tk.StringVar(value=self.settings.get("surface_model_mode", "standard"))
@@ -1474,7 +1495,7 @@ class SombraApp:
         self.cargar_imagen_button.pack(fill="x", padx=20, pady=4)
         self.panel2_advanced_check = tk.Checkbutton(
             panel,
-            text="Modo avanzado\n(tamaño de matriz)",
+            text="Modo avanzado\n(resolución 64–640)",
             justify="left",
             variable=self.panel2_advanced_mode,
             bg=panel.cget("bg"),
@@ -1490,16 +1511,23 @@ class SombraApp:
         self.shadow_detector_check.pack(fill="x", padx=20, pady=2)
 
         # Selección del tamaño de la matriz
-        matrix_label = tk.Label(panel, text="tamaño de matriz:", bg=panel.cget("bg"), fg="black")
+        matrix_label = tk.Label(panel, text="Resolución de matriz (N × N):", bg=panel.cget("bg"), fg="black")
         matrix_label.pack(fill="x", padx=20, pady=(4, 0))
 
         self.matrix_size_combo = ttk.Combobox(
             panel,
             textvariable=self.matriz_size,
-            values=[480, 640, 800, 1024],
+            values=MATRIX_SIZE_OPTIONS,
             state="readonly",
         )
-        self.matrix_size_combo.pack(fill="x", padx=20, pady=(0, 3))
+        self.matrix_size_combo.pack(fill="x", padx=20, pady=(0, 1))
+        tk.Label(
+            panel,
+            text="Paso 32 · predeterminado: 128 × 128",
+            bg=panel.cget("bg"),
+            fg="#555555",
+            font=("Arial", 8),
+        ).pack(fill="x", padx=20, pady=(0, 3))
 
         # Botones de selección de área
         self.area_calc_button = tk.Button(panel, text="Seleccione área de cálculo",bg='blue',fg='white', command=self.shape_selector.select_area_calculo, state=tk.DISABLED)
@@ -2461,7 +2489,7 @@ class SombraApp:
         self.panel2_advanced_mode.set(False)
         self.tmrt_model_mode.set(self.settings.get("tmrt_model_mode", "standard"))
         self.surface_model_mode.set(self.settings.get("surface_model_mode", "standard"))
-        self.matriz_size.set(480)        
+        self.matriz_size.set(DEFAULT_MATRIX_SIZE)        
         self.simple_temp_air_c.set(25.0)
         if hasattr(self, "city_combo") and self.locations_data:
             self._update_city_options()

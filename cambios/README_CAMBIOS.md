@@ -1,3 +1,18 @@
+# Actualización v20 — Confort vectorizado y matrices 64–640
+
+- Resolución seleccionable de 64×64 a 640×640 en pasos de 32.
+- Valor predeterminado: 128×128.
+- UTCI espacial calculado mediante una única llamada vectorizada a pythermalcomfort.
+- Clasificación de bandas UTCI vectorizada con NumPy.
+- Ventana Confort se abre antes del cálculo del mapa y permanece responsiva.
+- Cálculo espacial en worker; Tkinter solo se actualiza desde el hilo principal.
+- Resolución guardada en el proyecto y por análisis del carrusel.
+- 154 tests aprobados; 5 omitidos por pvlib opcional.
+
+Ver `CAMBIOS_CONFORT_RESOLUCION_v20.md`.
+
+---
+
 # Cambios aplicados — guía de integración (v3, con fixes de física y limpieza)
 
 ## 0. Qué se hizo en esta vuelta (v3)
