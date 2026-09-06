@@ -104,8 +104,14 @@ def atenuacion_copa(rho_copa: float) -> float:
 
 
 def viento_categoria_a_ms(categoria: str) -> float:
-    """Mapea categorías cualitativas a velocidad de referencia a 10 m."""
-    return VIENTO_CATEGORIA_MS.get(str(categoria).lower(), 4.0)
+    """Mapea categorías cualitativas o texto numérico a velocidad en m/s."""
+    text = str(categoria).strip().lower().replace(",", ".")
+    if text in VIENTO_CATEGORIA_MS:
+        return VIENTO_CATEGORIA_MS[text]
+    try:
+        return max(0.0, float(text))
+    except (TypeError, ValueError):
+        return 4.0
 
 
 # ---------------------------------------------------------------- radiación

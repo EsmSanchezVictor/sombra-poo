@@ -10,6 +10,7 @@ mismos nombres para que los call sites internos y externos
 from __future__ import annotations
 
 import tkinter as tk
+from datetime import datetime, timedelta
 from tkinter import ttk, messagebox
 
 import modelo_con_excel as modelo
@@ -18,72 +19,75 @@ from image_processor import DEFAULT_MATRIX_SIZE
 
 def _build_controles(vars_dict):
     return [
-        ("Fecha (AAAA-MM-DD)", vars_dict["dia"], 1, None, True),  # es_fecha=True
+        ("Fecha (AAAA-MM-DD)", vars_dict["dia"], 1, None, True),
         ("Latitud (°)", vars_dict["lat"], 2, [-90, 90], False),
         ("Longitud (°)", vars_dict["lon"], 3, [-180, 180], False),
         ("Hora Local", vars_dict["hora"], 4, [0, 24], False),
         ("Humedad (%)", vars_dict["humedad"], 5, [0, 100], False),
-        ("Temp. Base (K)", vars_dict["T_amb_base"], 6, [250, 350], False),
-        ("Radiación (W/m²)", vars_dict["I_sol_base"], 7, [0, 1500], False),
-        ("Temp. Mín (K)", vars_dict["T_min"], 8, [250, 350], False),
-        ("Temp. Máx (K)", vars_dict["T_max"], 9, [250, 350], False),
+        ("Radiación (W/m²)", vars_dict["I_sol_base"], 6, [0, 1500], False),
+        ("Temp. Mín (K)", vars_dict["T_min"], 7, [250, 350], False),
+        ("Temp. Máx (K)", vars_dict["T_max"], 8, [250, 350], False),
     ]
 
 
 def setup_panel_1(app):
-    """Configura el contenido del Panel 1."""
+    """Panel Temperatura con entrada simple y opciones avanzadas ocultables."""
     panel = app.panel_frames[0]
 
-    labels = ["Temperatura ambiente (°C):", "Hora del día (0-23):", "Fecha (YYYY-MM-DD):", "Latitud:", "Longitud:"]
-    app.entries = []
-    app.entry_temp = None
-    app.entry_time = None
-    app.entry_date = None
-    app.entry_lat = None
-    app.entry_lon = None
+    tk.Label(
+        panel, text="Temperatura", bg=panel.cget("bg"), fg="black",
+        font=("Arial", 9, "bold"), anchor="w",
+    ).pack(fill="x", padx=10, pady=(2, 3))
 
+    mode_frame = tk.Frame(panel, bg=panel.cget("bg"))
+    mode_frame.pack(fill="x", padx=10, pady=(0, 5))
+    tk.Radiobutton(
+        mode_frame, text="Entrada simple", variable=app.modo_temperatura,
+        value="simple", bg=panel.cget("bg"), command=app._toggle_temperatura_mode,
+    ).pack(anchor="w")
+    tk.Radiobutton(
+        mode_frame, text="Entrada avanzada", variable=app.modo_temperatura,
+        value="advanced", bg=panel.cget("bg"), command=app._toggle_temperatura_mode,
+    ).pack(anchor="w")
+
+    base_frame = tk.Frame(panel, bg=panel.cget("bg"))
+    base_frame.pack(fill="x")
+    labels = [
+        "Temperatura ambiente (°C):", "Hora del día (0-23):",
+        "Fecha (YYYY-MM-DD):", "Latitud:", "Longitud:",
+    ]
+    app.entries = []
     for label_text in labels:
-        label = tk.Label(panel, text=label_text, bg=panel.cget("bg"), fg="black")
-        label.pack(fill="x", padx=10, pady=(4, 0))
-        entry = tk.Entry(panel)
+        tk.Label(base_frame, text=label_text, bg=panel.cget("bg"), fg="black").pack(
+            fill="x", padx=10, pady=(4, 0)
+        )
+        entry = tk.Entry(base_frame)
         entry.pack(fill="x", padx=10, pady=(0, 4))
         app.entries.append(entry)
+    app.entry_temp, app.entry_time, app.entry_date, app.entry_lat, app.entry_lon = app.entries
 
-    app.entry_temp = app.entries[0]
-    app.entry_time = app.entries[1]
-    app.entry_date = app.entries[2]
-    app.entry_lat = app.entries[3]
-    app.entry_lon = app.entries[4]
-
-    # NUEVO: porcentaje de sombra manual. Antes "Calcular temperatura
-    # en sombra" exigía haber cargado una imagen y procesado la
-    # selección en el Panel 2 (app.porcentaje_sombra solo se
-    # llenaba ahí). Con este campo se puede calcular Tmrt para
-    # cualquier % de sombra hipotético sin pasar por una imagen —
-    # útil para explorar escenarios ("¿y si hubiera 60% de sombra
-    # acá?") o cuando no se tiene una foto todavía. Si se deja vacío,
-    # se sigue usando el % calculado desde la imagen, como antes.
-    manual_label = tk.Label(
-        panel, text="Porcentaje de sombra manual:",
-        bg=panel.cget("bg"), fg="black",
-    )
-    manual_label.pack(fill="x", padx=10, pady=(10, 3))
-    app.entry_porcentaje_manual = tk.Entry(panel)
-    app.entry_porcentaje_manual.pack(fill="x", padx=10, pady=(0, 3))
-    manual_hint = tk.Label(
-        panel,
-        text="Si se completa,\n se usa en vez del % calculado \n en el Panel 2.",
-        bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
-    )
-    manual_hint.pack(fill="x", padx=10, pady=(0, 3))
-
-    # v14: la fuente radiativa es explícita y queda separada de la opción
-    # de motor solar. El default "clear_sky" reproduce el flujo histórico.
+    # Es una entrada básica alternativa al porcentaje fotográfico, por eso
+    # permanece disponible también en modo simple.
     tk.Label(
-        panel, text="Fuente radiativa / meteorológica:",
+        base_frame, text="Porcentaje de sombra manual:",
+        bg=panel.cget("bg"), fg="black",
+    ).pack(fill="x", padx=10, pady=(7, 3))
+    app.entry_porcentaje_manual = tk.Entry(base_frame)
+    app.entry_porcentaje_manual.pack(fill="x", padx=10, pady=(0, 3))
+    tk.Label(
+        base_frame, text="Opcional: reemplaza el % de sombra calculado en el Panel 2.",
+        bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
+        justify="left", wraplength=210,
+    ).pack(fill="x", padx=10, pady=(0, 3))
+
+    app.temperature_advanced_frame = tk.Frame(panel, bg=panel.cget("bg"))
+    adv = app.temperature_advanced_frame
+
+    tk.Label(
+        adv, text="Fuente radiativa / meteorológica:",
         bg=panel.cget("bg"), fg="black", font=("Arial", 8, "bold"), anchor="w",
     ).pack(fill="x", padx=10, pady=(8, 2))
-    source_frame = tk.Frame(panel, bg=panel.cget("bg"))
+    source_frame = tk.Frame(adv, bg=panel.cget("bg"))
     source_frame.pack(fill="x", padx=10, pady=(0, 3))
     for text, value in (
         ("Cielo despejado modelado", "clear_sky"),
@@ -97,42 +101,50 @@ def setup_panel_1(app):
             command=app._refresh_meteorology_status,
         ).pack(fill="x", anchor="w")
 
-    pvlib_check = tk.Checkbutton(
-        panel, text="En cielo despejado: usar pvlib/Ineichen si está disponible",
+    tk.Checkbutton(
+        adv, text="En cielo despejado: usar pvlib/Ineichen si está disponible",
         variable=app.use_pvlib_engine, bg=panel.cget("bg"), fg="black",
         anchor="w", justify="left", wraplength=210,
         command=app._refresh_meteorology_status,
-    )
-    pvlib_check.pack(fill="x", padx=10, pady=(0, 4))
+    ).pack(fill="x", padx=10, pady=(0, 4))
 
-    manual_frame = tk.Frame(panel, bg=panel.cget("bg"))
+    manual_frame = tk.Frame(adv, bg=panel.cget("bg"))
     manual_frame.pack(fill="x", padx=10, pady=(0, 4))
     tk.Label(manual_frame, text="GHI manual (W/m²)", bg=panel.cget("bg"), font=("Arial", 7)).grid(row=0, column=0, sticky="w")
     tk.Entry(manual_frame, textvariable=app.manual_ghi, width=8).grid(row=0, column=1, sticky="ew", padx=(4, 0))
-    tk.Label(manual_frame, text="DNI opcional", bg=panel.cget("bg"), font=("Arial", 7)).grid(row=1, column=0, sticky="w")
+    tk.Label(manual_frame, text="DNI opcional (Tmrt avanzado)", bg=panel.cget("bg"), font=("Arial", 7)).grid(row=1, column=0, sticky="w")
     tk.Entry(manual_frame, textvariable=app.manual_dni, width=8).grid(row=1, column=1, sticky="ew", padx=(4, 0))
-    tk.Label(manual_frame, text="DHI opcional", bg=panel.cget("bg"), font=("Arial", 7)).grid(row=2, column=0, sticky="w")
+    tk.Label(manual_frame, text="DHI opcional (Tmrt avanzado)", bg=panel.cget("bg"), font=("Arial", 7)).grid(row=2, column=0, sticky="w")
     tk.Entry(manual_frame, textvariable=app.manual_dhi, width=8).grid(row=2, column=1, sticky="ew", padx=(4, 0))
     manual_frame.grid_columnconfigure(1, weight=1)
 
     tk.Button(
-        panel, text="Importar serie meteorológica CSV…",
+        adv, text="Importar serie meteorológica CSV…",
         command=app.cargar_serie_meteorologica,
     ).pack(fill="x", padx=10, pady=(0, 3))
     app.meteorology_status_label = tk.Label(
-        panel, bg=panel.cget("bg"), fg="#555555", font=("Arial", 7),
+        adv, bg=panel.cget("bg"), fg="#555555", font=("Arial", 7),
         anchor="w", justify="left", wraplength=210,
     )
     app.meteorology_status_label.pack(fill="x", padx=10, pady=(0, 6))
     app.radiation_source_mode.trace_add("write", lambda *_: app._refresh_meteorology_status())
-    app._refresh_meteorology_status()
 
     tk.Label(
-        panel, text="Modelo Tmrt activo:", bg=panel.cget("bg"), fg="black",
+        adv, text="Modelo Tmrt:", bg=panel.cget("bg"), fg="black",
         font=("Arial", 8, "bold"), anchor="w",
     ).pack(fill="x", padx=10, pady=(2, 0))
+    tmrt_mode_frame = tk.Frame(adv, bg=panel.cget("bg"))
+    tmrt_mode_frame.pack(fill="x", padx=10, pady=(1, 2))
+    tk.Radiobutton(
+        tmrt_mode_frame, text="Estándar", variable=app.tmrt_model_mode, value="standard",
+        bg=panel.cget("bg"), anchor="w",
+    ).pack(anchor="w")
+    tk.Radiobutton(
+        tmrt_mode_frame, text="Avanzado radiativo", variable=app.tmrt_model_mode, value="advanced",
+        bg=panel.cget("bg"), anchor="w",
+    ).pack(anchor="w")
     app.tmrt_model_status_label = tk.Label(
-        panel, bg=panel.cget("bg"), fg="#555555", font=("Arial", 8), anchor="w",
+        adv, bg=panel.cget("bg"), fg="#555555", font=("Arial", 8), anchor="w",
         justify="left", wraplength=210,
     )
     app.tmrt_model_status_label.pack(fill="x", padx=10, pady=(0, 6))
@@ -140,21 +152,23 @@ def setup_panel_1(app):
     def _refresh_tmrt_model_status(*_args):
         if not app.tmrt_model_status_label.winfo_exists():
             return
-        if app.tmrt_model_mode.get() == "advanced":
-            texto = "Avanzado · balance radiativo v1"
-        else:
-            texto = "Estándar · empírico calibrable (predeterminado)"
+        texto = (
+            "Avanzado · balance radiativo v1"
+            if app.tmrt_model_mode.get() == "advanced"
+            else "Estándar · empírico calibrable (predeterminado)"
+        )
         app.tmrt_model_status_label.config(text=texto)
 
     app.tmrt_model_mode.trace_add("write", _refresh_tmrt_model_status)
     _refresh_tmrt_model_status()
+    app._refresh_meteorology_status()
 
     app.calculate_temp_button = tk.Button(
-        panel,
-        text="Calcular temperatura en sombra",
+        panel, text="Calcular temperatura en sombra",
         command=app.calculate_temperature_in_shade,
     )
     app.calculate_temp_button.pack(fill="x", padx=10, pady=8)
+    _toggle_temperatura_mode(app)
 
 
 def crear_control(app, panel, texto, var, fila, rango=None, es_fecha=False):
@@ -172,12 +186,37 @@ def crear_control(app, panel, texto, var, fila, rango=None, es_fecha=False):
     tk.Label(panel, text=texto, anchor="w", font=("Arial", 7), width=18).grid(
         row=fila, column=0, sticky="ew", padx=0, pady=3)
     if es_fecha:
-        entry = tk.Entry(panel, width=12)
+        source_vars = app.vars_modelo if app.vars_modelo.get("dia") is var else app.vars
+        iso_value = source_vars.get("_date_iso")
+        if hasattr(iso_value, "get"):
+            iso_value = iso_value.get()
+        try:
+            day = max(1, min(int(float(var.get())), 366))
+            year = int(source_vars.get("_year", datetime.now().year))
+            initial_date = str(iso_value or (datetime(year, 1, 1) + timedelta(days=day - 1)).date().isoformat())
+        except Exception:
+            initial_date = datetime.now().date().isoformat()
+        date_text = tk.StringVar(value=initial_date)
+        entry = tk.Entry(panel, width=12, textvariable=date_text)
         entry.grid(row=fila, column=1, sticky="ew", padx=(0, 12))
-        # FIX: el binding original llamaba a `actualizar_dia` como nombre
-        # global (no existía) y habría dado NameError al presionar Enter;
-        # ahora usa el método real de la app (app_ui.actualizar_dia).
-        entry.bind("<Return>", lambda e: app.actualizar_dia(entry.get(), var))
+
+        def apply_date(_event=None):
+            app.actualizar_dia(date_text.get(), var)
+
+        def sync_from_day(*_args):
+            try:
+                day_now = max(1, min(int(float(var.get())), 366))
+                year_now = int(source_vars.get("_year", datetime.now().year))
+                date_text.set((datetime(year_now, 1, 1) + timedelta(days=day_now - 1)).date().isoformat())
+            except Exception:
+                pass
+
+        entry.bind("<Return>", apply_date)
+        entry.bind("<FocusOut>", apply_date)
+        try:
+            var.trace_add("write", sync_from_day)
+        except Exception:
+            pass
     elif rango:
         scale = tk.Scale(panel, from_=rango[0], to=rango[1], variable=var,
                          orient=tk.HORIZONTAL, length=1, width=5)
@@ -368,6 +407,7 @@ def setup_panel_4(app):
 
     # Herramientas de confort y calibración (análisis térmico)
     herramientas = tk.Frame(contenido, bg=panel.cget("bg"))
+    app.model_tools_frame = herramientas
     herramientas.grid(row=3, column=0, sticky="ew", pady=(2, 3))
     herramientas.grid_columnconfigure(0, weight=1)
     tk.Label(herramientas, text="Herramientas", bg=panel.cget("bg"),
@@ -399,46 +439,68 @@ def setup_panel_4(app):
         app.advanced_frame,
         textvariable=app.vars_modelo["viento"],
         values=["nulo", "moderado", "fuerte"],
+        state="normal",
     ).grid(row=0, column=1, sticky="ew", pady=2, padx=(8, 5))
+    tk.Label(
+        app.advanced_frame,
+        text="Categoría o m/s: nulo≈0.5 · moderado≈4 · fuerte≈10",
+        bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
+    ).grid(row=1, column=0, columnspan=2, sticky="w")
+
+    tk.Label(app.advanced_frame, text="Nubosidad", bg=panel.cget("bg")).grid(
+        row=2, column=0, sticky="w", pady=2)
+    ttk.Combobox(
+        app.advanced_frame,
+        textvariable=app.vars_modelo["nubosidad"],
+        values=["Despejado", "Parcial", "Nublado"],
+        state="readonly",
+    ).grid(row=2, column=1, sticky="ew", pady=2, padx=(8, 5))
+
+    tk.Label(app.advanced_frame, text="Modelo de superficie", bg=panel.cget("bg")).grid(
+        row=3, column=0, columnspan=2, sticky="w", pady=(5, 1))
+    surface_frame = tk.Frame(app.advanced_frame, bg=panel.cget("bg"))
+    surface_frame.grid(row=4, column=0, columnspan=2, sticky="w")
+    for label, value in (
+        ("Estándar", "standard"),
+        ("Avanzado seco", "advanced"),
+        ("Vegetación + ET", "advanced_vegetation"),
+    ):
+        tk.Radiobutton(
+            surface_frame, text=label, variable=app.surface_model_mode, value=value,
+            bg=panel.cget("bg"), anchor="w",
+        ).pack(anchor="w")
+    tk.Label(
+        app.advanced_frame,
+        text="Humedad y nubosidad intervienen plenamente en los balances avanzados; el modo Estándar conserva el modelo histórico.",
+        bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
+        justify="left", wraplength=210,
+    ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(1, 3))
 
     tk.Label(app.advanced_frame, text="Configuraciones rápidas", bg=panel.cget("bg")).grid(
-        row=1, column=0, sticky="w", pady=3
+        row=6, column=0, columnspan=2, sticky="w", pady=(5, 2)
     )
-    tk.Button(
+    preset_frame = tk.Frame(app.advanced_frame, bg=panel.cget("bg"))
+    preset_frame.grid(row=7, column=0, columnspan=2, sticky="ew", padx=(0, 5), pady=(0, 3))
+    preset_frame.grid_columnconfigure(0, weight=1)
+    preset_frame.grid_columnconfigure(1, weight=1)
+    for idx, (label, preset) in enumerate((
+        ("Verano", "verano"), ("Invierno", "invierno"),
+        ("Soleado", "soleado"), ("Nublado", "nublado"),
+    )):
+        tk.Button(
+            preset_frame, text=label,
+            command=lambda p=preset: modelo.cargar_preset(p, app.vars_modelo),
+            bg="#4CAF50", fg="white", font=("Arial", 7, "bold"),
+        ).grid(row=idx // 2, column=idx % 2, sticky="ew", padx=2, pady=2)
+    tk.Label(
         app.advanced_frame,
-        text="Soleado",
-        command=lambda: modelo.cargar_preset("soleado", app.vars_modelo),
-        bg="#4CAF50",
-        fg="white",
-        font=("Arial", 7, "bold"),
-    ).grid(row=2, column=0, sticky="w", padx=0, pady=2)
-    tk.Button(
-        app.advanced_frame,
-        text="Verano",
-        command=lambda: modelo.cargar_preset("verano", app.vars),
-        bg="#4CAF50",
-        fg="white",
-        font=("Arial", 7, "bold"),
-    ).grid(row=2, column=1, sticky="w", padx=10, pady=2)
-    tk.Button(
-        app.advanced_frame,
-        text="Soleado",
-        command=lambda: modelo.cargar_preset("soleado", app.vars),
-        bg="#4CAF50",
-        fg="white",
-        font=("Arial", 7, "bold"),
-    ).grid(row=3, column=0, sticky="w", padx=0, pady=2)
-    tk.Button(
-        app.advanced_frame,
-        text="Nublado",
-        command=lambda: modelo.cargar_preset("nublado", app.vars),
-        bg="#4CAF50",
-        fg="white",
-        font=("Arial", 7, "bold"),
-    ).grid(row=3, column=1, sticky="w", padx=10, pady=2)
+        text="Verano/Invierno adaptan la fecha al hemisferio. Soleado/Nublado ajustan radiación y nubosidad. Con serie observada prevalecen los datos medidos disponibles.",
+        bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
+        justify="left", wraplength=210,
+    ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(0, 3))
 
     panelin = tk.Frame(app.advanced_frame, bg=panel.cget("bg"))
-    panelin.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=(0, 12), pady=3)
+    panelin.grid(row=9, column=0, columnspan=2, sticky="nsew", padx=(0, 12), pady=3)
     for texto, var, fila, rango, es_fecha in app.controles_modelo:
         crear_control(app, panelin, texto, var, fila, rango, es_fecha)
     app.vars_modelo["graph_frame"] = app.frame11
@@ -449,13 +511,32 @@ def setup_panel_4(app):
     _toggle_modelo_mode(app)
 
 
+def _toggle_temperatura_mode(app):
+    frame = getattr(app, "temperature_advanced_frame", None)
+    if frame is None or not frame.winfo_exists():
+        return
+    if getattr(app, "modo_temperatura", None) is not None and app.modo_temperatura.get() == "advanced":
+        frame.pack(fill="x", before=app.calculate_temp_button, pady=(0, 2))
+    else:
+        frame.pack_forget()
+
+
 def _toggle_modelo_mode(app):
+    tools = getattr(app, "model_tools_frame", None)
     if app.modo_modelo.get() == "simple" and not app.locations_error:
         app.advanced_frame.grid_remove()
         app.simple_frame.grid()
+        if tools is not None and tools.winfo_exists():
+            tools.grid_remove()
     else:
         app.simple_frame.grid_remove()
         app.advanced_frame.grid()
+        if tools is not None and tools.winfo_exists():
+            tools.grid()
+    try:
+        app._refresh_meteorology_status()
+    except Exception:
+        pass
 
 
 def _toggle_edicion_mode(app):

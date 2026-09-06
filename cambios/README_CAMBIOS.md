@@ -698,3 +698,23 @@ Se reemplaza la compactación volumétrica de v23 por una reducción horizontal 
 - Diagnóstico visible si VTK está instalado pero falla OpenGL/contexto.
 - Script `DIAGNOSTICO_VTK_WINDOWS.py`.
 - Sin cambios científicos.
+
+## v32 — compatibilidad VTK 9.7
+- La barra escalar VTK usa `AddViewProp` en lugar de `AddActor2D`, compatible con VTK 9.7.
+- Se conserva el diagnóstico detallado de v31 y el fallback Matplotlib.
+- Suite de esa versión: 192 aprobados, 5 omitidos.
+
+## v33 — capa térmica 3D
+- Superposición térmica al 50 % sobre base física neutra.
+- Isotermas automáticas y diferenciación visual de árboles/estructuras.
+- Sin cambios de cálculo térmico.
+- Suite: 194 aprobados, 5 omitidos.
+
+## v34 — historial y auditoría de modos avanzados
+- Historial de sesiones/proyectos puede borrarse desde Administración, preservando la sesión actual y sin eliminar usuarios.
+- Modelo corrige presets Verano/Invierno/Soleado/Nublado, fecha por hemisferio, viento numérico, nubosidad y fuentes meteorológicas/radiativas.
+- `pvlib/Ineichen` y Ta observada quedan conectados al cálculo avanzado de Modelo.
+- Edición y Modelo aíslan sus parámetros avanzados y se persisten separadamente.
+- Temperatura incorpora Entrada simple / Entrada avanzada y oculta/desactiva parámetros avanzados hasta activarla.
+- Las opciones avanzadas ocultas ya no siguen actuando al volver a Simple.
+- Suite: 202 aprobados, 5 omitidos.

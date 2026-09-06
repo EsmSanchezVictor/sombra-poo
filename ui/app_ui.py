@@ -18,7 +18,7 @@ from core.settings_manager import SettingsManager
 from core.project_manager import ProjectManager
 from core import scenario as scenario_tools
 from core import thermal_comfort
-from core.climate_profile import viento_categoria_a_ms
+from core.climate_profile import viento_categoria_a_ms, factor_ghi_nubosidad, descomponer_radiacion
 from core.species import ESPECIES as CATALOGO_ESPECIES, nombres_especies
 from core.validation import k_factor_desde_mediciones, leer_csv_mediciones, metricas
 from core.uncertainty import estimate_tmrt_uncertainty
@@ -40,6 +40,7 @@ from services.meteorology_service import MeteorologyService, SOURCE_LABELS
 from services import analysis_service
 from services import report_service
 from ui import icon_factory
+from ui.solar_indicator import add_solar_indicator_2d
 from ui import panels as ui_panels
 from ui import theme
 from ui.layout import (
@@ -1446,6 +1447,7 @@ class SombraApp:
         self.vars_modelo = self._build_vars()
         self.modo_modelo = tk.StringVar(value="simple")
         self.modo_edicion = tk.StringVar(value="simple")
+        self.modo_temperatura = tk.StringVar(value="simple")
         self.panel2_advanced_mode = tk.BooleanVar(value=False)
         self.simple_country = tk.StringVar()
         self.simple_city = tk.StringVar()
@@ -1504,7 +1506,7 @@ class SombraApp:
         for name in (
             "selection_type", "matriz_size", "panel2_advanced_mode",
             "tmrt_model_mode", "surface_model_mode", "modo_modelo",
-            "modo_edicion", "simple_country", "simple_city",
+            "modo_edicion", "modo_temperatura", "simple_country", "simple_city",
             "simple_cloudiness", "simple_temp_air_c", "simple_rh",
             "temp_unit", "distance_unit", "shadow_detector_enabled",
             "use_pvlib_engine", "radiation_source_mode", "manual_ghi",
@@ -1532,6 +1534,7 @@ class SombraApp:
             "hora": tk.DoubleVar(value=12),
             "humedad": tk.DoubleVar(value=50.0),
             "viento": tk.StringVar(value="moderado"),
+            "nubosidad": tk.StringVar(value="Despejado"),
             "timezone": tk.StringVar(value="America/Argentina/Buenos_Aires"),
             "arboles": [],
             "estructuras": [],
@@ -1759,18 +1762,79 @@ class SombraApp:
 
         self.advanced_edit_frame = tk.Frame(contenido, bg=panel.cget("bg"))
         self.advanced_edit_frame.grid(row=3, column=0, sticky="nsew", pady=3)
-        self.advanced_edit_frame.grid_columnconfigure(0, weight=1)
+        self.advanced_edit_frame.grid_columnconfigure(1, weight=1)
 
-        label_viento = tk.Label(self.advanced_edit_frame, text="Viento", bg=panel.cget("bg"))
-        label_viento.grid(row=0, column=0, sticky="w", pady=(3, 2))
+        tk.Label(self.advanced_edit_frame, text="Viento", bg=panel.cget("bg")).grid(
+            row=0, column=0, sticky="w", pady=(3, 2))
         ttk.Combobox(
             self.advanced_edit_frame,
             textvariable=self.vars["viento"],
             values=["nulo", "moderado", "fuerte"],
-        ).grid(row=1, column=0, sticky="ew", padx=(0, 12), pady=2)
+            state="normal",
+        ).grid(row=0, column=1, sticky="ew", padx=(8, 12), pady=2)
+        tk.Label(
+            self.advanced_edit_frame,
+            text="Categoría o m/s: nulo≈0.5 · moderado≈4 · fuerte≈10",
+            bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
+        ).grid(row=1, column=0, columnspan=2, sticky="w")
+
+        tk.Label(self.advanced_edit_frame, text="Nubosidad", bg=panel.cget("bg")).grid(
+            row=2, column=0, sticky="w", pady=2)
+        ttk.Combobox(
+            self.advanced_edit_frame,
+            textvariable=self.vars["nubosidad"],
+            values=["Despejado", "Parcial", "Nublado"],
+            state="readonly",
+        ).grid(row=2, column=1, sticky="ew", padx=(8, 12), pady=2)
+
+        tk.Label(
+            self.advanced_edit_frame, text="Modelo de superficie",
+            bg=panel.cget("bg"), font=("Arial", 8, "bold"),
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(5, 1))
+        surface_frame = tk.Frame(self.advanced_edit_frame, bg=panel.cget("bg"))
+        surface_frame.grid(row=4, column=0, columnspan=2, sticky="w")
+        for label, value in (
+            ("Estándar", "standard"),
+            ("Avanzado seco", "advanced"),
+            ("Vegetación + ET", "advanced_vegetation"),
+        ):
+            tk.Radiobutton(
+                surface_frame, text=label, variable=self.surface_model_mode, value=value,
+                bg=panel.cget("bg"), anchor="w",
+            ).pack(anchor="w")
+        tk.Label(
+            self.advanced_edit_frame,
+            text="Humedad y nubosidad intervienen plenamente en los balances avanzados; el modo Estándar conserva el modelo histórico.",
+            bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
+            justify="left", wraplength=210,
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(1, 3))
+
+        tk.Label(
+            self.advanced_edit_frame, text="Configuraciones rápidas",
+            bg=panel.cget("bg"), font=("Arial", 8, "bold"),
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(5, 2))
+        preset_frame = tk.Frame(self.advanced_edit_frame, bg=panel.cget("bg"))
+        preset_frame.grid(row=7, column=0, columnspan=2, sticky="ew", padx=(0, 12), pady=(0, 3))
+        preset_frame.grid_columnconfigure(0, weight=1)
+        preset_frame.grid_columnconfigure(1, weight=1)
+        for idx, (label, preset) in enumerate((
+            ("Verano", "verano"), ("Invierno", "invierno"),
+            ("Soleado", "soleado"), ("Nublado", "nublado"),
+        )):
+            tk.Button(
+                preset_frame, text=label,
+                command=lambda p=preset: modelo.cargar_preset(p, self.vars),
+                bg="#4CAF50", fg="white", font=("Arial", 7, "bold"),
+            ).grid(row=idx // 2, column=idx % 2, sticky="ew", padx=2, pady=2)
+        tk.Label(
+            self.advanced_edit_frame,
+            text="Verano/Invierno adaptan la fecha al hemisferio. Soleado/Nublado ajustan radiación y nubosidad.",
+            bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
+            justify="left", wraplength=210,
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(0, 3))
 
         panelin = tk.Frame(self.advanced_edit_frame, bg=panel.cget("bg"))
-        panelin.grid(row=2, column=0, sticky="nsew", padx=(0, 12), pady=3)
+        panelin.grid(row=9, column=0, columnspan=2, sticky="nsew", padx=(0, 12), pady=3)
         for texto, var, fila, rango, es_fecha in self.controles:
             self.crear_control(panelin, texto, var, fila, rango, es_fecha)
         self._toggle_edicion_mode()    
@@ -1803,7 +1867,6 @@ class SombraApp:
         explícitamente en los labels). Antes solo se validaba T_amb_base;
         ahora también T_min y T_max."""
         for var, nombre in (
-            (self.vars_modelo["T_amb_base"], "Temp Base"),
             (self.vars_modelo["T_min"], "Temp. Mín"),
             (self.vars_modelo["T_max"], "Temp. Máx"),
         ):
@@ -1851,36 +1914,45 @@ class SombraApp:
             rad_map = {"Despejado": 950, "Parcial": 650, "Nublado": 250}
             i_max = rad_map.get(cloudiness, 650)
             self.vars_modelo["T_amb_base"].set(temp_air_k)
-            if self.radiation_source_mode.get() in {"manual_measured", "manual_scenario"}:
-                try:
-                    manual_model_ghi = self._optional_float_text(self.manual_ghi)
-                    if manual_model_ghi is None:
-                        raise ValueError("Ingrese GHI manual en el Panel 1.")
-                    self.vars_modelo["I_sol_base"].set(manual_model_ghi)
-                except ValueError as exc:
-                    messagebox.showerror("Radiación manual", str(exc))
-                    return
-            else:
-                self.vars_modelo["I_sol_base"].set(i_max)
+            # Entrada simple usa su esquema rápido propio. Una fuente manual,
+            # pvlib o una serie seleccionada en el modo avanzado no puede
+            # seguir modificando este cálculo mientras está oculta.
+            self.vars_modelo["I_sol_base"].set(i_max)
             self.vars_modelo["humedad"].set(float(self.simple_rh.get()))
-            self.vars_modelo["nubosidad"] = cloudiness
+            if hasattr(self.vars_modelo.get("nubosidad"), "set"):
+                self.vars_modelo["nubosidad"].set(cloudiness)
+            else:
+                self.vars_modelo["nubosidad"] = cloudiness
         else:
             if not self._validate_kelvin_input():
                 return
         self.vars_modelo["_modo_modelo"] = self.modo_modelo.get()
         self.vars_modelo["_surface_model_mode"] = self.surface_model_mode.get()
 
-        # v14: manual/observado pueden alimentar directamente el balance de
-        # superficies con GHI del instante. Para clear_sky se conserva el
-        # flujo legacy del Panel 4 para no cambiar resultados históricos.
+        # Fuente radiativa efectiva. En modo simple se mantiene el esquema
+        # rápido histórico; fuentes meteorológicas/pvlib son opciones detalladas.
         self.vars_modelo["_radiation_override_ghi"] = None
         self.vars_modelo["_radiation_override_dni"] = None
         self.vars_modelo["_radiation_override_dhi"] = None
         self.vars_modelo["_radiation_source_label"] = "Configuración histórica Panel 4"
         self.vars_modelo["_radiation_quality"] = "legacy_configured"
         self.vars_modelo["_cloud_fraction_override"] = None
-        source_mode = self.radiation_source_mode.get()
-        if source_mode in {"manual_measured", "manual_scenario", "observed_series"}:
+        self.vars_modelo["_air_temp_override_k"] = None
+        source_mode = (
+            self.radiation_source_mode.get()
+            if self.modo_modelo.get() == "advanced" else "clear_sky"
+        )
+        use_clear_sky_engine = (
+            self.modo_modelo.get() == "advanced"
+            and source_mode == "clear_sky"
+            and bool(self.use_pvlib_engine.get())
+            and bool(getattr(self.solar_engine, "pvlib_available", False))
+        )
+        use_external_radiation = (
+            source_mode in {"manual_measured", "manual_scenario", "observed_series"}
+            or use_clear_sky_engine
+        )
+        if use_external_radiation:
             try:
                 fecha_modelo = self._fecha_modelo_actual()
                 lat = float(self.vars_modelo["lat"].get())
@@ -1888,16 +1960,35 @@ class SombraApp:
                 hora = float(self.vars_modelo["hora"].get())
                 manual_ghi = float(self.vars_modelo["I_sol_base"].get()) if source_mode.startswith("manual_") else None
                 met = self._obtener_datos_solares(lat, lon, fecha_modelo, hora, manual_ghi=manual_ghi)
+
+                # En cielo claro modelado, la categoría de nubosidad genera un
+                # escenario atenuado. Datos observados/medidos no se atenúan dos veces.
+                if source_mode == "clear_sky":
+                    cloud_var = self.vars_modelo.get("nubosidad", "Despejado")
+                    cloudiness = cloud_var.get() if hasattr(cloud_var, "get") else str(cloud_var)
+                    factor_cloud = factor_ghi_nubosidad(cloudiness)
+                    if factor_cloud != 1.0:
+                        scenario_ghi = max(0.0, float(met["ghi"]) * float(factor_cloud))
+                        comp = descomponer_radiacion(
+                            scenario_ghi, float(met.get("elevation", 0.0)), cloudiness
+                        )
+                        met = dict(met)
+                        met["ghi"] = scenario_ghi
+                        met["dni"] = float(comp["dni_normal"])
+                        met["dhi"] = float(comp["dhi"])
+                        met["source_label"] = f"{met.get('source_label', 'Cielo claro')} · {cloudiness}"
+                        met["quality"] = f"{met.get('quality', 'modeled')} + escenario_nubosidad"
+
                 self.vars_modelo["_radiation_override_ghi"] = float(met["ghi"])
                 self.vars_modelo["_radiation_override_dni"] = float(met["dni"])
                 self.vars_modelo["_radiation_override_dhi"] = float(met["dhi"])
                 self.vars_modelo["_radiation_source_label"] = met.get("source_label", source_mode)
                 self.vars_modelo["_radiation_quality"] = met.get("quality", "external")
-                # En una serie observada, variables meteorológicas disponibles
-                # reemplazan las entradas manuales de ese instante.
                 if source_mode == "observed_series":
                     if met.get("ta_c") is not None:
-                        self.vars_modelo["T_amb_base"].set(float(met["ta_c"]) + 273.15)
+                        observed_ta_k = float(met["ta_c"]) + 273.15
+                        self.vars_modelo["T_amb_base"].set(observed_ta_k)
+                        self.vars_modelo["_air_temp_override_k"] = observed_ta_k
                         if self.modo_modelo.get() == "simple":
                             self.simple_temp_air_c.set(float(met["ta_c"]))
                     if met.get("rh_pct") is not None:
@@ -3546,7 +3637,10 @@ class SombraApp:
             raise ValueError("El valor radiativo debe ser finito.")
         return number
 
-    def _obtener_datos_solares(self, latitude, longitude, fecha, hora, *, manual_ghi=None):
+    def _obtener_datos_solares(
+        self, latitude, longitude, fecha, hora, *, manual_ghi=None,
+        mode_override=None, use_pvlib_override=None,
+    ):
         """Resuelve posición solar + radiación con procedencia explícita.
 
         Fuentes disponibles (v14):
@@ -3565,9 +3659,16 @@ class SombraApp:
             self.solar_engine.set_timezone(tz)
         except Exception:
             self.solar_engine.set_timezone("America/Argentina/Buenos_Aires")
-        self.solar_engine.set_use_pvlib(bool(self.use_pvlib_engine.get()))
+        use_pvlib = (
+            bool(use_pvlib_override) if use_pvlib_override is not None
+            else bool(self.use_pvlib_engine.get())
+        )
+        self.solar_engine.set_use_pvlib(use_pvlib)
 
-        mode = self.radiation_source_mode.get() if hasattr(self, "radiation_source_mode") else "clear_sky"
+        mode = (
+            str(mode_override) if mode_override is not None
+            else (self.radiation_source_mode.get() if hasattr(self, "radiation_source_mode") else "clear_sky")
+        )
         if manual_ghi is None:
             manual_ghi = self._optional_float_text(getattr(self, "manual_ghi", ""))
         manual_dni = self._optional_float_text(getattr(self, "manual_dni", ""))
@@ -3642,7 +3743,10 @@ class SombraApp:
         for name in ("meteorology_status_label", "model_meteorology_status_label"):
             label = getattr(self, name, None)
             if label is not None and label.winfo_exists():
-                label.config(text=text)
+                if name == "model_meteorology_status_label" and getattr(self, "modo_modelo", None) is not None and self.modo_modelo.get() == "simple":
+                    label.config(text="Entrada simple · radiación simplificada según nubosidad")
+                else:
+                    label.config(text=text)
 
     def _obtener_radiacion_pvlib(self, latitude, longitude, fecha, hora):
         """Compatibilidad: devuelve datos solo si cielo despejado usa pvlib."""
@@ -3696,11 +3800,21 @@ class SombraApp:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
             
             tz_offset = self._offset_timezone(fecha, hora)
+            temp_input_mode = getattr(self, "modo_temperatura", tk.StringVar(value="simple")).get()
+            if temp_input_mode == "advanced":
+                effective_tmrt_mode = self.tmrt_model_mode.get()
+                solar_data = self._obtener_datos_solares(latitude, longitude, fecha, hora)
+            else:
+                # Modo simple no hereda opciones avanzadas ocultas.
+                effective_tmrt_mode = "standard"
+                solar_data = self._obtener_datos_solares(
+                    latitude, longitude, fecha, hora,
+                    mode_override="clear_sky", use_pvlib_override=False,
+                )
             self.temp_calculator = Temperatura(
                 latitude, longitude, k_factor=self.k_factor, tz_offset_hours=tz_offset,
-                model_mode=self.tmrt_model_mode.get(),
+                model_mode=effective_tmrt_mode,
             )
-            solar_data = self._obtener_datos_solares(latitude, longitude, fecha, hora)
             # Si la fuente es una serie observada, Ta disponible en esa serie
             # pasa a ser la temperatura de aire del cálculo. Si no existe, se
             # conserva el valor ingresado por el usuario y queda trazado como
@@ -4034,6 +4148,9 @@ class SombraApp:
     def _toggle_edicion_mode(self):
         return ui_panels._toggle_edicion_mode(self)
 
+    def _toggle_temperatura_mode(self):
+        return ui_panels._toggle_temperatura_mode(self)
+
     def _toggle_panel2_advanced(self):
         return ui_panels._toggle_panel2_advanced(self)
 
@@ -4106,6 +4223,7 @@ class SombraApp:
             dhi_override=solar_data.get("dhi"),
             transmittance_map_override=tau_photo_map,
         )
+        resultado_mapa["Solar_azimuth"] = solar_data.get("azimuth")
         resultado_mapa["Fuente_solar"] = solar_data.get("source_label", solar_data.get("source", "fallback"))
         resultado_mapa["Fuente_solar_codigo"] = solar_data.get("source_mode", "clear_sky")
         resultado_mapa["Calidad_meteorologica"] = solar_data.get("quality")
@@ -4231,6 +4349,11 @@ class SombraApp:
             va="bottom",
             ha="left",
             bbox=dict(boxstyle="round", fc="white", ec="0.75", alpha=0.82),
+        )
+        add_solar_indicator_2d(
+            ax,
+            resultado_mapa.get("Solar_azimuth"),
+            resultado_mapa.get("Solar_altitude"),
         )
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")

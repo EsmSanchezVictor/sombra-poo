@@ -278,7 +278,12 @@ class HerramientasDialogs:
         pythermalcomfort, evitando bloquear el event loop de Tkinter.
         """
         temp_ambient, hora, fecha, lat, lon = self.app._leer_parametros_tmrt()
-        rh = float(self.app.simple_rh.get() or 60.0)
+        rh_source = (
+            self.app.vars_modelo["humedad"].get()
+            if getattr(self.app, "modo_modelo", None) is not None and self.app.modo_modelo.get() == "advanced"
+            else self.app.simple_rh.get()
+        )
+        rh = float(rh_source or 60.0)
         if rh < 0 or rh > 100:
             messagebox.showwarning("Humedad", "La humedad relativa debe estar entre 0 y 100.")
             return
@@ -437,7 +442,11 @@ class HerramientasDialogs:
         defaults = {
             "hora_ini": "8", "hora_fin": "18",
             "ta_min": "20", "ta_max": str(round(temp_ambient, 1)),
-            "rh": str(self.app.simple_rh.get() or 60),
+            "rh": str(
+                self.app.vars_modelo["humedad"].get()
+                if getattr(self.app, "modo_modelo", None) is not None and self.app.modo_modelo.get() == "advanced"
+                else (self.app.simple_rh.get() or 60)
+            ),
             "sombra_a": "20", "sombra_b": "60",
         }
         vars_ab = {}

@@ -10,13 +10,14 @@ import pandas as pd
 import math
 from core.scene_objects import adaptar_objetos_escena
 from core.species import color_copa, propiedades_especie
-from core.climate_profile import temperatura_diurna_ciclo
+from core.climate_profile import temperatura_diurna_ciclo, VIENTO_CATEGORIA_MS
 from core.solar_math import (
     solar_declination_deg, equation_of_time_degrees, standard_meridian_deg,
     timezone_offset_hours, solar_elevation_deg, solar_azimuth_deg,
 )
 from tkinter import messagebox
 from plot_style import CMAP_TEMPERATURA
+from ui.solar_indicator import add_solar_indicator_2d
 from core.excel_scene import save_scene_excel, load_scene_excel, apply_parameters_to_vars
 from core.materials import get_surface_material, effective_structure_transmittance
 from core.surface_energy import (
@@ -268,7 +269,7 @@ def sombra_estructuras(X, Y, estructuras, theta_sol, azimut_sol):
     return np.clip(sombra_total, 0, 1)
 
 
-_VIENTO_CATEGORIA_A_MS = {"nulo": 0.0, "moderado": 4.0, "fuerte": 10.0}
+_VIENTO_CATEGORIA_A_MS = VIENTO_CATEGORIA_MS
 
 
 def calcular_coeficiente_conveccion(viento):
@@ -279,7 +280,18 @@ def calcular_coeficiente_conveccion(viento):
     texto por compatibilidad, traduciéndolas a una velocidad estimada.
     """
     if isinstance(viento, str):
-        v = _VIENTO_CATEGORIA_A_MS.get(viento, 2.0)
+        text = viento.strip().lower().replace(",", ".")
+        if text in _VIENTO_CATEGORIA_A_MS:
+            v = _VIENTO_CATEGORIA_A_MS[text]
+        else:
+            try:
+                # Series meteorológicas cargadas en una StringVar llegan como
+                # texto numérico (p. ej. "3.2"). Antes se trataban como una
+                # categoría desconocida y se sustituían silenciosamente por
+                # 2 m/s.
+                v = max(0.0, float(text))
+            except (TypeError, ValueError):
+                v = 2.0
     else:
         v = max(0.0, float(viento))
     return 5.7 + 3.8 * v
@@ -527,6 +539,16 @@ def _canopy_et_diagnostics(X, Y, arboles, T_amb, rh, viento, I_sol, lw_local, di
 
 def _surface_model_mode(vars):
     app = vars.get("_app_instance") if isinstance(vars, dict) else None
+    if app is not None:
+        # Los ajustes avanzados no deben seguir actuando de forma invisible
+        # cuando la interfaz correspondiente vuelve a modo simple.
+        try:
+            if vars is getattr(app, "vars_modelo", None) and app.modo_modelo.get() == "simple":
+                return "standard"
+            if vars is getattr(app, "vars", None) and app.modo_edicion.get() == "simple":
+                return "standard"
+        except Exception:
+            pass
     if app is not None and hasattr(app, "surface_model_mode"):
         try:
             mode = app.surface_model_mode.get()
@@ -983,11 +1005,18 @@ def generar_grafico(vars, frame):
     debug_flag = vars.get("debug", False)
     debug = bool(debug_flag.get()) if hasattr(debug_flag, "get") else bool(debug_flag)
 
-    # Temperatura del aire del instante: entrada simple o ciclo detallado.
+    # Temperatura del aire del instante. Una Ta observada tiene prioridad
+    # porque corresponde exactamente al instante de la serie; si no existe,
+    # modo simple usa T_amb_base y modo detallado conserva el ciclo Tmin/Tmax.
     modo_modelo = vars.get("_modo_modelo", "advanced")
     if hasattr(modo_modelo, "get"):
         modo_modelo = modo_modelo.get()
-    if str(modo_modelo).lower() == "simple":
+    air_override = vars.get("_air_temp_override_k")
+    if hasattr(air_override, "get"):
+        air_override = air_override.get()
+    if air_override not in (None, ""):
+        T_amb = float(air_override)
+    elif str(modo_modelo).lower() == "simple":
         T_amb = float(vars["T_amb_base"].get())
     else:
         T_amb = temperatura_ambiente(vars["hora"].get(), vars["T_min"].get(), vars["T_max"].get())
@@ -1036,6 +1065,13 @@ def generar_grafico(vars, frame):
     contorno = ax.contourf(X, Y, T_display, niveles, cmap=CMAP_TEMPERATURA, alpha=0.8)
     ax.contour(X, Y, T_display, niveles, colors='k', linewidths=0.5)
     fig.colorbar(contorno, ax=ax, orientation='horizontal', pad=0.12).set_label(f'Temperatura superficial ({temp_unit})')
+    # Indicador solar discreto en planta: refleja azimut/elevación
+    # ya calculados, sin introducir nuevos cálculos.
+    add_solar_indicator_2d(
+        ax,
+        vars.get("_render_solar_azimuth_deg"),
+        vars.get("_render_solar_altitude_deg"),
+    )
     ax.set_xlabel(f'Distancia ({distance_unit})')
     ax.set_ylabel(f'Distancia ({distance_unit})')
 
@@ -1243,11 +1279,57 @@ def generar_3d(vars, frame=None):
         return None
 
 def cargar_preset(config, vars):
+    """Aplica configuraciones rápidas coherentes con hemisferio y nubosidad."""
+    config = str(config or "").strip().lower()
+    lat_value = vars.get("lat", 0.0) if isinstance(vars, dict) else 0.0
+    if hasattr(lat_value, "get"):
+        try:
+            lat_value = lat_value.get()
+        except Exception:
+            lat_value = 0.0
+    try:
+        southern = float(lat_value) < 0.0
+    except (TypeError, ValueError):
+        southern = False
+
+    # 21 Jun ~= día 172; 21 Dic ~= día 355.
+    summer_day = 355 if southern else 172
+    winter_day = 172 if southern else 355
     presets = {
-        "verano": {"T_min": 298, "T_max": 315, "I_sol_base": 1000, "dia": 180},
-        "invierno": {"T_min": 275, "T_max": 290, "I_sol_base": 600, "dia": 355},
-        "soleado": {"I_sol_base": 1200},
-        "nublado": {"I_sol_base": 300}
+        "verano": {"T_min": 298, "T_max": 315, "I_sol_base": 1000, "dia": summer_day},
+        "invierno": {"T_min": 275, "T_max": 290, "I_sol_base": 600, "dia": winter_day},
+        "soleado": {"I_sol_base": 1200, "nubosidad": "Despejado"},
+        "nublado": {"I_sol_base": 300, "nubosidad": "Nublado"},
     }
-    for k, v in presets[config].items():
-        vars[k].set(v)
+    if config not in presets:
+        raise ValueError(f"Preset desconocido: {config}")
+
+    for key, value in presets[config].items():
+        target = vars.get(key) if isinstance(vars, dict) else None
+        if hasattr(target, "set"):
+            target.set(value)
+        elif isinstance(vars, dict):
+            vars[key] = value
+
+    # Mantener la fecha ISO sincronizada: _fecha_modelo_actual prioriza este
+    # campo sobre el día juliano y de otro modo un preset estacional podía
+    # quedar visualmente cambiado pero calcular con una fecha anterior.
+    if isinstance(vars, dict) and config in {"verano", "invierno"}:
+        year_value = vars.get("_year", datetime.now().year)
+        if hasattr(year_value, "get"):
+            try:
+                year_value = year_value.get()
+            except Exception:
+                year_value = datetime.now().year
+        try:
+            year = int(year_value)
+        except (TypeError, ValueError):
+            year = datetime.now().year
+        day_value = vars.get("dia")
+        day = int(day_value.get() if hasattr(day_value, "get") else day_value)
+        date_value = (datetime(year, 1, 1) + timedelta(days=max(1, day) - 1)).date()
+        vars["_date_iso"] = date_value.isoformat()
+        vars["_year"] = year
+
+    if isinstance(vars, dict):
+        vars["_update_required"] = True

@@ -10,6 +10,7 @@ import math
 from core.scene_objects import adaptar_objetos_escena
 from core.species import color_copa, nombres_especies, propiedades_especie
 from plot_style import CMAP_TEMPERATURA
+from ui.solar_indicator import add_solar_indicator_2d
 from core.excel_scene import save_scene_excel, load_scene_excel, apply_parameters_to_vars
 from ui.scene3d import render_scene_3d
 
@@ -416,6 +417,14 @@ def actualizar_grafico(vars, frame):
     # Barra de color
     cbar = fig.colorbar(contorno, ax=ax, orientation='horizontal', pad=0.12)
     cbar.set_label(f'Temperatura superficial ({temp_unit})')
+
+    # Indicador solar discreto en planta: usa los mismos ángulos ya
+    # calculados para la física, pero solo como referencia visual.
+    add_solar_indicator_2d(
+        ax,
+        vars.get("_render_solar_azimuth_deg"),
+        vars.get("_render_solar_altitude_deg"),
+    )
     
     # Dibujar elementos del modelo
     #

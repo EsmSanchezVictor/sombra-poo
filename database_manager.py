@@ -419,6 +419,25 @@ class DatabaseManager:
         )
         return self.cursor.fetchall()
 
+    def delete_session_history(self, exclude_session_id=None):
+        """Elimina el historial de sesiones de forma explícita.
+
+        Si ``exclude_session_id`` está definido, conserva esa sesión (por
+        ejemplo la sesión administrativa actualmente conectada). Gracias a
+        ``ON DELETE CASCADE`` también se eliminan sus tramos de proyecto.
+        Devuelve la cantidad de sesiones eliminadas.
+        """
+        if exclude_session_id is None:
+            self.cursor.execute('DELETE FROM user_sessions')
+        else:
+            self.cursor.execute(
+                'DELETE FROM user_sessions WHERE id <> ?',
+                (int(exclude_session_id),),
+            )
+        deleted = int(self.cursor.rowcount if self.cursor.rowcount is not None else 0)
+        self.connection.commit()
+        return max(0, deleted)
+
     def close(self):
         try:
             self.cursor.close()

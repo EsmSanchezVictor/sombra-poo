@@ -73,17 +73,27 @@ class AppState:
             "location": self.app.current_location or {},
             "next_n": project.next_n,
             "vars": vars_data,
+            "vars_modelo": self._serialize_vars(self.app.vars_modelo),
             "ui": {
                 "active_panel": self.app.active_panel,
                 "model_mode": self.app.modo_modelo.get(),
                 "edit_mode": getattr(self.app, "modo_edicion", tk.StringVar(value="advanced")).get(),
+                "temperature_mode": getattr(self.app, "modo_temperatura", tk.StringVar(value="simple")).get(),
+                "tmrt_model_mode": getattr(self.app, "tmrt_model_mode", tk.StringVar(value="standard")).get(),
+                "surface_model_mode": getattr(self.app, "surface_model_mode", tk.StringVar(value="standard")).get(),
                 "panel2_advanced": getattr(self.app, "panel2_advanced_mode", tk.BooleanVar(value=False)).get(),
                 "matrix_size": int(getattr(self.app, "matriz_size", tk.IntVar(value=128)).get()),
                 "shadow_detector_enabled": getattr(self.app, "shadow_detector_enabled", tk.BooleanVar(value=False)).get(),
                 "radiation_source_mode": getattr(self.app, "radiation_source_mode", tk.StringVar(value="clear_sky")).get(),
                 "clear_sky_use_pvlib": getattr(self.app, "use_pvlib_engine", tk.BooleanVar(value=False)).get(),
+                "manual_ghi": getattr(self.app, "manual_ghi", tk.StringVar(value="")).get(),
+                "manual_dni": getattr(self.app, "manual_dni", tk.StringVar(value="")).get(),
+                "manual_dhi": getattr(self.app, "manual_dhi", tk.StringVar(value="")).get(),
                 "selected_city": self.app.simple_city.get(),
                 "selected_country": self.app.simple_country.get(),
+                "simple_cloudiness": self.app.simple_cloudiness.get(),
+                "simple_temp_air_c": float(self.app.simple_temp_air_c.get()),
+                "simple_rh": float(self.app.simple_rh.get()),
                 "curve_button_state": str(getattr(self.app, "curve_button", {}).cget("state")) if hasattr(self.app, "curve_button") else "disabled",
             },
             "paths": {
@@ -128,14 +138,19 @@ class AppState:
 
         defaults = self.app._build_vars()
         payload_vars = payload.get("vars", {})
+        # v34: Modelo conserva sus parámetros propios. Proyectos antiguos sin
+        # vars_modelo siguen cargando de forma compatible desde vars.
+        payload_model_vars = payload.get("vars_modelo", payload_vars)
         for key, value in payload_vars.items():
             if key not in self.app.vars:
                 self.app.vars[key] = value
+        for key, value in payload_model_vars.items():
             if key not in self.app.vars_modelo:
                 self.app.vars_modelo[key] = value
         vars_data = {**defaults, **payload_vars}
+        model_vars_data = {**defaults, **payload_model_vars}
         self._apply_vars_data(self.app.vars, vars_data)
-        self._apply_vars_data(self.app.vars_modelo, vars_data)
+        self._apply_vars_data(self.app.vars_modelo, model_vars_data)
 
         scene = payload.get("scene", {}) if isinstance(payload.get("scene"), dict) else {}
         scene_objects = []
@@ -161,6 +176,20 @@ class AppState:
         self.app.modo_modelo.set(ui.get("model_mode", ui.get("mode", self.app.modo_modelo.get())))
         if hasattr(self.app, "modo_edicion"):
             self.app.modo_edicion.set(ui.get("edit_mode", self.app.modo_edicion.get()))
+        if hasattr(self.app, "modo_temperatura"):
+            stored_temp_mode = ui.get("temperature_mode")
+            if stored_temp_mode in {"simple", "advanced"}:
+                self.app.modo_temperatura.set(stored_temp_mode)
+            elif ui.get("radiation_source_mode", "clear_sky") != "clear_sky" or bool(ui.get("clear_sky_use_pvlib", False)):
+                self.app.modo_temperatura.set("advanced")
+        if hasattr(self.app, "tmrt_model_mode"):
+            tmrt_mode = str(ui.get("tmrt_model_mode", self.app.tmrt_model_mode.get())).lower()
+            if tmrt_mode in {"standard", "advanced"}:
+                self.app.tmrt_model_mode.set(tmrt_mode)
+        if hasattr(self.app, "surface_model_mode"):
+            surface_mode = str(ui.get("surface_model_mode", self.app.surface_model_mode.get())).lower()
+            if surface_mode in {"standard", "advanced", "advanced_vegetation"}:
+                self.app.surface_model_mode.set(surface_mode)
         if hasattr(self.app, "panel2_advanced_mode"):
             self.app.panel2_advanced_mode.set(ui.get("panel2_advanced", self.app.panel2_advanced_mode.get()))
         if hasattr(self.app, "matriz_size"):
@@ -174,14 +203,32 @@ class AppState:
         if hasattr(self.app, "radiation_source_mode"):
             self.app.radiation_source_mode.set(ui.get("radiation_source_mode", self.app.radiation_source_mode.get()))
         if hasattr(self.app, "use_pvlib_engine"):
-            self.app.use_pvlib_engine.set(bool(ui.get("clear_sky_use_pvlib", self.app.use_pvlib_engine.get())))        
+            self.app.use_pvlib_engine.set(bool(ui.get("clear_sky_use_pvlib", self.app.use_pvlib_engine.get())))
+        for attr in ("manual_ghi", "manual_dni", "manual_dhi"):
+            var = getattr(self.app, attr, None)
+            if var is not None and hasattr(var, "set") and attr in ui:
+                var.set(str(ui.get(attr, "")))
         self.app.simple_country.set(ui.get("selected_country", self.app.simple_country.get()))
         if self.app.locations_data:
             self.app._update_city_options()
         self.app.simple_city.set(ui.get("selected_city", self.app.simple_city.get()))
+        if hasattr(self.app, "simple_cloudiness"):
+            self.app.simple_cloudiness.set(ui.get("simple_cloudiness", self.app.simple_cloudiness.get()))
+        if hasattr(self.app, "simple_temp_air_c"):
+            try:
+                self.app.simple_temp_air_c.set(float(ui.get("simple_temp_air_c", self.app.simple_temp_air_c.get())))
+            except (TypeError, ValueError):
+                pass
+        if hasattr(self.app, "simple_rh"):
+            try:
+                self.app.simple_rh.set(float(ui.get("simple_rh", self.app.simple_rh.get())))
+            except (TypeError, ValueError):
+                pass
         self.app._toggle_modelo_mode()
         if hasattr(self.app, "_toggle_edicion_mode"):
             self.app._toggle_edicion_mode()
+        if hasattr(self.app, "_toggle_temperatura_mode"):
+            self.app._toggle_temperatura_mode()
         if hasattr(self.app, "_toggle_panel2_advanced"):
             self.app._toggle_panel2_advanced()
 

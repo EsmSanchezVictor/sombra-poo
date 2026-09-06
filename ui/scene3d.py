@@ -37,6 +37,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from core.species import color_copa
 from plot_style import CMAP_TEMPERATURA
+from ui.solar_indicator import add_solar_indicator_2d
 
 
 @dataclass(frozen=True)
@@ -205,8 +206,8 @@ class _VTKOffscreenSceneController:
         import vtkmodules.vtkRenderingOpenGL2  # noqa: F401
         from vtkmodules.vtkCommonCore import vtkLookupTable, vtkPoints
         from vtkmodules.vtkCommonDataModel import vtkStructuredGrid
-        from vtkmodules.vtkFiltersCore import vtkContourFilter
-        from vtkmodules.vtkFiltersSources import vtkCubeSource, vtkCylinderSource, vtkSphereSource
+        from vtkmodules.vtkFiltersCore import vtkContourFilter, vtkTubeFilter
+        from vtkmodules.vtkFiltersSources import vtkCubeSource, vtkCylinderSource, vtkLineSource, vtkSphereSource
         from vtkmodules.vtkRenderingAnnotation import vtkCubeAxesActor, vtkScalarBarActor
         from vtkmodules.vtkRenderingCore import (
             vtkActor,
@@ -247,9 +248,12 @@ class _VTKOffscreenSceneController:
         tk.Button(toolbar, text="Reencuadrar", command=self.reset_camera).pack(
             side=tk.LEFT, padx=2, pady=2
         )
+        solar_summary = ""
+        if data.solar_altitude_deg is not None and data.solar_azimuth_deg is not None:
+            solar_summary = f" · ☀ Az {data.solar_azimuth_deg:.0f}° · El {data.solar_altitude_deg:.0f}°"
         tk.Label(
             toolbar,
-            text="Arrastrar: rotar · Rueda: zoom",
+            text=f"Arrastrar: rotar · Rueda: zoom{solar_summary}",
             anchor="e",
             fg="#555555",
         ).pack(side=tk.RIGHT, padx=8)
@@ -602,6 +606,51 @@ class _VTKOffscreenSceneController:
         rim.SetIntensity(0.18)
         renderer.AddLight(rim)
 
+        # Marcador solar representativo (opción 1): una esfera en el cielo
+        # y una guía tenue hacia la escena. Usa azimut/elevación ya calculados.
+        if data.solar_altitude_deg is not None and data.solar_azimuth_deg is not None:
+            alt = math.radians(data.solar_altitude_deg)
+            azi = math.radians(data.solar_azimuth_deg)
+            sx = math.sin(azi) * math.cos(alt)
+            sy = math.cos(azi) * math.cos(alt)
+            sz = max(0.10, math.sin(alt))
+            sun_distance = span * 2.15
+            sun_pos = (
+                center[0] + sx * sun_distance,
+                center[1] + sy * sun_distance,
+                center[2] + sz * sun_distance,
+            )
+            sun = vtkSphereSource()
+            sun.SetRadius(max(0.20, span * 0.04))
+            sun.SetThetaResolution(24)
+            sun.SetPhiResolution(24)
+            sun.SetCenter(*sun_pos)
+            sun_mapper = vtkPolyDataMapper()
+            sun_mapper.SetInputConnection(sun.GetOutputPort())
+            sun_actor = vtkActor()
+            sun_actor.SetMapper(sun_mapper)
+            sun_actor.GetProperty().SetColor(1.00, 0.84, 0.22)
+            sun_actor.GetProperty().SetAmbient(0.70)
+            sun_actor.GetProperty().SetDiffuse(0.30)
+            sun_actor.GetProperty().SetSpecular(0.10)
+            renderer.AddActor(sun_actor)
+
+            guide = vtkLineSource()
+            guide.SetPoint1(*sun_pos)
+            guide.SetPoint2(center[0] + sx * span * 0.35, center[1] + sy * span * 0.35, max(0.05, center[2] * 0.12))
+            guide_tube = vtkTubeFilter()
+            guide_tube.SetInputConnection(guide.GetOutputPort())
+            guide_tube.SetRadius(max(0.03, span * 0.0035))
+            guide_tube.SetNumberOfSides(12)
+            guide_tube.CappingOn()
+            guide_mapper = vtkPolyDataMapper()
+            guide_mapper.SetInputConnection(guide_tube.GetOutputPort())
+            guide_actor = vtkActor()
+            guide_actor.SetMapper(guide_mapper)
+            guide_actor.GetProperty().SetColor(0.86, 0.64, 0.16)
+            guide_actor.GetProperty().SetOpacity(0.55)
+            renderer.AddActor(guide_actor)
+
         self._image_filter.SetInput(render_window)
         self._image_filter.SetInputBufferTypeToRGB()
         self._image_filter.ReadFrontBufferOff()
@@ -846,6 +895,8 @@ def _render_matplotlib_fallback(
         text += " · VTK no está instalado"
     else:
         text += " · VTK no pudo inicializarse"
+    if data.solar_altitude_deg is not None and data.solar_azimuth_deg is not None:
+        text += f" · ☀ Az {data.solar_azimuth_deg:.0f}° · El {data.solar_altitude_deg:.0f}°"
     tk.Label(top, text=text, anchor="w").pack(side=tk.LEFT, padx=6, pady=3)
     if vtk_error is not None:
         detail = f"{type(vtk_error).__name__}: {vtk_error}"
@@ -923,6 +974,24 @@ def _render_matplotlib_fallback(
             ax.add_collection3d(
                 Poly3DCollection(rect, facecolor=color, alpha=0.55)
             )
+
+    # Marcador solar representativo también en el fallback.
+    if data.solar_altitude_deg is not None and data.solar_azimuth_deg is not None:
+        xmin, xmax, ymin, ymax, max_height = _scene_extent(data)
+        span = max(xmax - xmin, ymax - ymin, 1.0)
+        center = ((xmin + xmax) / 2, (ymin + ymax) / 2, max_height * 0.35)
+        alt = math.radians(data.solar_altitude_deg)
+        azi = math.radians(data.solar_azimuth_deg)
+        sx = math.sin(azi) * math.cos(alt)
+        sy = math.cos(azi) * math.cos(alt)
+        sz = max(0.10, math.sin(alt))
+        sun_distance = span * 2.15
+        sun_x = center[0] + sx * sun_distance
+        sun_y = center[1] + sy * sun_distance
+        sun_z = center[2] + sz * sun_distance
+        ax.scatter([sun_x], [sun_y], [sun_z], s=220, color="#ffd34d", edgecolors="#d88a00", depthshade=False)
+        ax.plot([sun_x, center[0]], [sun_y, center[1]], [sun_z, max(0.05, center[2] * 0.12)], color="#d88a00", alpha=0.45, linewidth=1.4)
+        ax.text(sun_x, sun_y, sun_z, f"  ☀", fontsize=10, color="#6b4c00")
 
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")

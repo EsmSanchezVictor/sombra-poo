@@ -337,6 +337,43 @@ class MainApp:
             bg="#fef9c3", fg="#111827", relief="flat", padx=18, pady=9,
             cursor="hand2",
         ).pack(side="left")
+        tk.Button(
+            footer, text="Borrar historial", command=self.clear_session_history,
+            bg="#fee2e2", fg="#991b1b", relief="flat", padx=18, pady=9,
+            cursor="hand2",
+        ).pack(side="right")
+
+    def clear_session_history(self):
+        """Borra el historial anterior conservando la sesión activa del admin."""
+        if not messagebox.askyesno(
+            "Borrar historial",
+            "¿Borrar definitivamente el historial de sesiones y proyectos?\n\n"
+            "La sesión administrativa actual se conservará para no perder la trazabilidad "
+            "de la conexión que está en curso.",
+            parent=self.root,
+        ):
+            return
+        try:
+            deleted = self.db_manager.delete_session_history(
+                exclude_session_id=self.current_session_id
+            )
+            self.db_manager.touch_session(self.current_session_id)
+        except Exception as exc:
+            messagebox.showerror(
+                "Historial", f"No se pudo borrar el historial:\n{exc}", parent=self.root
+            )
+            return
+        if deleted:
+            messagebox.showinfo(
+                "Historial borrado",
+                f"Se eliminaron {deleted} sesión(es) anteriores. La sesión actual se conservó.",
+                parent=self.root,
+            )
+        else:
+            messagebox.showinfo(
+                "Historial", "No había sesiones anteriores para borrar.", parent=self.root
+            )
+        self.open_session_history()
 
     def open_user_management(self):
         """Gestión administrativa con proyección segura y selección de filas."""

@@ -63,6 +63,7 @@ PARAM_TO_VAR = {
     "humedad_relativa_pct": "humedad",
     "viento": "viento",
     "timezone": "timezone",
+    "nubosidad": "nubosidad",
 }
 
 PARAM_METADATA = {
@@ -94,7 +95,7 @@ PARAM_METADATA = {
     "humedad_relativa_pct": ("%", "Humedad relativa"),
     "viento": ("", "Categoría o velocidad de viento"),
     "timezone": ("IANA", "Zona horaria IANA"),
-    "nubosidad": ("", "Categoría de nubosidad del modo simple"),
+    "nubosidad": ("", "Categoría de nubosidad del escenario"),
     "simple_temp_air_c": ("°C", "Temperatura de aire visible en modo simple"),
     "simple_rh_pct": ("%", "Humedad relativa visible en modo simple"),
     "simple_country": ("", "País seleccionado en modo simple"),
@@ -284,6 +285,10 @@ def extract_parameters(
             ("simple_country", "simple_country"),
             ("simple_city", "simple_city"),
         ):
+            # En modo detallado nubosidad pertenece a vars_dict; no debe ser
+            # sobrescrita por el selector del modo simple que puede estar oculto.
+            if attr == "simple_cloudiness" and str(calculation_mode).lower() != "simple":
+                continue
             if hasattr(app, attr):
                 params[key] = _safe_scalar(_value(getattr(app, attr)))
 
