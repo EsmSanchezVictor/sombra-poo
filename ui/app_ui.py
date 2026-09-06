@@ -3,7 +3,7 @@ import zoneinfo
 import os
 import shutil
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, font as tkfont
 
 import numpy as np
 import pandas as pd
@@ -42,6 +42,14 @@ from services import report_service
 from ui import icon_factory
 from ui import panels as ui_panels
 from ui import theme
+from ui.layout import (
+    PANEL_CONTENT_RATIO,
+    PANEL_HORIZONTAL_SCALE,
+    PANEL_ELEMENT_SCALE,
+    PANEL_MIN_FONT_SIZE,
+    calcular_geometria_contenido_panel,
+    calcular_ancho_sidebar_abierto,
+)
 from ui.dialogs import HerramientasDialogs
 from ui.menu_bar import MenuBar
 from utils import export_to_excel
@@ -50,9 +58,16 @@ import modelo_con_excel as modelo
 
 
 class SombraApp:
-    def __init__(self, root):
+    def __init__(self, root, db_manager=None, username="Usuario", session_id=None,
+                 connection_start=None, on_session_exit=None):
 
         self.root = root
+        self.db_manager = db_manager
+        self.username = username or "Usuario"
+        self.session_id = session_id
+        self.connection_start = connection_start or datetime.now()
+        self.on_session_exit = on_session_exit
+        self._session_exit_notified = False
         self.root.title("Distribución Grid")
         # NUEVO: la ventana arranca siempre maximizada. Antes se creaba
         # con el tamaño por defecto de Tk (chico, sin geometría propia)
@@ -254,18 +269,26 @@ class SombraApp:
         )
 
         # Ubicar frames
+        # v26: frame1 abarca también la fila 4. Esa fila contiene el
+        # carrusel cuando se muestra el Panel 2; con rowspan=3 el lateral
+        # terminaba antes del carrusel y dejaba una franja vacía debajo.
         self.frame0.grid(row=0, column=0, columnspan=3, sticky="nsew")
-        self.frame1.grid(row=1, column=0, rowspan=3, sticky="nsew")
+        self.frame1.grid(row=1, column=0, rowspan=4, sticky="nsew")
         self.frame2.grid(row=1, column=1, sticky="nsew")
         self.frame3.grid(row=1, column=2, sticky="nsew")
         self.frame4.grid(row=2, column=1, sticky="nsew")
         self.frame5.grid(row=2, column=2, sticky="nsew")
         self.frame6.grid(row=5, column=1, columnspan=2, sticky="nsew")
-        self.frame7.grid(row=1, column=1, sticky="nsew")
+        # v30: Edición y Modelo son superficies de visualización completas.
+        # frame7/frame11 abarcan exactamente el bloque histórico 2x2 ocupado
+        # por frame2+frame3+frame4+frame5 (filas 1-2, columnas 1-2).
+        # Los frames auxiliares 8-10 / 12-14 se conservan por compatibilidad
+        # pero permanecen ocultos en esos modos.
+        self.frame7.grid(row=1, column=1, rowspan=2, columnspan=2, sticky="nsew")
         self.frame8.grid(row=1, column=2, sticky="nsew")
         self.frame9.grid(row=2, column=1, sticky="nsew")
         self.frame10.grid(row=2, column=2, sticky="nsew")
-        self.frame11.grid(row=1, column=1, sticky="nsew")
+        self.frame11.grid(row=1, column=1, rowspan=2, columnspan=2, sticky="nsew")
         self.frame12.grid(row=1, column=2, sticky="nsew")
         self.frame13.grid(row=2, column=1, sticky="nsew")
         self.frame14.grid(row=2, column=2, sticky="nsew")
@@ -352,13 +375,12 @@ class SombraApp:
         #self.frame1 = frame1
 
         # --- Ancho del panel desplegable -----------------------------
-        # BUG CORREGIDO: antes se hacía min(1/6 del ancho de pantalla,
-        # frame1.winfo_width()) — pero en __init__ la ventana todavía
-        # no se dibujó y winfo_width() devuelve 1, así que panel_width
-        # quedaba en 1 y la animación de apertura/cierre operaba sobre
-        # un ancho inválido (el panel quedaba a merced del ancho que le
-        # imponía su contenido). Ahora: 1/6 de la pantalla, tope 400px.
-        self.panel_width = max(260, min(int(self.frame1.winfo_screenwidth() / 6), 400))
+        # v22: el ancho se calcula como una fracción del viewport con
+        # límites operativos. La columna 0 se reserva explícitamente al
+        # abrir el panel (ver _reservar_ancho_sidebar); esto evita que
+        # grid comprima frame1 mientras el panel colocado con place()
+        # conserva un ancho mayor y termina recortado contra frame2/4.
+        self.panel_width = calcular_ancho_sidebar_abierto(self.frame1.winfo_screenwidth())
 
         # --- Barra de íconos lateral (columna 0 de frame1) -----------
         # Se queda siempre en column=0 de frame1; los paneles se abren
@@ -393,6 +415,14 @@ class SombraApp:
                             bg=self.frame1.cget('bg'))
             btn.grid(row=i, column=0, pady=0, padx=0, sticky="ew")
             self.buttons.append(btn)
+
+        # v22: la columna 0 de la grilla principal tiene un ancho reservado
+        # explícito. Sin esto Tk podía comprimir frame1 por debajo del ancho
+        # del panel colocado con ``place`` (p.ej. frame1=218 px mientras el
+        # panel medía 260 px), recortando su borde derecho junto a frame2/4.
+        self.sidebar_closed_width = max(40, max(img.width() for img in self.images) + 8)
+        self.frame1.grid_propagate(False)
+        self._reservar_ancho_sidebar(self.sidebar_closed_width)
 
         # --- Paneles desplegables (inicialmente ocultos) -------------
         # Cada panel = 1 frame outer (animado/posicionado) que contiene
@@ -486,6 +516,9 @@ class SombraApp:
         self.activar_mouse()
         self.setup_startup_screen()
         self.show_startup_screen()
+        # El cierre por la X usa la misma ruta que Archivo > Salir, para
+        # registrar correctamente el fin de sesión y del proyecto activo.
+        self.root.protocol("WM_DELETE_WINDOW", self.exit_app)
     
     
     def activar_mouse(self):
@@ -606,13 +639,41 @@ class SombraApp:
     def hide_startup_screen(self):
         self.startup_frame.grid_remove()
 
-    def on_project_loaded(self):
+    def on_project_loaded(self, project_action="opened"):
         self.hide_startup_screen()
         self.set_project_ui_enabled(True)
         self._get_analysis_store()
         self.update_status_saved_time()
+        self._register_project_session(project_action)
         if self.current_location:
             self._update_location_labels()
+
+    def _register_project_session(self, action="opened"):
+        """Asocia el proyecto actual a la sesión autenticada."""
+        if self.db_manager is None or not self.session_id:
+            return
+        project = self.project_manager.current_project
+        if project is None:
+            return
+        try:
+            self.db_manager.start_project_work(
+                self.session_id,
+                project.name,
+                project_root=os.path.abspath(project.root_path),
+                project_state_path=os.path.abspath(project.state_path),
+                action=action,
+            )
+        except Exception as exc:
+            # La trazabilidad no debe impedir abrir un proyecto.
+            print(f"[sesion] No se pudo registrar proyecto: {exc}")
+
+    def _touch_session(self):
+        if self.db_manager is None or not self.session_id:
+            return
+        try:
+            self.db_manager.touch_session(self.session_id)
+        except Exception as exc:
+            print(f"[sesion] No se pudo actualizar actividad: {exc}")
 
     def _get_analysis_store(self):
         """Devuelve la base de análisis del proyecto actual.
@@ -1659,7 +1720,7 @@ class SombraApp:
         vista_3d = tk.Button(
             acciones,
             text="Vista 3D",
-            command=lambda: self._run_with_project("generar la vista 3D", lambda: design.generar_3d(self.vars)),
+            command=self.mostrar_vista_3d_diseno,
             bg='#4CAF50',
             fg='white',
             font=("Arial", 8, "bold"),
@@ -1851,112 +1912,265 @@ class SombraApp:
                 messagebox.showerror("Meteorología", f"No se pudo resolver la fuente meteorológica seleccionada:\n{exc}")
                 return
 
-        result = modelo.generar_grafico(self.vars_modelo, self.frame11)
+        view2d, _view3d, notebook = self._get_scene_view_frames("modelo")
+        result = modelo.generar_grafico(self.vars_modelo, view2d)
         if result:
+            notebook.select(view2d)
             self.last_T = result.get("T")
             self.last_shadow = result.get("shadow")
             self.last_meta = result.get("meta")
-    def _crear_panel_desplazable(self, contenedor):
-        """Envuelve el contenido de un panel lateral en un Canvas +
-        Scrollbar vertical.
+    def _ancho_viewport_actual(self):
+        """Ancho usable para dimensionar el lateral en el estado actual."""
+        try:
+            ancho = int(self.root.winfo_width())
+        except (TypeError, ValueError, tk.TclError):
+            ancho = 1
+        if ancho <= 200:
+            try:
+                ancho = int(self.root.winfo_screenwidth())
+            except (TypeError, ValueError, tk.TclError):
+                ancho = 1366
+        return max(ancho, 1)
 
-        POR QUÉ: los paneles 1, 2 y 4 tienen más controles de los que
-        entran en el alto de la pantalla — antes lo que no entraba
-        quedaba directamente invisible, sin ninguna forma de llegar a
-        eso (no había scroll). Ahora sí.
+    def _reservar_ancho_sidebar(self, ancho):
+        """Reserva físicamente la columna 0 para que frame1 no se comprima.
 
-        Devuelve el FRAME INTERNO donde hay que empacar los widgets del
-        panel — setup_panel_1/2/3/4 ya hacen exactamente eso
-        (`panel = self.panel_frames[i]` + `.pack(...)`/`.grid(...)`),
-        sin ningún cambio en esas funciones.
-
-        AJUSTE DE ANCHO (widgets): el bind de "<Configure>" del canvas
-        fuerza al frame interno a medir lo mismo que el canvas visible
-        — así los widgets empacados con `fill="x"` o `sticky="ew"`
-        (comboboxes, entries, botones) se ajustan al ancho real del
-        panel en vez de quedarse cortados o sobrar espacio vacío a la
-        derecha.
-
-        AJUSTE DE ANCHO (texto): eso NO alcanza para las Label con
-        texto largo — un tk.Label no hace salto de línea solo porque
-        su contenedor sea angosto, sigue pidiendo el ancho que necesita
-        su texto en una sola línea. Como este Canvas solo tiene scroll
-        VERTICAL (a propósito, para no mezclar dos barras de scroll),
-        cualquier Label más ancha que el panel queda directamente
-        recortada por el viewport del Canvas — invisible, sin forma de
-        llegar a leerla. _ajustar_wraplength recorre todos los hijos
-        (recursivo, incluye Labels dentro de sub-frames) y les fija
-        wraplength = ancho actual del panel cada vez que este cambia
-        (incluso durante la animación de apertura/cierre), así el texto
-        largo se acomoda en 2-3 líneas en vez de perderse.
+        ``place`` no participa en el cálculo de tamaño de ``grid``. Por eso
+        configurar solo ``frame1.config(width=...)`` no garantizaba que la
+        columna 0 recibiera ese ancho. El ``minsize`` de la columna sí lo
+        garantiza y evita que el panel quede recortado contra frame2/frame4.
         """
-        canvas = tk.Canvas(contenedor, bg=self.palette["panel"], highlightthickness=0)
-        scrollbar = tk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
-        contenido = tk.Frame(canvas, bg=self.palette["panel"])
+        ancho = max(int(ancho), 1)
+        self.frame1.configure(width=ancho)
+        self.root.grid_columnconfigure(0, weight=0, minsize=ancho)
+        return ancho
 
-        # Cada vez que el contenido cambia de tamaño (se agregan/sacan
-        # widgets), actualizar la región scrolleable.
-        contenido.bind(
-            "<Configure>",
-            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
+    def _recalcular_ancho_sidebar_abierto(self):
+        self.panel_width = calcular_ancho_sidebar_abierto(self._ancho_viewport_actual())
+        return self.panel_width
+
+    def _crear_panel_desplazable(self, contenedor):
+        """Crea el viewport común de TODOS los paneles laterales.
+
+        v24 (sobre la geometría segura de v22):
+        - reducción HORIZONTAL real: el sidebar completo es ~30 % más angosto
+          y los widgets con ancho explícito se reducen al 70 %;
+        - el contenido ocupa el 96 % del Canvas, con márgenes de ~2 % por lado,
+          para no desperdiciar espacio lateral;
+        - la barra vertical vive en una columna propia (fuera del Canvas),
+          por lo que jamás se superpone con botones, entradas o etiquetas;
+        - el texto largo se envuelve automáticamente al ancho real;
+        - la rueda del mouse se vincula localmente a widgets no editables,
+          evitando un ``bind_all`` global que podía interferir con otros
+          controles de la aplicación.
+        """
+        contenedor.grid_rowconfigure(0, weight=1)
+        contenedor.grid_columnconfigure(0, weight=1)
+        contenedor.grid_columnconfigure(1, weight=0)
+
+        canvas = tk.Canvas(
+            contenedor,
+            bg=self.palette["panel"],
+            highlightthickness=0,
+            bd=0,
+            yscrollincrement=18,
         )
-        ventana_id = canvas.create_window((0, 0), window=contenido, anchor="nw")
+        scrollbar = tk.Scrollbar(
+            contenedor,
+            orient="vertical",
+            command=canvas.yview,
+            width=10,
+            takefocus=False,
+        )
+        contenido = tk.Frame(canvas, bg=self.palette["panel"], bd=0)
 
-        def _ajustar_wraplength(widget, ancho):
-            for hijo in widget.winfo_children():
-                if isinstance(hijo, tk.Label):
-                    hijo.config(wraplength=max(80, ancho - 30))
-                _ajustar_wraplength(hijo, ancho)
-
-        # FIX ("elementos sin margen a la derecha"): antes el frame de
-        # contenido se igualaba EXACTAMENTE al ancho del canvas
-        # (width=event.width), así que cualquier widget con
-        # sticky="ew"/fill="x" llegaba justo hasta el borde del canvas
-        # (=borde del panel, pegado a la scrollbar) sin importar el
-        # padx que tuviera cada widget puesto por separado — bastaba
-        # que UN control se creara sin padx (como pasó en varios
-        # lugares) para que se viera pegado al borde. Ahora se resta un
-        # margen fijo acá, una sola vez, para que TODO el contenido
-        # quede short del borde real del canvas sin depender de que
-        # cada widget nuevo se acuerde de ponerle padx.
-        MARGEN_DERECHO_PANEL = 14
-
-        def _on_canvas_resize(event):
-            # Ancho: el frame interno copia el ancho del canvas menos el
-            # margen fijo de la derecha.
-            ancho = max(event.width - MARGEN_DERECHO_PANEL, 1)
-            canvas.itemconfig(ventana_id, width=ancho)
-            # Alto: antes NO se tocaba, así que el frame interno se
-            # quedaba siempre en su alto natural (lo que pide su
-            # contenido) y nunca crecía con la ventana — por más
-            # sticky="nsew"/weight que tuvieran los widgets de adentro,
-            # nunca había alto "sobrante" para repartir. Usamos el
-            # máximo entre el alto pedido por el contenido y el alto
-            # visible del canvas: si el contenido entra, se estira para
-            # llenar el panel (y ahí sí actúan los grid_rowconfigure con
-            # weight); si no entra, se respeta su alto real y sigue
-            # scrolleando como corresponde.
-            alto = max(event.height, contenido.winfo_reqheight())
-            canvas.itemconfig(ventana_id, height=alto)
-            # Texto: todas las Labels del panel (recursivo) se ajustan
-            # al mismo ancho, para que el texto largo haga salto de
-            # línea en vez de quedar recortado por el Canvas.
-            _ajustar_wraplength(contenido, ancho)
-
-        canvas.bind("<Configure>", _on_canvas_resize)
+        # La scrollbar se reserva en column=1. El Canvas solamente usa
+        # column=0, así que su viewport ya excluye físicamente la barra.
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
         canvas.configure(yscrollcommand=scrollbar.set)
 
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        ventana_id = canvas.create_window((0, 0), window=contenido, anchor="nw")
 
-        # Scroll con la rueda del mouse — se activa/desactiva solo
-        # mientras el puntero está sobre ESTE panel en particular, para
-        # no interceptar el scroll de otras partes de la ventana.
+        def _actualizar_scrollregion():
+            bbox = canvas.bbox("all")
+            if bbox is not None:
+                canvas.configure(scrollregion=bbox)
+
+        def _ajustar_textos(widget, ancho):
+            # Label/Checkbutton/Radiobutton/Button admiten wraplength.
+            # Esto cubre también textos de botones largos que antes podían
+            # quedar cortados al reducir el ancho del contenido.
+            wrap = max(80, int(ancho) - 10)
+            for hijo in widget.winfo_children():
+                if isinstance(hijo, (tk.Label, tk.Checkbutton, tk.Radiobutton, tk.Button)):
+                    try:
+                        hijo.config(wraplength=wrap)
+                    except tk.TclError:
+                        pass
+                _ajustar_textos(hijo, ancho)
+
+        def _escalar_horizontal(valor, factor=PANEL_HORIZONTAL_SCALE):
+            """Reduce sólo espaciados/ancho horizontales; no toca altura."""
+            if valor in (None, "", 0, "0"):
+                return valor
+            if isinstance(valor, (tuple, list)):
+                return tuple(max(0, int(round(float(v) * factor))) for v in valor)
+            texto = str(valor).strip()
+            if " " in texto:
+                partes = [p for p in texto.split() if p]
+                try:
+                    return tuple(max(0, int(round(float(v) * factor))) for v in partes)
+                except ValueError:
+                    return valor
+            try:
+                return max(0, int(round(float(valor) * factor)))
+            except (TypeError, ValueError):
+                return valor
+
+        def _compactar_widget_horizontal(widget):
+            """v24: compacta exclusivamente el ANCHO una sola vez.
+
+            No se modifican font, height, pady ni ipady. Los controles con
+            sticky=ew quedan más angostos porque el propio sidebar es ~30 %
+            menor; los controles con width/length explícitos también se
+            reducen al 70 %. Así la reducción es visible y no vertical.
+            """
+            if getattr(widget, "_panel_horizontal_v24", False):
+                return
+            widget._panel_horizontal_v24 = True
+
+            # Sólo padding horizontal administrado por grid/pack.
+            try:
+                manager = widget.winfo_manager()
+                if manager == "grid":
+                    info = widget.grid_info()
+                    cambios = {}
+                    for clave in ("padx", "ipadx"):
+                        if clave in info:
+                            cambios[clave] = _escalar_horizontal(info[clave])
+                    if cambios:
+                        widget.grid_configure(**cambios)
+                elif manager == "pack":
+                    info = widget.pack_info()
+                    cambios = {}
+                    for clave in ("padx", "ipadx"):
+                        if clave in info:
+                            cambios[clave] = _escalar_horizontal(info[clave])
+                    if cambios:
+                        widget.pack_configure(**cambios)
+            except (tk.TclError, ValueError, TypeError):
+                pass
+
+            # Sólo ancho explícito. La altura se conserva intacta.
+            try:
+                valor = float(widget.cget("width"))
+                if valor > 1:
+                    widget.configure(width=max(1, int(round(valor * PANEL_HORIZONTAL_SCALE))))
+            except (tk.TclError, ValueError, TypeError):
+                pass
+
+            # En Scale, length es la dimensión horizontal principal.
+            if isinstance(widget, tk.Scale):
+                try:
+                    valor = float(widget.cget("length"))
+                    if valor > 5:
+                        widget.configure(length=max(5, int(round(valor * PANEL_HORIZONTAL_SCALE))))
+                except (tk.TclError, ValueError, TypeError):
+                    pass
+
+        def _compactar_arbol_horizontal(widget):
+            for hijo in widget.winfo_children():
+                _compactar_widget_horizontal(hijo)
+                _compactar_arbol_horizontal(hijo)
+
+        # La rueda se aplica solo a elementos que no tienen un comportamiento
+        # de rueda propio. Entradas, escalas y Combobox quedan intactos; la
+        # scrollbar sigue estando siempre visible para esos casos.
+        _wheel_bound = set()
+
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            delta = getattr(event, "delta", 0)
+            if delta:
+                canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+            elif getattr(event, "num", None) == 4:
+                canvas.yview_scroll(-1, "units")
+            elif getattr(event, "num", None) == 5:
+                canvas.yview_scroll(1, "units")
+            return "break"
 
-        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
-        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+        def _vincular_rueda(widget):
+            for hijo in widget.winfo_children():
+                # No interceptar la rueda de controles editables/interactivos.
+                if not isinstance(hijo, (tk.Entry, tk.Scale, ttk.Combobox, tk.Listbox, tk.Text)):
+                    key = str(hijo)
+                    if key not in _wheel_bound:
+                        hijo.bind("<MouseWheel>", _on_mousewheel, add="+")
+                        hijo.bind("<Button-4>", _on_mousewheel, add="+")
+                        hijo.bind("<Button-5>", _on_mousewheel, add="+")
+                        _wheel_bound.add(key)
+                _vincular_rueda(hijo)
+
+        canvas.bind("<MouseWheel>", _on_mousewheel, add="+")
+        canvas.bind("<Button-4>", _on_mousewheel, add="+")
+        canvas.bind("<Button-5>", _on_mousewheel, add="+")
+        contenido.bind("<MouseWheel>", _on_mousewheel, add="+")
+        contenido.bind("<Button-4>", _on_mousewheel, add="+")
+        contenido.bind("<Button-5>", _on_mousewheel, add="+")
+
+        _vertical_sync_job = None
+
+        def _sincronizar_alto_y_scroll():
+            nonlocal _vertical_sync_job
+            _vertical_sync_job = None
+            alto = max(canvas.winfo_height(), contenido.winfo_reqheight())
+            try:
+                actual = float(canvas.itemcget(ventana_id, "height") or 0)
+            except (TypeError, ValueError, tk.TclError):
+                actual = 0
+            if abs(actual - alto) > 1:
+                canvas.itemconfig(ventana_id, height=alto)
+            _actualizar_scrollregion()
+
+        def _on_contenido_configure(_event):
+            nonlocal _vertical_sync_job
+            _compactar_arbol_horizontal(contenido)
+            _vincular_rueda(contenido)
+            # El wrap de textos puede aumentar el alto pedido DESPUÉS del
+            # resize horizontal. Sin esta segunda sincronización, el Canvas
+            # podía conservar el alto previo y recortar las últimas filas.
+            if _vertical_sync_job is None:
+                _vertical_sync_job = canvas.after_idle(_sincronizar_alto_y_scroll)
+
+        contenido.bind("<Configure>", _on_contenido_configure, add="+")
+
+        def _on_canvas_resize(event):
+            # v24: contenido al 96 % del Canvas (~2 % de margen por lado).
+            # La reducción horizontal no se logra con márgenes grandes, sino
+            # con el sidebar y anchos explícitos más compactos.
+            x, ancho = calcular_geometria_contenido_panel(
+                event.width, PANEL_CONTENT_RATIO
+            )
+            canvas.coords(ventana_id, x, 0)
+            canvas.itemconfig(ventana_id, width=ancho)
+
+            # Si el contenido entra verticalmente, completar el alto visible;
+            # si no, respetar su alto pedido para que la barra pueda recorrerlo.
+            alto = max(event.height, contenido.winfo_reqheight())
+            canvas.itemconfig(ventana_id, height=alto)
+            _ajustar_textos(contenido, ancho)
+            canvas.after_idle(_actualizar_scrollregion)
+
+        canvas.bind("<Configure>", _on_canvas_resize, add="+")
+
+        # Guardar referencias facilita depuración y mantiene viva la relación
+        # explícita panel -> canvas -> scrollbar.
+        if not hasattr(self, "panel_canvases"):
+            self.panel_canvases = []
+        if not hasattr(self, "panel_scrollbars"):
+            self.panel_scrollbars = []
+        self.panel_canvases.append(canvas)
+        self.panel_scrollbars.append(scrollbar)
 
         return contenido
 
@@ -1998,16 +2212,14 @@ class SombraApp:
     def open_panel(self, index):
         """Abre (despliega) el panel lateral 'index' (0-3).
 
-        GEOMETRÍA (bug corregido en la vuelta anterior): frame1 se crea
-        con un ancho fijo de apenas 100px — suficiente para la columna
-        de íconos sola, pero NO para columna de íconos + panel
-        desplegado. Como los paneles se ubican con .place() (que no
-        fuerza a su contenedor a agrandarse), el panel terminaba
-        dibujándose más ancho que frame1 y la parte que sobraba quedaba
-        recortada/tapada por lo que hay al lado. Acá se agranda frame1
-        al ancho real necesario ANTES de animar la apertura; close_panel
-        lo vuelve a achicar (solo si no hay otro open_panel encadenado
-        justo después — ver animate_panel_close).
+        GEOMETRÍA v22: los paneles internos usan .place(), por lo que no
+        participan del cálculo de tamaño de grid. Configurar solamente
+        ``frame1.width`` no alcanzaba: en una prueba 1400x900 frame1
+        pedía 260 px pero la columna 0 recibía 218 px, y el borde derecho
+        del panel quedaba recortado al comenzar frame2/frame4. Ahora la
+        apertura reserva el ancho completo mediante ``minsize`` en la
+        columna 0 antes de animar. close_panel devuelve esa reserva al
+        ancho de la barra de íconos al terminar.
         """
         if not self.require_project("acceder a los paneles"):
             return
@@ -2023,7 +2235,8 @@ class SombraApp:
         # horizontales primero, frame1 = ancho del panel, y la
         # animación fuerza el ancho exacto del panel (place width).
         self.switch_buttons_to_horizontal()
-        self.frame1.config(width=self.panel_width)
+        self._recalcular_ancho_sidebar_abierto()
+        self._reservar_ancho_sidebar(self.panel_width)
         self.animate_panel_open(index, 0, token)
         if index == 1:
             self.show_panel2_frames()
@@ -2115,8 +2328,8 @@ class SombraApp:
                     else:
                         self.open_panel(index)
                 else:
-                    icon_width = max(self.icon_frame.winfo_width(), 40)
-                    self.frame1.config(width=icon_width)
+                    icon_width = max(self.sidebar_closed_width, self.icon_frame.winfo_reqwidth(), 40)
+                    self._reservar_ancho_sidebar(icon_width)
                     self.is_animating = False
 
     def close_panel(self, index, on_complete=None):
@@ -2180,14 +2393,23 @@ class SombraApp:
             [self.frame7, self.frame8, self.frame9, self.frame10, self.frame11, self.frame12, self.frame13, self.frame14],
         )
     def show_diseno_frames(self):
+        # v30: un único host ocupa las cuatro celdas centrales. Esto evita
+        # tres cuartos vacíos alrededor del gráfico 2D/3D y permite que el
+        # Notebook de Edición use todo el viewport disponible.
         self._toggle_frames(
-            [self.frame7, self.frame8, self.frame9, self.frame10],
-            [self.frame2, self.frame3, self.frame4, self.frame5, self.frame11, self.frame12, self.frame13, self.frame14, self.frame15],
+            [self.frame7],
+            [self.frame2, self.frame3, self.frame4, self.frame5,
+             self.frame8, self.frame9, self.frame10,
+             self.frame11, self.frame12, self.frame13, self.frame14, self.frame15],
         )
     def show_modelo_frames(self):
+        # v30: mismo criterio para Modelo. frame11 tiene rowspan=2 y
+        # columnspan=2, por lo que ocupa el bloque frame2..frame5 completo.
         self._toggle_frames(
-            [self.frame11, self.frame12, self.frame13, self.frame14],
-            [self.frame2, self.frame3, self.frame4, self.frame5, self.frame7, self.frame8, self.frame9, self.frame10, self.frame15],
+            [self.frame11],
+            [self.frame2, self.frame3, self.frame4, self.frame5,
+             self.frame7, self.frame8, self.frame9, self.frame10,
+             self.frame12, self.frame13, self.frame14, self.frame15],
         )
     def highlight_button(self, index):
         for i, button in enumerate(self.buttons):
@@ -2261,7 +2483,19 @@ class SombraApp:
         if not self._confirm_discard_changes("Salir"):
             return
         if messagebox.askokcancel("Salir", "¿Desea salir de la aplicación?"):
-            self.root.destroy()
+            # Cerrar explícitamente el período de proyecto antes de destruir
+            # la ventana. MainApp cerrará después la sesión completa.
+            if self.db_manager is not None and self.session_id:
+                try:
+                    self.db_manager.end_project_work(self.session_id)
+                except Exception as exc:
+                    print(f"[sesion] No se pudo cerrar proyecto activo: {exc}")
+            try:
+                self.root.destroy()
+            finally:
+                if not self._session_exit_notified and callable(self.on_session_exit):
+                    self._session_exit_notified = True
+                    self.on_session_exit()
 
     def undo(self):
         messagebox.showinfo(
@@ -2505,6 +2739,10 @@ class SombraApp:
         self.current_location = None
         
     def _clear_frame(self, frame):
+        if frame is self.frame7:
+            self._cleanup_scene_view_host("diseno")
+        elif frame is self.frame11:
+            self._cleanup_scene_view_host("modelo")
         for widget in frame.winfo_children():
             widget.destroy()
 
@@ -3028,7 +3266,7 @@ class SombraApp:
         )
         self.carrusel_izq.pack(side="left", fill="y")
         self.carrusel_canvas = tk.Canvas(
-            strip, height=62, bg=self.palette["panel"], highlightthickness=0,
+            strip, height=58, bg=self.palette["panel"], highlightthickness=0,
         )
         self.carrusel_canvas.pack(side="left", fill="both", expand=True)
         self.carrusel_der = tk.Button(
@@ -3092,15 +3330,13 @@ class SombraApp:
                 highlightthickness=1, bd=0,
             )
             marco.pack(side="left", padx=3)
-            etiqueta = entry.get("label") or f"elemento{entry.get('n', '?')}"
-            sombra = entry.get("porcentaje_sombra")
-            if isinstance(sombra, (int, float)):
-                etiqueta += f" · {sombra:.0f}%"
+            # v21: el carrusel es puramente visual. La miniatura identifica
+            # el análisis y el borde azul marca la selección; se eliminan
+            # nombres/% debajo de las fotos para ganar altura y evitar
+            # recortes cuando hay muchos elementos.
             lbl_img = tk.Label(marco, image=photo, bg=self.palette["panel"], cursor="hand2")
-            lbl_img.pack()
+            lbl_img.pack(padx=2, pady=2)
             lbl_img.bind("<Button-1>", lambda _e, i=idx: self._carrusel_seleccionar(i))
-            tk.Label(marco, text=etiqueta, font=("Arial", 7),
-                     bg=self.palette["panel"]).pack()
             self._carrusel_frames.append((marco, idx))
         if self._carrusel_frames:
             target = None
@@ -4281,6 +4517,94 @@ class SombraApp:
                     pass
         except ValueError:
             messagebox.showerror("Error", "Formato de fecha inválido. Use AAAA-MM-DD")
+    def _scene_view_parent(self, mode):
+        if mode == "diseno":
+            return self.frame7
+        if mode == "modelo":
+            return self.frame11
+        raise ValueError(f"Modo de vista desconocido: {mode}")
+
+    def _cleanup_scene_view_host(self, mode):
+        hosts = getattr(self, "_scene_view_hosts", {})
+        host = hosts.pop(mode, None)
+        if not host:
+            return
+        frame3d = host.get("view3d")
+        controller = getattr(frame3d, "_sombra_scene3d_controller", None) if frame3d is not None else None
+        if controller is not None:
+            try:
+                controller.close()
+            except Exception:
+                pass
+        notebook = host.get("notebook")
+        if notebook is not None:
+            try:
+                notebook.destroy()
+            except tk.TclError:
+                pass
+
+    def _get_scene_view_frames(self, mode):
+        """Devuelve (2D, 3D, notebook) dentro del MISMO frame principal.
+
+        v30 conserva frame7 para Edición y frame11 para Modelo como hosts,
+        pero ambos abarcan las cuatro celdas centrales (frame2..frame5).
+        Dentro de cada host crea dos pestañas que llenan el 100 % del área.
+        No cambia el lateral, el carrusel ni los cálculos científicos.
+        """
+        parent = self._scene_view_parent(mode)
+        if not hasattr(self, "_scene_view_hosts"):
+            self._scene_view_hosts = {}
+        host = self._scene_view_hosts.get(mode)
+        if host is not None:
+            notebook = host.get("notebook")
+            try:
+                if notebook is not None and notebook.winfo_exists():
+                    return host["view2d"], host["view3d"], notebook
+            except tk.TclError:
+                pass
+            self._cleanup_scene_view_host(mode)
+
+        # El parent puede contener un canvas legacy si se entra por primera
+        # vez desde una versión/proyecto previo. Se limpia solo la capa UI.
+        for widget in parent.winfo_children():
+            try:
+                widget.destroy()
+            except tk.TclError:
+                pass
+
+        notebook = ttk.Notebook(parent)
+        notebook.pack(fill="both", expand=True)
+        view2d = tk.Frame(notebook, bg=self.palette["panel"])
+        view3d = tk.Frame(notebook, bg=self.palette["panel"])
+        notebook.add(view2d, text="Vista 2D")
+        notebook.add(view3d, text="Vista 3D")
+        self._scene_view_hosts[mode] = {
+            "notebook": notebook,
+            "view2d": view2d,
+            "view3d": view3d,
+        }
+        return view2d, view3d, notebook
+
+    def mostrar_vista_3d_diseno(self):
+        if not self.require_project("generar la vista 3D"):
+            return
+        view2d, view3d, notebook = self._get_scene_view_frames("diseno")
+        if not all(k in self.vars for k in ("X", "Y", "T")):
+            self.actualizar_grafico_diseno(self.frame7)
+        backend = design.generar_3d(self.vars, view3d)
+        if backend:
+            notebook.select(view3d)
+
+    def mostrar_vista_3d_modelo(self):
+        if not self.require_project("generar la vista 3D"):
+            return
+        view2d, view3d, notebook = self._get_scene_view_frames("modelo")
+        if not all(k in self.vars_modelo for k in ("X", "Y", "T")):
+            self.generar_grafico_modelo()
+        backend = modelo.generar_3d(self.vars_modelo, view3d)
+        if backend:
+            notebook.select(view3d)
+
     def render_grafico_en_frame(self, target_frame, grafico_fn, *args):
         for widget in target_frame.winfo_children():
             widget.destroy()
@@ -4289,16 +4613,21 @@ class SombraApp:
         # Crear nuevo gráfico en frame2 y capturar el canvas
         return grafico_fn(*args, target_frame)
     def actualizar_grafico_diseno(self, target_frame=None):
-        if target_frame is None:
-            target_frame = self.frame2
+        if target_frame is None or target_frame is self.frame7:
+            target_frame, _view3d, notebook = self._get_scene_view_frames("diseno")
+        else:
+            notebook = None
 
-        # Crear nuevo gráfico en el frame destino y capturar el canvas
+        # El 2D conserva exactamente el renderer Matplotlib existente; solo
+        # cambia el contenedor físico en el que se monta.
         fig, ax, self.canvas_diseno = self.render_grafico_en_frame(
             target_frame,
             lambda vars, frame: design.crear_area_grafico(vars, frame, self),
             self.vars,
         )
-    
+
+        if notebook is not None:
+            notebook.select(target_frame)
         # Vincular eventos usando la instancia actual (self)
         self.canvas_diseno.mpl_connect('button_press_event', lambda event: design.manejar_click(event, self))
     def save_dataset(self):

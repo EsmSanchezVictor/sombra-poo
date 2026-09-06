@@ -283,7 +283,7 @@ def setup_panel_4(app):
     tk.Button(
         acciones_frame,
         text="Vista 3D",
-        command=lambda: modelo.generar_3d(app.vars_modelo),
+        command=app.mostrar_vista_3d_modelo,
         bg="#4CAF50",
         fg="white",
         font=("Arial", 7, "bold"),

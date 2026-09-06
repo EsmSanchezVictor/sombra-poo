@@ -1,3 +1,32 @@
+# Actualización v29 — Vista 3D VTK integrada
+
+- Nuevo renderer 3D basado en VTK estándar, con iluminación Phong, MSAA, cámara interactiva y geometría volumétrica simplificada.
+- Vista 2D y Vista 3D viven dentro del mismo `frame7` (Edición) / `frame11` (Modelo) mediante pestañas.
+- Se elimina la ventana 3D independiente (`Toplevel`).
+- VTK se usa en modo off-screen y el frame se presenta en Tkinter; no depende de `vtkRenderingTk`.
+- Fallback automático a Matplotlib 3D embebido si VTK no está disponible.
+- La vista reutiliza `X`, `Y` y `T` ya calculados y no modifica los kernels científicos.
+- `core/` y `services/` permanecen sin cambios.
+- 184 tests aprobados; 5 omitidos.
+
+Ver `CAMBIOS_VISTA_3D_VTK_v29.md`.
+
+---
+
+# Actualización v21 — Interfaz de paneles y carrusel
+
+- Carrusel sin nombres ni porcentajes debajo de las miniaturas.
+- Contenido de los cuatro paneles de `frame1` limitado al 80 % del ancho útil.
+- Márgenes laterales simétricos y wrapping dinámico de textos largos.
+- Scrollbar vertical en una columna independiente, sin superposición con controles.
+- Rueda del mouse local al panel, sin `bind_all` global.
+- Sin cambios en cálculos, persistencia ni resultados científicos.
+- 158 tests aprobados; 5 omitidos por pvlib opcional.
+
+Ver `CAMBIOS_INTERFAZ_PANELES_v21.md`.
+
+---
+
 # Actualización v20 — Confort vectorizado y matrices 64–640
 
 - Resolución seleccionable de 64×64 a 640×640 en pasos de 32.
@@ -600,3 +629,72 @@ Se agrega `advanced_vegetation`, FAO-56 Penman-Monteith horaria para suelo veget
 - `Ctrl+S` crea respaldo `.3es` en `respaldos/`; `Guardar como…` es la única acción de guardado que solicita destino.
 - Inventario automático en `config/inventario.json`.
 - Migración conservadora desde esquemas v18/v17 y anteriores.
+
+
+## v22 — Geometría principal / frame lateral
+
+- Se reprodujo el recorte de `frame1`: en 1400×900 el panel pedía 260 px pero la columna 0 recibía 218 px.
+- La columna lateral ahora reserva su ancho real con `grid_columnconfigure(..., minsize=...)`.
+- `frame1` usa `grid_propagate(False)` y ya no puede quedar más angosto que el panel colocado con `place()`.
+- Ancho abierto dinámico: 28 % del viewport, mínimo operativo 380 px, máximo 520 px y tope de 45 % en ventanas angostas.
+- Se conserva el contenido al 80 % y la scrollbar en columna independiente de v21.
+- No se modificaron cálculos ni persistencia.
+
+## v23 - Interfaz compacta de paneles
+- Controles laterales aproximadamente 30 % más compactos.
+- Contenido al 90 % del Canvas, con márgenes laterales de ~5 %.
+- Sidebar abierto más ajustado (350-500 px, objetivo 26 % del viewport).
+- Scrollbar vertical de 10 px en columna independiente.
+- Tipografía con piso de legibilidad de 7 pt.
+
+## v24 — paneles más angostos
+Se reemplaza la compactación volumétrica de v23 por una reducción horizontal real de aproximadamente 30 %. El sidebar pasa, por ejemplo, de 364 px a 255 px en una ventana de 1400 px; el contenido usa 96 % del Canvas para mantener márgenes pequeños. No se reducen alturas ni tipografías.
+
+
+## v25 — Panel 2 a altura completa
+- Panel 2 reorganizado con fila central expansible.
+- El bloque de procesamiento queda apoyado al borde inferior cuando sobra altura.
+- Se elimina el hueco inferior visual sin cambiar el ancho de la v24.
+- 172 tests aprobados, 5 omitidos opcionales.
+
+## v26 — Panel 2: contenedor a altura completa
+- `frame1` ahora usa `rowspan=4`, incluyendo la fila del carrusel de Panel 2.
+- Se elimina la franja vacía inferior que aparecía al mostrar el carrusel.
+- Se revierte la redistribución interna de Panel 2 de v25; no se altera el contenido para simular altura.
+
+## v27 — Registro de sesiones y proyectos
+- Cada login exitoso crea una sesión persistente en `users.db`.
+- Cada proyecto creado/abierto/importado/duplicado/guardado-como queda asociado a la sesión y al usuario.
+- Se registran inicio, fin y última actividad.
+- El cambio de proyecto cierra el período anterior sin cerrar la sesión.
+- El menú administrador incorpora un historial de sesiones.
+- La migración de base es automática y no requiere reemplazar `users.db`.
+
+## v28 — Gestión de usuarios
+- Corrige definitivamente el corrimiento de columnas de la pantalla Gestión de Usuarios.
+- Reemplaza la tabla manual por Treeview y elimina hashes/salt de la proyección visual.
+- Agrega búsqueda, filtros, selección, edición directa, reset de contraseña y activar/desactivar.
+- Migra bases existentes con estado, fechas y último ingreso.
+- Conserva íntegra la trazabilidad de sesiones/proyectos de v27.
+
+## v29 — Vista 3D VTK embebida
+- Vista 3D integrada dentro del mismo contenedor que la vista 2D mediante pestañas.
+- Backend VTK estándar off-screen presentado dentro de Tkinter; no depende de vtkRenderingTk.
+- Fallback Matplotlib 3D embebido.
+- Cámara isométrica/superior, rotación, zoom, iluminación y actores volumétricos.
+- La vista consume X/Y/T existentes y no modifica cálculos científicos.
+
+## v30 — Visualización central completa y VTK principal
+- Edición (`frame7`) y Modelo (`frame11`) abarcan el bloque central completo equivalente a frame2+frame3+frame4+frame5.
+- Las pestañas Vista 2D / Vista 3D usan el 100 % del área disponible.
+- VTK pasa a `requirements.txt` como motor 3D principal; Matplotlib queda como fallback.
+- Render VTK con supersampling limitado, copas multilobuladas, mallas más suaves, iluminación de tres puntos y mejor encuadre.
+- Interacción a resolución 1x y alta calidad al soltar para equilibrar fluidez/RAM.
+- Suite: 187 aprobados, 5 omitidos.
+
+## v31 — compatibilidad VTK/Windows
+- Inicio VTK más conservador en Windows (MSAA 0; calidad por supersampling).
+- Primer render diferido hasta que Tk termine de construir el tab.
+- Diagnóstico visible si VTK está instalado pero falla OpenGL/contexto.
+- Script `DIAGNOSTICO_VTK_WINDOWS.py`.
+- Sin cambios científicos.

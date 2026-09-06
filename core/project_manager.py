@@ -56,7 +56,7 @@ class ProjectManager:
         self.app.is_dirty = False
         self._save_project_file(project.state_path, autosave=True)
         self._update_last_project_path(project.state_path)
-        self.app.on_project_loaded()
+        self.app.on_project_loaded("created")
 
     def open_project(self) -> None:
         """Abre un proyecto desde un JSON."""
@@ -65,7 +65,7 @@ class ProjectManager:
             return
         self.open_project_from_path(file_path)
 
-    def open_project_from_path(self, file_path: str) -> bool:
+    def open_project_from_path(self, file_path: str, project_action: str = "opened") -> bool:
         """Abre un proyecto desde una ruta de estado/config."""
         payload = self._load_project_file(file_path)
         if not payload:
@@ -86,7 +86,7 @@ class ProjectManager:
         self.app.current_project_path = project.state_path
         self.app.is_dirty = False
         self._update_last_project_path(project.state_path)
-        self.app.on_project_loaded()
+        self.app.on_project_loaded(project_action)
         # Persistir inmediatamente la migración de rutas/estructura.
         self._save_project_file(project.state_path, autosave=True)
         return True
@@ -180,7 +180,7 @@ class ProjectManager:
         except Exception as exc:
             messagebox.showerror("Guardar como", f"No se pudo crear la copia:\n{exc}")
             return False
-        return self.open_project_from_path(new_project.state_path)
+        return self.open_project_from_path(new_project.state_path, project_action="save_as")
 
     def duplicate_project(self) -> bool:
         """Duplica el proyecto actual bajo /proyectos."""
@@ -233,7 +233,7 @@ class ProjectManager:
             return False
 
         if messagebox.askyesno("Duplicar proyecto", "Proyecto duplicado correctamente. ¿Desea abrirlo ahora?"):
-            return self.open_project_from_path(new_project.state_path)
+            return self.open_project_from_path(new_project.state_path, project_action="duplicated")
         return True
 
     def export_project(self) -> bool:
@@ -301,7 +301,7 @@ class ProjectManager:
                 return False
 
             if messagebox.askyesno("Importar .3es", "Importación completa. ¿Desea abrir el proyecto ahora?"):
-                return self.open_project_from_path(source_path)
+                return self.open_project_from_path(source_path, project_action="imported")
             return True
         except zipfile.BadZipFile:
             messagebox.showerror("Importar .3es", "El archivo seleccionado no es un ZIP válido.")
@@ -346,6 +346,9 @@ class ProjectManager:
             self.app.current_project_path = str(path)
             self._update_last_project_path(str(path))
             self.app.update_status_saved_time(payload.get("meta", {}).get("saved_at"))
+            touch = getattr(self.app, "_touch_session", None)
+            if callable(touch):
+                touch()
             return True
         except Exception as exc:
             messagebox.showerror("Guardar proyecto", f"No se pudo guardar el proyecto: {exc}")

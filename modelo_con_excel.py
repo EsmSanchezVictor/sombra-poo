@@ -1,11 +1,10 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import tkinter as tk
 from tkinter import ttk, filedialog
 from datetime import datetime, timedelta
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import pandas as pd
 import math
@@ -23,6 +22,7 @@ from core.materials import get_surface_material, effective_structure_transmittan
 from core.surface_energy import (
     solve_surface_energy_balance, cloud_fraction_from_label, downwelling_longwave,
 )
+from ui.scene3d import render_scene_3d
 from core.vegetation import (
     VegetationConfig, phenology_factor, ground_latent_heat_flux_wm2,
     species_canopy_latent_flux_wm2,
@@ -961,6 +961,9 @@ def generar_grafico(vars, frame):
             huso_horas = huso_tz
     theta_sol = angulo_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), huso_horas)
     azimut_sol = azimut_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), theta_sol, huso_horas)
+    # v29: metadatos SOLO visuales para orientar la iluminación VTK.
+    vars["_render_solar_altitude_deg"] = float(np.degrees(theta_sol))
+    vars["_render_solar_azimuth_deg"] = float(np.degrees(azimut_sol))
     # v14: radiación observada/manual puede entrar como GHI del instante.
     # Si no hay override, se conserva EXACTAMENTE el comportamiento legacy
     # del Panel 4: I_sol_base * sin(elevación).
@@ -1212,104 +1215,32 @@ def editar_elemento(vars, arbol=None, estructura=None):
         row=len(fields) + 1, columnspan=2, pady=10)
 
 
-def generar_3d(vars):
-    """Vista 3D del modelo — misma lógica que diseño.py::generar_3d(),
-    para que modo edición y modelo se vean y se lean igual.
+def generar_3d(vars, frame=None):
+    """Renderiza la escena 3D del Modelo en el contenedor compartido.
 
-    CAMBIOS respecto a la versión original (idénticos a los ya aplicados
-    en diseño.py): antes era una superficie de T en Kelvin con el eje Z
-    invertido, sin ningún árbol/estructura dibujado y con paleta
-    'viridis' distinta a la del resto de la app. Ahora la temperatura es
-    un mapa de color sobre el plano del suelo (misma paleta
-    CMAP_TEMPERATURA que el plano 2D de acá arriba y que modo edición),
-    el eje Z es altura real de los objetos, y los árboles/estructuras
-    cargados desde el Excel del modelo se dibujan igual que en edición.
+    Usa VTK embebido cuando está disponible y Matplotlib embebido como
+    fallback. X/Y/T provienen del cálculo 2D ya ejecutado.
     """
     if "T" not in vars or "X" not in vars or "Y" not in vars:
         messagebox.showerror("Error", "Primero genere el gráfico 2D")
-        return
+        return None
 
-    ventana_3d = tk.Toplevel()
-    ventana_3d.title("Vista 3D simplificada — Modelo")
-    ventana_3d.geometry("1000x800")
-
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection='3d')
-
-    X = vars["X"]
-    Y = vars["Y"]
-    T = vars["T"]
-
-    app_instance = vars.get('_app_instance')
-    temp_unit = app_instance.get_temperature_unit_symbol() if app_instance else "K"
-    T_display = app_instance.convert_temperature_for_display(T) if app_instance else T
-
-    nivel_min, nivel_max = float(np.nanmin(T_display)), float(np.nanmax(T_display))
-    if not np.isfinite(nivel_min) or not np.isfinite(nivel_max) or nivel_min == nivel_max:
-        niveles = 10
-    else:
-        niveles = np.linspace(nivel_min, nivel_max, 20)
-
-    piso = ax.contourf(X, Y, T_display, niveles, zdir='z', offset=0,
-                        cmap=CMAP_TEMPERATURA, alpha=0.2)
-    cbar = fig.colorbar(piso, ax=ax, shrink=0.6, aspect=12, pad=0.08)
-    cbar.set_label(f"Temperatura ({temp_unit})")
-    cbar.ax.text(0.5, 1.02, "Más cálido", transform=cbar.ax.transAxes,
-                 ha='center', va='bottom', fontsize=8)
-    cbar.ax.text(0.5, -0.02, "Más fresco", transform=cbar.ax.transAxes,
-                 ha='center', va='top', fontsize=8)
-
-    arboles = vars.get('arboles', [])
-    if arboles:
-        ax.scatter(
-            [a.x for a in arboles], [a.y for a in arboles], [a.h for a in arboles],
-            s=[max(30, (a.radio_copa ** 2) * 25) for a in arboles],
-            c=[color_copa(getattr(a, "especie", "")) for a in arboles],
-            alpha=0.85, depthshade=True,
-            edgecolors='darkgreen', label='Árboles',
+    app = vars.get("_app_instance")
+    if frame is None and app is not None and hasattr(app, "_get_scene_view_frames"):
+        _view2d, frame, notebook = app._get_scene_view_frames("modelo")
+        notebook.select(frame)
+    if frame is None:
+        messagebox.showerror(
+            "Vista 3D",
+            "No se encontró el contenedor 3D embebido. Regenere el gráfico desde el Panel Modelo.",
         )
-        for a in arboles:
-            ax.plot([a.x, a.x], [a.y, a.y], [0, a.h], color='saddlebrown', linewidth=2)
+        return None
 
-    estructuras = vars.get('estructuras', [])
-    for e in estructuras:
-        color = {'Pared': '0.3', 'Galeria': 'saddlebrown', 'Sendero': 'gray'}.get(e.tipo, '0.5')
-        if e.tipo == 'Pared':
-            altura = max(e.altura, 0.1)
-            panel = [[
-                (e.x1, e.y1, 0), (e.x2, e.y2, 0),
-                (e.x2, e.y2, altura), (e.x1, e.y1, altura),
-            ]]
-            ax.add_collection3d(Poly3DCollection(panel, facecolor=color, alpha=0.7, edgecolor='black'))
-        else:
-            z_nivel = e.altura if e.tipo == 'Galeria' else 0.05
-            franja = [[
-                (e.x1, e.y1, z_nivel), (e.x2, e.y1, z_nivel),
-                (e.x2, e.y2, z_nivel), (e.x1, e.y2, z_nivel),
-            ]]
-            ax.add_collection3d(Poly3DCollection(franja, facecolor=color, alpha=0.5))
-
-    ax.set_xlabel('X (m)')
-    ax.set_ylabel('Y (m)')
-    ax.set_zlabel('Altura (m)')
-    ax.set_title('Vista 3D simplificada — Modelo')
-    ax.view_init(elev=42, azim=-60)
-    if arboles or estructuras:
-        ax.legend(loc='upper left', fontsize=8)
-
-    canvas = FigureCanvasTkAgg(fig, master=ventana_3d)
-    canvas.draw()
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    toolbar = NavigationToolbar2Tk(canvas, ventana_3d)
-    toolbar.update()
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    def _cerrar_3d():
-        plt.close(fig)
-        ventana_3d.destroy()
-    ventana_3d.protocol("WM_DELETE_WINDOW", _cerrar_3d)
-
+    try:
+        return render_scene_3d(vars, frame, title="Vista 3D — Modelo · sombra y temperatura")
+    except Exception as exc:
+        messagebox.showerror("Vista 3D", f"No se pudo generar la vista 3D:\n{exc}")
+        return None
 
 def cargar_preset(config, vars):
     presets = {

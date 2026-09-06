@@ -1,10 +1,9 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import pandas as pd
 import math
@@ -12,6 +11,7 @@ from core.scene_objects import adaptar_objetos_escena
 from core.species import color_copa, nombres_especies, propiedades_especie
 from plot_style import CMAP_TEMPERATURA
 from core.excel_scene import save_scene_excel, load_scene_excel, apply_parameters_to_vars
+from ui.scene3d import render_scene_3d
 
 # Constantes físicas
 sigma = 5.67e-8  # Constante de Stefan-Boltzmann
@@ -74,7 +74,11 @@ def crear_area_grafico(vars, frame, app):
     figura intermedia que quedaba retenida por pyplot. v18 delega todo en
     una sola actualización y devuelve exactamente el canvas visible.
     """
-    frame.grid(row=1, column=1, sticky="nsew")
+    # v29: si ``frame`` es una pestaña de ttk.Notebook ya tiene gestor
+    # geométrico propio; no intentar reubicarlo con grid().
+    manager_fn = getattr(frame, "winfo_manager", None)
+    if manager_fn is None or not manager_fn():
+        frame.grid(row=1, column=1, sticky="nsew")
     vars['_app_instance'] = app
     return actualizar_grafico(vars, frame)
 """ def crear_menu(self):
@@ -345,6 +349,10 @@ def actualizar_grafico(vars, frame):
     # Cálculos principales
     theta_sol = angulo_solar(vars)
     azimut_sol = azimut_solar(vars, theta_sol)
+    # v29: metadatos SOLO visuales para orientar la iluminación VTK.
+    # Son los mismos ángulos ya calculados; no participan en la física.
+    vars["_render_solar_altitude_deg"] = float(np.degrees(theta_sol))
+    vars["_render_solar_azimuth_deg"] = float(np.degrees(azimut_sol))
     I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
     
     # Cálculo térmico unificado con Modelo. El modo de superficie se lee
@@ -514,121 +522,34 @@ def calcular_sombra_arboles(vars, X, Y, theta_sol, azimut_sol):
 
 def calcular_sombra_estructuras(vars, X, Y, theta_sol, azimut_sol):
     return _sombra_estructuras(X, Y, vars.get('estructuras', []), theta_sol, azimut_sol)
-def generar_3d(vars):
-    """Vista 3D simplificada de la escena: temperatura como mapa de color
-    sobre el plano del suelo + árboles/estructuras como objetos con su
-    altura real.
+def generar_3d(vars, frame=None):
+    """Renderiza la escena 3D dentro del contenedor compartido 2D/3D.
 
-    CAMBIOS respecto a la versión original:
-    - Antes se dibujaba T (temperatura, en Kelvin) como una SUPERFICIE
-      ondulada en el eje Z, con el eje Z además invertido. Eso no se
-      parece a cómo se lee un plano de sombra real y no tenía ninguna
-      relación visual con los árboles/estructuras que el usuario coloca
-      en el modo edición — de hecho, generar_3d() no los dibujaba en
-      absoluto.
-    - Ahora el eje Z representa ALTURA REAL (metros) de los objetos de
-      la escena, y la temperatura se muestra como un mapa de color
-      proyectado sobre el plano del suelo (contourf con zdir='z',
-      offset=0) — el mismo lenguaje visual que la imagen de referencia
-      del usuario (curvas de temperatura sobre el terreno + objetos
-      3D simples encima), pero sin geometría fotorrealista.
-    - Los árboles se dibujan como un tallo + una copa esférica simple,
-      del tamaño real de su radio de copa. Las estructuras tipo Pared
-      se dibujan como un panel vertical de su altura real; Galería y
-      Sendero como una franja horizontal a nivel de piso/techo.
-    - Usa la misma paleta (CMAP_TEMPERATURA) que el resto de la app en
-      vez de 'viridis' suelto, para que el mapa de color se lea igual
-      en todas las vistas del proyecto.
+    v29 reemplaza la ventana ``Toplevel`` de Matplotlib por el backend VTK
+    embebido cuando está disponible. La función consume X/Y/T ya calculados
+    y no modifica ninguna ecuación ni resultado científico.
     """
     if "T" not in vars or "X" not in vars or "Y" not in vars:
         messagebox.showerror("Error", "Primero genere el gráfico 2D")
-        return
+        return None
 
-    ventana_3d = tk.Toplevel()
-    ventana_3d.title("Vista 3D simplificada")
-    ventana_3d.geometry("1000x800")
-
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection='3d')
-
-    X = vars["X"]
-    Y = vars["Y"]
-    T = vars["T"]
-
-    app_instance = vars.get('_app_instance')
-    temp_unit = app_instance.get_temperature_unit_symbol() if app_instance else "K"
-    T_display = app_instance.convert_temperature_for_display(T) if app_instance else T
-
-    # --- Mapa de temperatura proyectado sobre el plano del suelo (z=0) ---
-    nivel_min, nivel_max = float(np.nanmin(T_display)), float(np.nanmax(T_display))
-    if not np.isfinite(nivel_min) or not np.isfinite(nivel_max) or nivel_min == nivel_max:
-        niveles = 10
-    else:
-        niveles = np.linspace(nivel_min, nivel_max, 20)
-
-    piso = ax.contourf(X, Y, T_display, niveles, zdir='z', offset=0,
-                        cmap=CMAP_TEMPERATURA, alpha=0.2)
-    cbar = fig.colorbar(piso, ax=ax, shrink=0.6, aspect=12, pad=0.08)
-    cbar.set_label(f"Temperatura ({temp_unit})")
-    # Etiquetas de extremos al estilo "Warmest/Coolest" de la referencia,
-    # además de los números — más rápido de leer de un vistazo.
-    cbar.ax.text(0.5, 1.02, "Más cálido", transform=cbar.ax.transAxes,
-                 ha='center', va='bottom', fontsize=8)
-    cbar.ax.text(0.5, -0.02, "Más fresco", transform=cbar.ax.transAxes,
-                 ha='center', va='top', fontsize=8)
-
-    # --- Árboles: tallo + copa esférica simple, tamaño real ---
-    arboles = vars.get('arboles', [])
-    if arboles:
-        ax.scatter(
-            [a.x for a in arboles], [a.y for a in arboles], [a.h for a in arboles],
-            s=[max(30, (a.radio_copa ** 2) * 25) for a in arboles],
-            c=[color_copa(getattr(a, "especie", "")) for a in arboles],
-            alpha=0.85, depthshade=True,
-            edgecolors='darkgreen', label='Árboles',
+    app = vars.get("_app_instance")
+    if frame is None and app is not None and hasattr(app, "_get_scene_view_frames"):
+        _view2d, frame, notebook = app._get_scene_view_frames("diseno")
+        notebook.select(frame)
+    if frame is None:
+        messagebox.showerror(
+            "Vista 3D",
+            "No se encontró el contenedor 3D embebido. Regenere el gráfico desde el Panel de Edición.",
         )
-        for a in arboles:
-            ax.plot([a.x, a.x], [a.y, a.y], [0, a.h], color='saddlebrown', linewidth=2)
+        return None
 
-    # --- Estructuras: panel vertical (Pared) o franja horizontal (Galería/Sendero) ---
-    estructuras = vars.get('estructuras', [])
-    for e in estructuras:
-        color = {'Pared': '0.3', 'Galeria': 'saddlebrown', 'Sendero': 'gray'}.get(e.tipo, '0.5')
-        if e.tipo == 'Pared':
-            altura = max(e.altura, 0.1)
-            panel = [[
-                (e.x1, e.y1, 0), (e.x2, e.y2, 0),
-                (e.x2, e.y2, altura), (e.x1, e.y1, altura),
-            ]]
-            ax.add_collection3d(Poly3DCollection(panel, facecolor=color, alpha=0.7, edgecolor='black'))
-        else:
-            z_nivel = e.altura if e.tipo == 'Galeria' else 0.05
-            franja = [[
-                (e.x1, e.y1, z_nivel), (e.x2, e.y1, z_nivel),
-                (e.x2, e.y2, z_nivel), (e.x1, e.y2, z_nivel),
-            ]]
-            ax.add_collection3d(Poly3DCollection(franja, facecolor=color, alpha=0.5))
+    try:
+        return render_scene_3d(vars, frame, title="Vista 3D — Edición · sombra y temperatura")
+    except Exception as exc:
+        messagebox.showerror("Vista 3D", f"No se pudo generar la vista 3D:\n{exc}")
+        return None
 
-    ax.set_xlabel('X (m)')
-    ax.set_ylabel('Y (m)')
-    ax.set_zlabel('Altura (m)')
-    ax.set_title('Vista 3D simplificada — sombra y temperatura')
-    ax.view_init(elev=42, azim=-60)  # ángulo isométrico, similar a la referencia
-    if arboles or estructuras:
-        ax.legend(loc='upper left', fontsize=8)
-
-    canvas = FigureCanvasTkAgg(fig, master=ventana_3d)
-    canvas.draw()
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    toolbar = NavigationToolbar2Tk(canvas, ventana_3d)
-    toolbar.update()
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    def _cerrar_3d():
-        plt.close(fig)
-        ventana_3d.destroy()
-    ventana_3d.protocol("WM_DELETE_WINDOW", _cerrar_3d)
 def guardar_como(vars, app):
     """Exporta una copia de la escena a una ubicación elegida por el usuario."""
     global archivo_actual

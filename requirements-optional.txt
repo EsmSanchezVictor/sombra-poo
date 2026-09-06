@@ -1,3 +1,6 @@
 # Dependencias científicas opcionales
 pvlib>=0.10,<1
 pythermalcomfort>=4.4
+
+# Desde v30 VTK ya forma parte de requirements.txt porque es el motor 3D
+# principal. Matplotlib queda únicamente como fallback de seguridad.
