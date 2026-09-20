@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 from admin_panel import AdminPanel
+from ui.modal_style import ask_text
 
 class LoginWindow:
     def __init__(self, root, db_manager):
@@ -77,7 +78,7 @@ class LoginWindow:
         user = self.db_manager.get_user(username)
 
         if user:
-            new_password = tk.simpledialog.askstring("Recuperar contraseña", "Introduce una nueva contraseña:")
+            new_password = ask_text(self.root, "Recuperar contraseña", "Ingresá una nueva contraseña:", show="*", accept_text="Actualizar")
             if new_password:
                 # FIX: update_password espera el id (columna 0), antes se le
                 # pasaba el username y el UPDATE no encontraba la fila.

@@ -743,3 +743,21 @@ Se reemplaza la compactación volumétrica de v23 por una reducción horizontal 
 - `core/crown_shapes.py` incluido en reemplazo acumulativo;
 - `diseño.py` queda como compatibilidad histórica;
 - 218 tests aprobados, 5 omitidos.
+
+## v35.5 — Diálogos de Edición y catálogo de materiales
+
+- Corregida doble apertura de `Nuevo Árbol` por doble `mpl_connect`.
+- Protección adicional de instancia única para diálogos de árbol/estructura.
+- Rediseño visual y modal de ambos formularios.
+- Catálogo visible de materiales depurado a 43 entradas únicas.
+- Compatibilidad preservada para el alias histórico `concreto translucido`.
+- Sin cambios en fórmulas científicas.
+
+## v35.6 — Homogeneización de ventanas emergentes
+- Nuevo `ui/modal_style.py` centraliza cromado, tipografía, centrado, teclado y botones de los diálogos.
+- Todos los Toplevel funcionales propios pasan por el estilo común.
+- Editar elemento (Edición/Modelo), Preferencias y Ejecutar simulación adoptan el lenguaje visual de Árbol/Estructura.
+- Nuevo proyecto, duplicar proyecto y restablecer contraseña usan formularios homogéneos en lugar de prompts sueltos.
+- Diálogos nativos de archivos/carpetas/messagebox permanecen nativos.
+- Sin cambios científicos.
+- Validación: 224 passed, 5 skipped; ejecución estricta sin ResourceWarning.

@@ -54,6 +54,7 @@ from ui.dialogs import HerramientasDialogs
 from ui.menu_bar import MenuBar
 from ui.diurnal_animation import DiurnalAnimationPlayer, Diurnal3DAnimationPlayer
 from ui.solar_indicator import add_solar_indicator_2d
+from ui.modal_style import prepare_dialog
 from utils import export_to_excel
 import diseno as design
 import modelo_con_excel as modelo
@@ -590,6 +591,7 @@ class SombraApp:
         ese proyecto, no una configuración global de la pantalla vacía.
         """
         dialogo = tk.Toplevel(self.root)
+        prepare_dialog(dialogo, self.root, modal=True, resizable=False)
         dialogo.title("Primeras configuraciones")
         dialogo.configure(bg=self.palette["panel"])
         dialogo.transient(self.root)
@@ -2607,6 +2609,7 @@ class SombraApp:
 
     def open_preferences(self):
         preferences = tk.Toplevel(self.root)
+        prepare_dialog(preferences, self.root, modal=False, resizable=False)
         preferences.title("Preferencias")
         preferences.resizable(False, False)
         preferences.configure(bg=self.palette["background"])
@@ -2624,8 +2627,16 @@ class SombraApp:
         water_var = tk.StringVar(value=str(self.settings.get("vegetation_water_availability", 0.75)))
         canopy_water_var = tk.StringVar(value=str(self.settings.get("canopy_water_availability", 0.75)))
 
-        card = tk.Frame(preferences, bg="white", padx=16, pady=14, bd=1, relief="solid")
-        card.grid(row=0, column=0, padx=14, pady=14)
+        header = ttk.Frame(preferences, padding=(18, 16, 18, 0))
+        header.grid(row=0, column=0, sticky="ew")
+        ttk.Label(header, text="Preferencias", style="Heading.TLabel").pack(anchor="w")
+        ttk.Label(
+            header, text="Configuración general de interfaz, unidades y modelos.",
+            style="Muted.TLabel",
+        ).pack(anchor="w", pady=(2, 0))
+
+        card = tk.Frame(preferences, bg="white", padx=18, pady=14, bd=0, relief="flat")
+        card.grid(row=1, column=0, padx=18, pady=(8, 16))
 
         tk.Label(card, text="Unidades", bg="white", font=("Arial", 9, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Combobox(card, textvariable=temp_unit_var, values=["C", "F", "K"], state="readonly", width=10).grid(
@@ -2901,51 +2912,65 @@ class SombraApp:
         if not self.require_project("ejecutar el modelo"):
             return
         if self.active_panel not in (2, 3):
-            # Para los otros paneles se conserva el comportamiento existente.
             self.run_model_for_active_panel()
             return
 
         dlg = tk.Toplevel(self.root)
+        prepare_dialog(dlg, self.root, modal=True, resizable=False)
         dlg.title("Ejecutar simulación")
-        dlg.transient(self.root)
-        dlg.resizable(False, False)
-        body = tk.Frame(dlg, padx=16, pady=14)
+
+        body = ttk.Frame(dlg, padding=(18, 16, 18, 16))
         body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+        ttk.Label(body, text="Ejecutar simulación", style="Heading.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(
+            body,
+            text="Elegí entre un cálculo puntual o una secuencia diurna de sombra y temperatura.",
+            style="Muted.TLabel",
+            wraplength=410,
+            justify="left",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 14))
 
         mode = tk.StringVar(value="animation")
-        tk.Label(body, text="Tipo de ejecución", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
+        ttk.Label(body, text="Tipo de ejecución", style="DialogSection.TLabel").grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=(0, 6)
         )
-        tk.Radiobutton(body, text="Instantánea", variable=mode, value="instant").grid(
-            row=1, column=0, columnspan=2, sticky="w"
+        ttk.Radiobutton(body, text="Instantánea", variable=mode, value="instant").grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=2
         )
-        tk.Radiobutton(
+        ttk.Radiobutton(
             body, text="Animación diurna (sombra + temperatura)",
             variable=mode, value="animation",
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 12))
 
         start_var = tk.DoubleVar(value=8.0)
         end_var = tk.DoubleVar(value=18.0)
         step_var = tk.IntVar(value=60)
         speed_var = tk.IntVar(value=500)
 
-        tk.Label(body, text="Hora inicial").grid(row=3, column=0, sticky="w", pady=2)
-        tk.Spinbox(body, from_=0, to=23.75, increment=0.25, textvariable=start_var, width=8).grid(row=3, column=1, sticky="ew", pady=2)
-        tk.Label(body, text="Hora final").grid(row=4, column=0, sticky="w", pady=2)
-        tk.Spinbox(body, from_=0.25, to=24, increment=0.25, textvariable=end_var, width=8).grid(row=4, column=1, sticky="ew", pady=2)
-        tk.Label(body, text="Paso temporal").grid(row=5, column=0, sticky="w", pady=2)
-        ttk.Combobox(body, textvariable=step_var, values=(15, 30, 60), state="readonly", width=8).grid(row=5, column=1, sticky="ew", pady=2)
-        tk.Label(body, text="Velocidad reproducción").grid(row=6, column=0, sticky="w", pady=2)
-        ttk.Combobox(body, textvariable=speed_var, values=(1000, 750, 500, 300, 150), state="readonly", width=8).grid(row=6, column=1, sticky="ew", pady=2)
-        tk.Label(
+        ttk.Label(body, text="Hora inicial:").grid(row=5, column=0, sticky="w", padx=(0, 14), pady=6)
+        ttk.Spinbox(body, from_=0, to=23.75, increment=0.25, textvariable=start_var, width=12).grid(
+            row=5, column=1, sticky="ew", pady=6)
+        ttk.Label(body, text="Hora final:").grid(row=6, column=0, sticky="w", padx=(0, 14), pady=6)
+        ttk.Spinbox(body, from_=0.25, to=24, increment=0.25, textvariable=end_var, width=12).grid(
+            row=6, column=1, sticky="ew", pady=6)
+        ttk.Label(body, text="Paso temporal:").grid(row=7, column=0, sticky="w", padx=(0, 14), pady=6)
+        ttk.Combobox(body, textvariable=step_var, values=(15, 30, 60), state="readonly", width=12).grid(
+            row=7, column=1, sticky="ew", pady=6)
+        ttk.Label(body, text="Velocidad reproducción:").grid(row=8, column=0, sticky="w", padx=(0, 14), pady=6)
+        ttk.Combobox(body, textvariable=speed_var, values=(1000, 750, 500, 300, 150), state="readonly", width=12).grid(
+            row=8, column=1, sticky="ew", pady=6)
+        ttk.Label(
             body,
             text=("Cada fotograma se calcula primero y luego se reproduce desde memoria. "
                   "Es una secuencia cuasi-estacionaria: no incorpora inercia térmica temporal entre cuadros."),
-            justify="left", wraplength=360, fg="#666666", font=("Arial", 8),
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 10))
+            style="Muted.TLabel", justify="left", wraplength=410,
+        ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-        buttons = tk.Frame(body)
-        buttons.grid(row=8, column=0, columnspan=2, sticky="e")
+        buttons = ttk.Frame(body)
+        buttons.grid(row=10, column=0, columnspan=2, sticky="e", pady=(16, 0))
 
         def execute():
             selected = mode.get()
@@ -2974,9 +2999,9 @@ class SombraApp:
             dlg.destroy()
             self._start_diurnal_animation(start, end, step, speed)
 
-        tk.Button(buttons, text="Cancelar", command=dlg.destroy).pack(side="right", padx=(6, 0))
-        tk.Button(buttons, text="Ejecutar", command=execute, bg="#4CAF50", fg="white").pack(side="right")
-        dlg.grab_set()
+        ttk.Button(buttons, text="Cancelar", command=dlg.destroy).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Ejecutar", command=execute, style="DialogSuccess.TButton").pack(side="left")
+        dlg.bind("<Return>", lambda _e: execute())
         dlg.wait_visibility()
         dlg.focus_set()
 
@@ -3050,6 +3075,7 @@ class SombraApp:
         frames = []
 
         progress = tk.Toplevel(self.root)
+        prepare_dialog(progress, self.root, modal=True, resizable=False)
         progress.title("Calculando secuencia diurna")
         progress.transient(self.root)
         progress.resizable(False, False)
@@ -3204,6 +3230,7 @@ class SombraApp:
         self.mark_dirty()
 
         ventana = tk.Toplevel(self.root)
+        prepare_dialog(ventana, self.root, modal=False, resizable=True, minsize=(640, 560))
         ventana.title("Análisis comparativo del proyecto")
         ventana.geometry("720x950")
 
@@ -3301,6 +3328,7 @@ class SombraApp:
         self.mark_dirty()
 
         ventana = tk.Toplevel(self.root)
+        prepare_dialog(ventana, self.root, modal=False, resizable=True, minsize=(560, 480))
         ventana.title("Sensibilidad sombra–temperatura")
         ventana.geometry("650x620")
         img = Image.open(resultado_path)
@@ -4282,6 +4310,7 @@ class SombraApp:
             return
 
         dlg = tk.Toplevel(self.root)
+        prepare_dialog(dlg, self.root, modal=False, resizable=True, minsize=(720, 440))
         dlg.title("Cobertura e intensidad de sombra")
         dlg.geometry("920x520")
         dlg.configure(bg=self.palette["background"])
@@ -5004,8 +5033,9 @@ class SombraApp:
 
         if notebook is not None:
             notebook.select(target_frame)
-        # Vincular eventos usando la instancia actual (self)
-        self.canvas_diseno.mpl_connect('button_press_event', lambda event: design.manejar_click(event, self))
+        # El renderer de Edición ya conecta un único handler de click.
+        # No volver a conectarlo aquí: hacerlo dos veces abría dos diálogos
+        # de Árbol y rompía el flujo de dos clicks de Estructura.
     def save_dataset(self):
         """Método para manejar el guardado del dataset"""
         

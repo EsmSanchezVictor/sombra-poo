@@ -2,10 +2,10 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
-from tkinter import simpledialog
 from ui.app_ui import SombraApp
 from add_user_window import AddUserWindow
 from modify_user_window import ModifyUserWindow
+from ui.modal_style import ask_password_pair
 
 class MainApp:
     def __init__(self, root, db_manager):
@@ -559,18 +559,12 @@ class MainApp:
         if user is None:
             self.refresh_user_management()
             return
-        p1 = simpledialog.askstring(
-            "Restablecer contraseña", f"Nueva contraseña para {user['username']}:",
-            show="*", parent=self.root,
+        p1, p2 = ask_password_pair(
+            self.root,
+            f"Restablecer contraseña · {user['username']}",
+            min_length=8,
         )
         if p1 is None:
-            return
-        if len(p1) < 8:
-            messagebox.showerror("Contraseña débil", "La contraseña debe tener al menos 8 caracteres.")
-            return
-        p2 = simpledialog.askstring("Confirmar contraseña", "Repetí la nueva contraseña:", show="*", parent=self.root)
-        if p2 != p1:
-            messagebox.showerror("No coincide", "Las contraseñas no coinciden.")
             return
         self.db_manager.update_password(user_id, p1)
         self.db_manager.touch_session(self.current_session_id)

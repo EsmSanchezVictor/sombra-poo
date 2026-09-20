@@ -15,6 +15,7 @@ from plot_style import CMAP_TEMPERATURA
 from core.excel_scene import save_scene_excel, load_scene_excel, apply_parameters_to_vars
 from ui.scene3d import render_scene_3d
 from ui.solar_indicator import add_solar_indicator_2d
+from ui.modal_style import prepare_dialog, center_dialog, dialog_header
 
 # Constantes físicas
 sigma = 5.67e-8  # Constante de Stefan-Boltzmann
@@ -33,6 +34,7 @@ archivo_actual = None
 # de materiales que fallaba con mayúsculas). Una sola fuente de verdad.
 from modelo_con_excel import (
     Arbol, Estructura, Material, materiales, MATERIALES_LOWER,
+    MATERIAL_CHOICES, material_display_name,
     asignar_materiales_grilla, calcular_campo_termico_superficie,
     angulo_solar as _angulo_solar,
     azimut_solar as _azimut_solar,
@@ -117,7 +119,7 @@ def _combo_especie(parent, entries, fila, prefijo=""):
     """Combobox de especie que autocompleta Altura/Densidad/Radio con
     las propiedades documentadas de la biblioteca (core/species.py).
     El usuario puede sobreescribir los valores después del autocompletado."""
-    ttk.Label(parent, text="Especie:").grid(row=fila, column=0, sticky="w", pady=(6, 2))
+    ttk.Label(parent, text="Especie:").grid(row=fila, column=0, sticky="w", padx=(0, 14), pady=6)
     combo = ttk.Combobox(parent, values=nombres_especies(), state="readonly")
     combo.set("Plátano (Platanus × acerifolia)")
 
@@ -133,16 +135,82 @@ def _combo_especie(parent, entries, fila, prefijo=""):
             entry.insert(0, str(valor))
 
     combo.bind("<<ComboboxSelected>>", aplicar)
-    combo.grid(row=fila, column=1, sticky="ew", pady=(6, 2))
+    combo.grid(row=fila, column=1, sticky="ew", pady=6)
     aplicar()
     return combo
 
 
-def mostrar_dialogo_arbol(x, y,app):
-    dialogo = tk.Toplevel()
-    dialogo.title("Nuevo Árbol")
-    dialogo.resizable(False, False)
-    dialogo.columnconfigure(1, weight=1)
+def _centrar_dialogo(dialogo, parent=None):
+    """Compatibilidad: delegado al centrado visual común de v35.6."""
+    center_dialog(dialogo, parent)
+
+
+def _crear_dialogo_unico(app, attr_name, titulo):
+    """Crea un único Toplevel modal por tipo de editor.
+
+    Además de evitar ventanas duplicadas por dobles eventos de Matplotlib,
+    ``grab_set`` impide que el usuario siga actuando sobre la escena mientras
+    hay un formulario incompleto abierto.
+    """
+    existente = getattr(app, attr_name, None)
+    try:
+        if existente is not None and existente.winfo_exists():
+            existente.deiconify()
+            existente.lift()
+            existente.focus_force()
+            return None, None
+    except tk.TclError:
+        pass
+
+    parent = getattr(app, "root", None)
+    dialogo = tk.Toplevel(parent) if parent is not None else tk.Toplevel()
+    setattr(app, attr_name, dialogo)
+    dialogo.title(titulo)
+    prepare_dialog(dialogo, parent, modal=False, resizable=False, escape_closes=False)
+
+    def cerrar():
+        if getattr(app, attr_name, None) is dialogo:
+            setattr(app, attr_name, None)
+        try:
+            dialogo.grab_release()
+        except tk.TclError:
+            pass
+        try:
+            dialogo.destroy()
+        except tk.TclError:
+            pass
+
+    dialogo.protocol("WM_DELETE_WINDOW", cerrar)
+    dialogo.bind("<Escape>", lambda _e: cerrar())
+    dialogo.after_idle(lambda: _centrar_dialogo(dialogo, parent))
+    try:
+        dialogo.grab_set()
+    except tk.TclError:
+        pass
+    return dialogo, cerrar
+
+
+def _titulo_dialogo(parent, titulo, subtitulo):
+    return dialog_header(parent, titulo, subtitulo, layout="grid")
+
+
+def mostrar_dialogo_arbol(x, y, app):
+    dialogo, cerrar_dialogo = _crear_dialogo_unico(app, "_dialogo_arbol", "Nuevo Árbol")
+    if dialogo is None:
+        return
+
+    cont = ttk.Frame(dialogo, padding=(18, 16, 18, 16))
+    cont.pack(fill="both", expand=True)
+    cont.columnconfigure(0, weight=1)
+    _titulo_dialogo(
+        cont,
+        "Añadir árbol",
+        f"Posición seleccionada: X {x:.2f} · Y {y:.2f}",
+    )
+
+    form = ttk.Frame(cont)
+    form.grid(row=1, column=0, sticky="ew")
+    form.columnconfigure(1, weight=1)
 
     campos = [
         ('Altura (m):', '5'),
@@ -150,44 +218,47 @@ def mostrar_dialogo_arbol(x, y,app):
         ('Radio Copa (m):', '3')
     ]
 
-    # Las entradas se crean primero para que el selector de especie pueda
-    # autocompletar sus valores, pero visualmente quedan después de Especie y
-    # Forma de copa. Esto hace visible y explícita la morfología seleccionada.
     entries = {}
     for i, (label, valor) in enumerate(campos):
         fila = i + 2
-        ttk.Label(dialogo, text=label).grid(
-            row=fila, column=0, sticky="w", padx=(12, 8), pady=4
+        ttk.Label(form, text=label).grid(
+            row=fila, column=0, sticky="w", padx=(0, 14), pady=6
         )
-        entry = ttk.Entry(dialogo, width=28)
+        entry = ttk.Entry(form, width=32)
         entry.insert(0, valor)
-        entry.grid(row=fila, column=1, sticky="ew", padx=(0, 12), pady=4)
+        entry.grid(row=fila, column=1, sticky="ew", pady=6)
         entries[label] = entry
 
-    combo_especie = _combo_especie(dialogo, entries, 0)
-    combo_especie.configure(width=26)
-    combo_especie.grid_configure(padx=(0, 12))
+    combo_especie = _combo_especie(form, entries, 0)
+    combo_especie.configure(width=34)
 
-    ttk.Label(dialogo, text="Forma de copa:").grid(
-        row=1, column=0, sticky="w", padx=(12, 8), pady=4
+    ttk.Label(form, text="Forma de copa:").grid(
+        row=1, column=0, sticky="w", padx=(0, 14), pady=6
     )
     combo_forma = ttk.Combobox(
-        dialogo,
+        form,
         values=CANOPY_SHAPES,
         state="readonly",
-        width=26,
+        width=32,
     )
     combo_forma.set(DEFAULT_CANOPY_SHAPE)
-    combo_forma.grid(row=1, column=1, sticky="ew", padx=(0, 12), pady=4)
+    combo_forma.grid(row=1, column=1, sticky="ew", pady=6)
 
     def guardar():
         try:
+            altura = float(entries['Altura (m):'].get())
+            densidad = float(entries['Densidad Copa (0-1):'].get())
+            radio = float(entries['Radio Copa (m):'].get())
+            if altura <= 0 or radio <= 0:
+                raise ValueError("altura_radio")
+            if not 0.0 <= densidad <= 1.0:
+                raise ValueError("densidad")
             nuevo_arbol = Arbol(
                 x=x,
                 y=y,
-                h=float(entries['Altura (m):'].get()),
-                rho_copa=float(entries['Densidad Copa (0-1):'].get()),
-                radio_copa=float(entries['Radio Copa (m):'].get()),
+                h=altura,
+                rho_copa=densidad,
+                radio_copa=radio,
                 forma_copa=combo_forma.get(),
                 especie=combo_especie.get(),
             )
@@ -196,59 +267,104 @@ def mostrar_dialogo_arbol(x, y,app):
                 app.mark_dirty()
             target_frame = getattr(app, "frame7", app.frame2)
             actualizar_grafico(app.vars, target_frame)
-            dialogo.destroy()
-        except ValueError:
-            messagebox.showerror("Error", "Valores inválidos")
+            cerrar_dialogo()
+        except ValueError as exc:
+            if str(exc) == "densidad":
+                msg = "La densidad de copa debe estar entre 0 y 1."
+            elif str(exc) == "altura_radio":
+                msg = "La altura y el radio de copa deben ser mayores que cero."
+            else:
+                msg = "Revisá los valores numéricos ingresados."
+            messagebox.showerror("Valores inválidos", msg, parent=dialogo)
 
-    ttk.Button(dialogo, text="Guardar", command=guardar).grid(
-        row=5, column=0, columnspan=2, pady=(10, 12)
+    acciones = ttk.Frame(cont)
+    acciones.grid(row=2, column=0, sticky="e", pady=(16, 0))
+    ttk.Button(acciones, text="Cancelar", command=cerrar_dialogo).pack(side="left", padx=(0, 8))
+    ttk.Button(acciones, text="Guardar árbol", command=guardar).pack(side="left")
+
+    dialogo.bind("<Return>", lambda _e: guardar())
+    combo_especie.focus_set()
+
+
+def mostrar_dialogo_estructura(x1, y1, x2, y2, app):
+    dialogo, cerrar_dialogo = _crear_dialogo_unico(app, "_dialogo_estructura", "Nueva Estructura")
+    if dialogo is None:
+        return
+
+    cont = ttk.Frame(dialogo, padding=(18, 16, 18, 16))
+    cont.pack(fill="both", expand=True)
+    cont.columnconfigure(0, weight=1)
+    _titulo_dialogo(
+        cont,
+        "Añadir estructura",
+        f"Inicio: ({x1:.2f}, {y1:.2f}) · Fin: ({x2:.2f}, {y2:.2f})",
     )
-def mostrar_dialogo_estructura(x1, y1, x2, y2,app):
-    dialogo = tk.Toplevel()
-    dialogo.title("Nueva Estructura")
-    
-    campos = [
-        ('Tipo:', ['Pared', 'Galeria', 'Sendero']),
-        ('Altura (m):', '0'),
-        ('Opacidad (0-1):', '1'),
-        ('Material:', list(materiales.keys()))
-    ]
-    
-    entries = {}
-    for i, (label, opciones) in enumerate(campos):
-        ttk.Label(dialogo, text=label).grid(row=i, column=0)
-        if isinstance(opciones, list):
-            entry = ttk.Combobox(dialogo, values=opciones)
-            entry.current(0)
-        else:
-            entry = ttk.Entry(dialogo)
-            entry.insert(0, opciones)
-        entry.grid(row=i, column=1)
-        entries[label] = entry
-    
+
+    form = ttk.Frame(cont)
+    form.grid(row=1, column=0, sticky="ew")
+    form.columnconfigure(1, weight=1)
+
+    ttk.Label(form, text="Tipo:").grid(row=0, column=0, sticky="w", padx=(0, 14), pady=6)
+    tipo = ttk.Combobox(form, values=("Pared", "Galeria", "Sendero"), state="readonly", width=34)
+    tipo.set("Pared")
+    tipo.grid(row=0, column=1, sticky="ew", pady=6)
+
+    ttk.Label(form, text="Altura (m):").grid(row=1, column=0, sticky="w", padx=(0, 14), pady=6)
+    altura = ttk.Entry(form, width=36)
+    altura.insert(0, "0")
+    altura.grid(row=1, column=1, sticky="ew", pady=6)
+
+    ttk.Label(form, text="Opacidad (0-1):").grid(row=2, column=0, sticky="w", padx=(0, 14), pady=6)
+    opacidad = ttk.Entry(form, width=36)
+    opacidad.insert(0, "1")
+    opacidad.grid(row=2, column=1, sticky="ew", pady=6)
+
+    ttk.Label(form, text="Material:").grid(row=3, column=0, sticky="w", padx=(0, 14), pady=6)
+    material = ttk.Combobox(form, values=MATERIAL_CHOICES, state="readonly", width=34)
+    material.set("Hormigón")
+    material.grid(row=3, column=1, sticky="ew", pady=6)
+
     def guardar():
         try:
+            altura_val = float(altura.get())
+            opacidad_val = float(opacidad.get())
+            if altura_val < 0:
+                raise ValueError("altura")
+            if not 0.0 <= opacidad_val <= 1.0:
+                raise ValueError("opacidad")
             nueva_estructura = Estructura(
-                tipo=entries['Tipo:'].get(),
+                tipo=tipo.get(),
                 x1=x1,
                 y1=y1,
                 x2=x2,
                 y2=y2,
-                altura=float(entries['Altura (m):'].get()),
-                opacidad=float(entries['Opacidad (0-1):'].get()),
-                material=entries['Material:'].get()
+                altura=altura_val,
+                opacidad=opacidad_val,
+                material=material.get(),
             )
             app.vars['estructuras'].append(nueva_estructura)
             if hasattr(app, "mark_dirty"):
                 app.mark_dirty()
-            #actualizar_grafico(app.vars,app.frame2)
             target_frame = getattr(app, "frame7", app.frame2)
             actualizar_grafico(app.vars, target_frame)
-            dialogo.destroy()
-        except ValueError:
-            messagebox.showerror("Error", "Valores inválidos")
-            
-    ttk.Button(dialogo, text="Guardar", command=guardar).grid(row=len(campos), columnspan=2)
+            cerrar_dialogo()
+        except ValueError as exc:
+            if str(exc) == "opacidad":
+                msg = "La opacidad debe estar entre 0 y 1."
+            elif str(exc) == "altura":
+                msg = "La altura no puede ser negativa."
+            else:
+                msg = "Revisá los valores numéricos ingresados."
+            messagebox.showerror("Valores inválidos", msg, parent=dialogo)
+
+    acciones = ttk.Frame(cont)
+    acciones.grid(row=2, column=0, sticky="e", pady=(16, 0))
+    ttk.Button(acciones, text="Cancelar", command=cerrar_dialogo).pack(side="left", padx=(0, 8))
+    ttk.Button(acciones, text="Guardar estructura", command=guardar).pack(side="left")
+
+    dialogo.bind("<Return>", lambda _e: guardar())
+    tipo.focus_set()
+
 def seleccionar_elemento(x, y,vars,app):
     for arbol in vars['arboles']:
         if math.dist((x, y), (arbol.x, arbol.y)) < 5:
@@ -261,109 +377,162 @@ def seleccionar_elemento(x, y,vars,app):
             mostrar_dialogo_edicion(estructura=estructura, vars=vars, app=app)
             return
 def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
-    dialogo = tk.Toplevel()
-    dialogo.title("Editar Elemento")
-    
-    if arbol:
-        campos = [
-            ('X:', arbol.x),
-            ('Y:', arbol.y),
-            ('Altura (m):', arbol.h),
-            ('Densidad Copa:', arbol.rho_copa),
-            ('Radio Copa:', arbol.radio_copa)
-        ]
-        obj = arbol
-        es_arbol = True
+    """Editor homogéneo de árboles/estructuras (v35.6)."""
+    if app is not None:
+        dialogo, cerrar_dialogo = _crear_dialogo_unico(app, "_dialogo_edicion", "Editar elemento")
+        if dialogo is None:
+            return
     else:
-        campos = [
-            ('X1:', estructura.x1),
-            ('Y1:', estructura.y1),
-            ('X2:', estructura.x2),
-            ('Y2:', estructura.y2),
-            ('Altura (m):', estructura.altura),
-            ('Opacidad:', estructura.opacidad),
-            ('Material:', estructura.material)
-        ]
-        obj = estructura
-        es_arbol = False
-    
-    entries = {}
-    for i, (label, valor) in enumerate(campos):
-        fila = i + (2 if es_arbol else 0)
-        ttk.Label(dialogo, text=label).grid(row=fila, column=0)
-        if label == 'Material:':
-            entry = ttk.Combobox(dialogo, values=list(materiales.keys()))
-            entry.set(valor)
-        else:
-            entry = ttk.Entry(dialogo)
-            entry.insert(0, str(valor))
-        entry.grid(row=fila, column=1)
-        entries[label] = entry
+        dialogo = tk.Toplevel()
+        dialogo.title("Editar elemento")
+        prepare_dialog(dialogo, None, modal=True, resizable=False)
+        cerrar_dialogo = dialogo.destroy
 
+    es_arbol = arbol is not None
+    obj = arbol if es_arbol else estructura
+    cont = ttk.Frame(dialogo, padding=(18, 16, 18, 16))
+    cont.pack(fill="both", expand=True)
+    cont.columnconfigure(0, weight=1)
+    _titulo_dialogo(
+        cont,
+        "Editar árbol" if es_arbol else "Editar estructura",
+        "Modificá los valores y guardá los cambios. También podés eliminar el elemento de la escena.",
+    )
+
+    form = ttk.Frame(cont)
+    form.grid(row=1, column=0, sticky="ew")
+    form.columnconfigure(1, weight=1)
+    entries = {}
     combo_especie = None
     combo_forma = None
+
     if es_arbol:
-        combo_especie = _combo_especie(dialogo, entries, 0)
-        ttk.Label(dialogo, text="Forma de copa:").grid(row=1, column=0, sticky="w", pady=(4, 2))
-        combo_forma = ttk.Combobox(dialogo, values=CANOPY_SHAPES, state="readonly")
-        combo_forma.set(normalize_canopy_shape(getattr(arbol, "forma_copa", DEFAULT_CANOPY_SHAPE)))
-        combo_forma.grid(row=1, column=1, sticky="ew", pady=(4, 2))
+        campos = [
+            ("X:", arbol.x),
+            ("Y:", arbol.y),
+            ("Altura (m):", arbol.h),
+            ("Densidad Copa (0-1):", arbol.rho_copa),
+            ("Radio Copa (m):", arbol.radio_copa),
+        ]
+        # Crear primero los Entry para que el selector de especie pueda autocompletar.
+        for i, (label, valor) in enumerate(campos, start=2):
+            ttk.Label(form, text=label).grid(row=i, column=0, sticky="w", padx=(0, 14), pady=6)
+            entry = ttk.Entry(form, width=32)
+            entry.insert(0, str(valor))
+            entry.grid(row=i, column=1, sticky="ew", pady=6)
+            entries[label] = entry
+
+        combo_especie = _combo_especie(form, entries, 0)
+        combo_especie.configure(width=34)
         especie_actual = getattr(arbol, "especie", None)
         if especie_actual in nombres_especies():
             combo_especie.set(especie_actual)
-            # restaura los valores reales del árbol (el autocompletado
-            # del combo los pisaría con los típicos de la especie)
-            for label, valor in (("Altura (m):", arbol.h),
-                                 ("Densidad Copa:", arbol.rho_copa),
-                                 ("Radio Copa:", arbol.radio_copa)):
-                entries[label].delete(0, "end")
-                entries[label].insert(0, str(valor))
-    
+
+        ttk.Label(form, text="Forma de copa:").grid(row=1, column=0, sticky="w", padx=(0, 14), pady=6)
+        combo_forma = ttk.Combobox(form, values=CANOPY_SHAPES, state="readonly", width=32)
+        combo_forma.set(normalize_canopy_shape(getattr(arbol, "forma_copa", DEFAULT_CANOPY_SHAPE)))
+        combo_forma.grid(row=1, column=1, sticky="ew", pady=6)
+
+        # Restaurar los valores reales del ejemplar tras el autocompletado de especie.
+        for label, valor in (("Altura (m):", arbol.h),
+                             ("Densidad Copa (0-1):", arbol.rho_copa),
+                             ("Radio Copa (m):", arbol.radio_copa)):
+            entries[label].delete(0, "end")
+            entries[label].insert(0, str(valor))
+    else:
+        campos = [
+            ("X1:", estructura.x1),
+            ("Y1:", estructura.y1),
+            ("X2:", estructura.x2),
+            ("Y2:", estructura.y2),
+            ("Altura (m):", estructura.altura),
+            ("Opacidad (0-1):", estructura.opacidad),
+            ("Material:", estructura.material),
+        ]
+        for i, (label, valor) in enumerate(campos):
+            ttk.Label(form, text=label).grid(row=i, column=0, sticky="w", padx=(0, 14), pady=6)
+            if label == "Material:":
+                entry = ttk.Combobox(form, values=MATERIAL_CHOICES, state="readonly", width=32)
+                entry.set(material_display_name(valor))
+            else:
+                entry = ttk.Entry(form, width=34)
+                entry.insert(0, str(valor))
+            entry.grid(row=i, column=1, sticky="ew", pady=6)
+            entries[label] = entry
+
     def guardar():
         try:
-            if arbol:
-                arbol.x = float(entries['X:'].get())
-                arbol.y = float(entries['Y:'].get())
-                arbol.h = float(entries['Altura (m):'].get())
-                arbol.rho_copa = float(entries['Densidad Copa:'].get())
-                arbol.radio_copa = float(entries['Radio Copa:'].get())
-                if combo_especie is not None:
-                    arbol.especie = combo_especie.get()
-                if combo_forma is not None:
-                    arbol.forma_copa = normalize_canopy_shape(combo_forma.get())
+            if es_arbol:
+                x = float(entries["X:"].get())
+                y = float(entries["Y:"].get())
+                h = float(entries["Altura (m):"].get())
+                rho = float(entries["Densidad Copa (0-1):"].get())
+                radio = float(entries["Radio Copa (m):"].get())
+                if h <= 0 or radio <= 0:
+                    raise ValueError("altura_radio")
+                if not 0.0 <= rho <= 1.0:
+                    raise ValueError("densidad")
+                arbol.x, arbol.y, arbol.h = x, y, h
+                arbol.rho_copa, arbol.radio_copa = rho, radio
+                arbol.especie = combo_especie.get() if combo_especie is not None else getattr(arbol, "especie", "")
+                arbol.forma_copa = normalize_canopy_shape(combo_forma.get()) if combo_forma is not None else DEFAULT_CANOPY_SHAPE
             else:
-                estructura.x1 = float(entries['X1:'].get())
-                estructura.y1 = float(entries['Y1:'].get())
-                estructura.x2 = float(entries['X2:'].get())
-                estructura.y2 = float(entries['Y2:'].get())
-                estructura.altura = float(entries['Altura (m):'].get())
-                estructura.opacidad = float(entries['Opacidad:'].get())
-                estructura.material = entries['Material:'].get()
-            
-            #actualizar_grafico(vars, app.frame2)
+                x1 = float(entries["X1:"].get())
+                y1 = float(entries["Y1:"].get())
+                x2 = float(entries["X2:"].get())
+                y2 = float(entries["Y2:"].get())
+                altura = float(entries["Altura (m):"].get())
+                opacidad = float(entries["Opacidad (0-1):"].get())
+                if altura < 0:
+                    raise ValueError("altura")
+                if not 0.0 <= opacidad <= 1.0:
+                    raise ValueError("opacidad")
+                estructura.x1, estructura.y1, estructura.x2, estructura.y2 = x1, y1, x2, y2
+                estructura.altura, estructura.opacidad = altura, opacidad
+                estructura.material = entries["Material:"].get()
+
+            if app is not None:
+                target_frame = getattr(app, "frame7", app.frame2)
+                actualizar_grafico(vars, target_frame)
+                if hasattr(app, "mark_dirty"):
+                    app.mark_dirty()
+            cerrar_dialogo()
+        except ValueError as exc:
+            code = str(exc)
+            mensajes = {
+                "altura_radio": "La altura y el radio de copa deben ser mayores que cero.",
+                "densidad": "La densidad de copa debe estar entre 0 y 1.",
+                "altura": "La altura no puede ser negativa.",
+                "opacidad": "La opacidad debe estar entre 0 y 1.",
+            }
+            messagebox.showerror("Valores inválidos", mensajes.get(code, "Revisá los valores numéricos ingresados."), parent=dialogo)
+
+    def eliminar():
+        if not messagebox.askyesno("Eliminar elemento", "¿Eliminar este elemento de la escena?", parent=dialogo):
+            return
+        if es_arbol:
+            vars["arboles"].remove(obj)
+        else:
+            vars["estructuras"].remove(obj)
+        if app is not None:
             target_frame = getattr(app, "frame7", app.frame2)
             actualizar_grafico(vars, target_frame)
             if hasattr(app, "mark_dirty"):
                 app.mark_dirty()
-            dialogo.destroy()
-        except ValueError:
-            messagebox.showerror("Error", "Valores inválidos")
-    
-    def eliminar():
-        if messagebox.askyesno("Confirmar", "¿Eliminar este elemento?"):
-            if arbol:
-                vars['arboles'].remove(obj)
-            else:
-                vars['estructuras'].remove(obj)
-            #actualizar_grafico(vars, app.frame2)
-            target_frame = getattr(app, "frame7", app.frame2)
-            actualizar_grafico(vars, target_frame)
-            if hasattr(app, "mark_dirty"):
-                app.mark_dirty()            
-            dialogo.destroy()
-    
-    ttk.Button(dialogo, text="Guardar", command=guardar).grid(row=len(campos)+1, column=0)
-    ttk.Button(dialogo, text="Eliminar", command=eliminar).grid(row=len(campos)+1, column=1)
+        cerrar_dialogo()
+
+    acciones = ttk.Frame(cont)
+    acciones.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+    ttk.Button(acciones, text="Eliminar", command=eliminar).pack(side="left")
+    ttk.Button(acciones, text="Cancelar", command=cerrar_dialogo).pack(side="right", padx=(8, 0))
+    ttk.Button(acciones, text="Guardar cambios", command=guardar, style="DialogPrimary.TButton").pack(side="right")
+
+    dialogo.bind("<Return>", lambda _e: guardar())
+    if combo_especie is not None:
+        combo_especie.focus_set()
+    else:
+        next(iter(entries.values())).focus_set()
+
 def actualizar_grafico(vars, frame):
     # Cerrar figura anterior ANTES de destruir el widget Tk. Esto rompe las
     # referencias de artistas/canvas y evita crecimiento de RAM al editar.

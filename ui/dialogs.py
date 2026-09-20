@@ -17,9 +17,10 @@ from datetime import datetime
 
 import numpy as np
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, messagebox
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from ui.modal_style import prepare_dialog, dialog_container, dialog_header, ask_text
 
 from core import scenario as scenario_tools
 from core import thermal_comfort
@@ -42,84 +43,79 @@ from shadow_temp import Temperatura
 
 def ask_project_name(root: tk.Tk) -> str | None:
     """Solicita el nombre del proyecto."""
-    return simpledialog.askstring("Nuevo proyecto", "Ingrese el nombre del proyecto:", parent=root)
+    return ask_text(root, "Nuevo proyecto", "Ingresá el nombre del proyecto:", accept_text="Crear proyecto")
 
 
 def ask_project_location(root: tk.Tk, locations_data: dict | None) -> dict | None:
-    """Solicita la ubicación (país/ciudad) usando combobox con búsqueda."""
+    """Solicita la ubicación con el mismo formulario visual que Árbol/Estructura."""
     if not locations_data:
         return None
 
     result: dict | None = None
     dialog = tk.Toplevel(root)
     dialog.title("Ubicación del proyecto")
-    dialog.transient(root)
-    dialog.grab_set()
-
-    dialog.columnconfigure(1, weight=1)
-
-    tk.Label(dialog, text="País").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 4))
-    country_var = tk.StringVar(value=locations_data["countries"][0] if locations_data["countries"] else "")
-    country_combo = ttk.Combobox(
-        dialog,
-        textvariable=country_var,
-        values=locations_data["countries"],
-        state="readonly",
-        width=28,
+    prepare_dialog(dialog, root, modal=True, resizable=False)
+    cont = dialog_container(dialog)
+    dialog_header(
+        cont,
+        "Ubicación del proyecto",
+        "Seleccioná país y ciudad. Podés filtrar la lista escribiendo parte del nombre.",
     )
-    country_combo.grid(row=0, column=1, sticky="ew", padx=10, pady=(10, 4))
 
-    tk.Label(dialog, text="Ciudad").grid(row=1, column=0, sticky="w", padx=10, pady=4)
+    form = ttk.Frame(cont)
+    form.pack(fill="x")
+    form.columnconfigure(1, weight=1)
+
+    country_var = tk.StringVar(value=locations_data["countries"][0] if locations_data["countries"] else "")
     city_var = tk.StringVar()
-    city_combo = ttk.Combobox(dialog, textvariable=city_var, values=[], width=28)
-    city_combo.grid(row=1, column=1, sticky="ew", padx=10, pady=4)
-
-    tk.Label(dialog, text="Buscar").grid(row=2, column=0, sticky="w", padx=10, pady=4)
     search_var = tk.StringVar()
-    search_entry = tk.Entry(dialog, textvariable=search_var)
-    search_entry.grid(row=2, column=1, sticky="ew", padx=10, pady=4)
+
+    ttk.Label(form, text="País:").grid(row=0, column=0, sticky="w", padx=(0, 14), pady=6)
+    country_combo = ttk.Combobox(
+        form, textvariable=country_var, values=locations_data["countries"], state="readonly", width=32,
+    )
+    country_combo.grid(row=0, column=1, sticky="ew", pady=6)
+
+    ttk.Label(form, text="Ciudad:").grid(row=1, column=0, sticky="w", padx=(0, 14), pady=6)
+    city_combo = ttk.Combobox(form, textvariable=city_var, values=[], width=32)
+    city_combo.grid(row=1, column=1, sticky="ew", pady=6)
+
+    ttk.Label(form, text="Buscar:").grid(row=2, column=0, sticky="w", padx=(0, 14), pady=6)
+    search_entry = ttk.Entry(form, textvariable=search_var, width=34)
+    search_entry.grid(row=2, column=1, sticky="ew", pady=6)
 
     def update_cities(*_args):
-        country = country_var.get()
-        cities = locations_data["cities"].get(country, [])
+        cities = locations_data["cities"].get(country_var.get(), [])
         city_combo["values"] = cities
         if cities:
             city_var.set(cities[0])
 
     def filter_cities(*_args):
-        country = country_var.get()
         query = search_var.get().lower().strip()
-        cities = locations_data["cities"].get(country, [])
-        if query:
-            filtered = [city for city in cities if query in city.lower()]
-        else:
-            filtered = cities
+        cities = locations_data["cities"].get(country_var.get(), [])
+        filtered = [city for city in cities if query in city.lower()] if query else cities
         city_combo["values"] = filtered
         if filtered:
             city_var.set(filtered[0])
 
     def on_accept():
         nonlocal result
-        city_label = city_var.get().strip()
-        location = locations_data["lookup"].get(city_label)
+        location = locations_data["lookup"].get(city_var.get().strip())
         if location:
             result = location
             dialog.destroy()
 
-    def on_cancel():
-        dialog.destroy()
-
     country_combo.bind("<<ComboboxSelected>>", lambda _e: update_cities())
     city_combo.bind("<<ComboboxSelected>>", lambda _e: search_var.set(""))
     search_entry.bind("<KeyRelease>", lambda _e: filter_cities())
-
     update_cities()
 
-    button_frame = tk.Frame(dialog)
-    button_frame.grid(row=3, column=0, columnspan=2, pady=(10, 12))
-    tk.Button(button_frame, text="Aceptar", command=on_accept, width=12).pack(side=tk.LEFT, padx=6)
-    tk.Button(button_frame, text="Cancelar", command=on_cancel, width=12).pack(side=tk.LEFT, padx=6)
-
+    buttons = ttk.Frame(cont)
+    buttons.pack(fill="x", pady=(16, 0))
+    ttk.Button(buttons, text="Cancelar", command=dialog.destroy).pack(side="right", padx=(8, 0))
+    ttk.Button(buttons, text="Aceptar", command=on_accept, style="DialogPrimary.TButton").pack(side="right")
+    dialog.bind("<Return>", lambda _e: on_accept())
+    country_combo.focus_set()
     dialog.wait_window()
     return result
 
@@ -136,6 +132,7 @@ class HerramientasDialogs:
         viento), ajusta k_factor por mínimos cuadrados y lo persiste en
         settings.json para que todo el modelo lo use."""
         dlg = tk.Toplevel(self.app.root)
+        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(560, 420))
         dlg.title("Asistente de calibración de k_factor")
         dlg.geometry("640x520")
         dlg.transient(self.app.root)
@@ -350,6 +347,7 @@ class HerramientasDialogs:
         # La ventana se crea ANTES del análisis espacial. Así Confort responde
         # de inmediato aunque haya un mapa de alta resolución.
         dlg = tk.Toplevel(self.app.root)
+        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(600, 420))
         dlg.title("Confort térmico")
         dlg.geometry("680x500")
         dlg.transient(self.app.root)
@@ -432,6 +430,7 @@ class HerramientasDialogs:
         grados-hora de estrés."""
         temp_ambient, _hora, fecha, lat, lon = self.app._leer_parametros_tmrt()
         dlg = tk.Toplevel(self.app.root)
+        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(640, 520))
         dlg.title("Escenario A/B horario (sombra vs. propuesta)")
         dlg.geometry("720x640")
         dlg.transient(self.app.root)
@@ -592,6 +591,7 @@ class HerramientasDialogs:
         como diagnóstico interno y no como validación independiente.
         """
         dlg = tk.Toplevel(self.app.root)
+        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(820, 650))
         dlg.title("Calibración y validación científica")
         dlg.geometry("940x760")
         dlg.minsize(820, 650)
@@ -934,6 +934,7 @@ class HerramientasDialogs:
             self.app.mark_dirty()
 
         dlg = tk.Toplevel(self.app.root)
+        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(720, 560))
         dlg.title("Auditoría científica y preparación para validación")
         dlg.geometry("820x640")
         dlg.transient(self.app.root)
@@ -990,6 +991,7 @@ class HerramientasDialogs:
         """Biblioteca de especies con propiedades térmicas (transmitancia
         de copa, densidad, caducidad) y su referencia bibliográfica."""
         dlg = tk.Toplevel(self.app.root)
+        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(500, 420))
         dlg.title("Biblioteca de especies")
         dlg.geometry("560x520")
         dlg.transient(self.app.root)
@@ -1030,6 +1032,7 @@ class HerramientasDialogs:
         persiste en data/species_db.json; las vistas 3D y el editor de
         diseño usan la base resultante al instante."""
         dlg = tk.Toplevel(self.app.root)
+        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(680, 500))
         dlg.title("Editar base de especies")
         dlg.geometry("740x560")
         dlg.transient(self.app.root)
@@ -1207,6 +1210,7 @@ class HerramientasDialogs:
         ranking = scenario_tools.ranking_arboles(unicos, calc, fecha, hora)
 
         dlg = tk.Toplevel(self.app.root)
+        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(620, 460))
         dlg.title("Efectividad de los árboles de la escena")
         dlg.geometry("700x520")
         dlg.transient(self.app.root)

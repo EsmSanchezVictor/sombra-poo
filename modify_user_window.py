@@ -1,6 +1,7 @@
 import re
 import tkinter as tk
 from tkinter import ttk, messagebox
+from ui.modal_style import prepare_dialog
 
 
 class ModifyUserWindow:
@@ -15,19 +16,20 @@ class ModifyUserWindow:
             return
 
         self.window = tk.Toplevel(root)
+        prepare_dialog(self.window, root, modal=True, resizable=False, minsize=(520, 610))
         self.window.title("Editar usuario")
-        self.window.configure(bg="#f3f4f6")
+        self.window.configure(bg="#ffffff")
         self.window.transient(root)
         self.window.grab_set()
         self.window.resizable(False, False)
 
-        outer = tk.Frame(self.window, bg="#f3f4f6", padx=18, pady=18)
+        outer = tk.Frame(self.window, bg="#ffffff", padx=18, pady=18)
         outer.grid(row=0, column=0, sticky="nsew")
         card = tk.Frame(outer, bg="white", bd=1, relief="solid", padx=20, pady=18)
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_columnconfigure(1, weight=1)
 
-        tk.Label(card, text="Editar usuario", font=("Helvetica", 15, "bold"), bg="white", fg="#1f2937").grid(
+        tk.Label(card, text="Editar usuario", font=("Segoe UI", 13, "bold"), bg="white", fg="#1f2937").grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 14)
         )
 
@@ -72,10 +74,10 @@ class ModifyUserWindow:
         buttons = tk.Frame(card, bg="white")
         buttons.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(16, 0))
         buttons.grid_columnconfigure((0, 1), weight=1, uniform="b")
-        tk.Button(buttons, text="Cancelar", command=self.window.destroy, bg="#e5e7eb", fg="#111827",
-                  relief="flat", padx=12, pady=8, cursor="hand2").grid(row=0, column=0, padx=(0, 6), sticky="ew")
-        tk.Button(buttons, text="Guardar cambios", command=self.save_changes, bg="#2563eb", fg="white",
-                  relief="flat", padx=12, pady=8, cursor="hand2").grid(row=0, column=1, padx=(6, 0), sticky="ew")
+        ttk.Button(buttons, text="Cancelar", command=self.window.destroy).grid(
+            row=0, column=0, padx=(0, 6), sticky="ew")
+        ttk.Button(buttons, text="Guardar cambios", command=self.save_changes, style="DialogPrimary.TButton").grid(
+            row=0, column=1, padx=(6, 0), sticky="ew")
 
         self.window.update_idletasks()
         w = max(520, self.window.winfo_reqwidth())

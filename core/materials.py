@@ -113,7 +113,6 @@ _ADVANCED = [
     SurfaceMaterial("Fibra de vidrio", 0.30, 0.90, 0.30, 0.40, 0.35, 0.06, 1.5e6),
     SurfaceMaterial("Lámina de polietileno (HDPE)", 0.20, 0.92, 0.50, 0.30, 0.45, 0.03, 1.8e6),
     SurfaceMaterial("Concreto Translúcido", 0.45, 0.90, 0.10, 0.45, 1.20, 0.15, 2.0e6),
-    SurfaceMaterial("concreto translucido", 0.45, 0.90, 0.10, 0.45, 1.20, 0.15, 2.0e6),
     SurfaceMaterial("Fotocerámica (Vidrio Fotovoltaico)", 0.75, 0.90, 0.05, 0.20, 1.00, 0.05, 2.0e6),
 ]
 

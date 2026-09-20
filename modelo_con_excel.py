@@ -26,6 +26,7 @@ from core.surface_energy import (
 )
 from ui.scene3d import render_scene_3d
 from ui.solar_indicator import add_solar_indicator_2d
+from ui.modal_style import prepare_dialog, dialog_header
 from core.vegetation import (
     VegetationConfig, phenology_factor, ground_latent_heat_flux_wm2,
     species_canopy_latent_flux_wm2,
@@ -114,11 +115,72 @@ materiales = {
     "Espuma de Poliuretano": Material(alpha=0.3, epsilon=0.9),
     "Concreto Autocurativo": Material(alpha=0.6, epsilon=0.9),
     "Ladrillos de PET reciclado": Material(alpha=0.95, epsilon=0.925),
-    "concreto translucido": Material(alpha=0.5, epsilon=0.9),
     "asfalto": Material(alpha=0.95, epsilon=0.95),
     "cemento": Material(alpha=0.6, epsilon=0.9),
     "suelo": Material(alpha=0.4, epsilon=0.9),
 }
+
+# v35.5: catálogo visible depurado para la interfaz. Se conserva el diccionario
+# ``materiales`` como fuente del modelo físico, pero el usuario ve nombres
+# consistentes y sin duplicados. Los dos policarbonatos se mantienen porque
+# representan variantes constructivas distintas.
+MATERIAL_CHOICES = (
+    "Acero inoxidable",
+    "Aluminio",
+    "Madera tratada",
+    "Policarbonato",
+    "Policarbonato (paneles)",
+    "Hormigón",
+    "PVC (estructuras ligeras)",
+    "Fibra de vidrio",
+    "Lámina de polietileno (HDPE)",
+    "Vidrio templado",
+    "Ladrillo cerámico",
+    "Corrugado de hierro",
+    "ETFE",
+    "CLT (Madera laminada natural)",
+    "Aerogel",
+    "Tierra apisonada",
+    "Paca de paja",
+    "Corcho",
+    "Fibra de carbono",
+    "Chapa de zinc",
+    "Terracota",
+    "Micelio (hongos)",
+    "Plástico reciclado",
+    "Lana de vidrio",
+    "Caucho",
+    "Malla de acero",
+    "Geotextil",
+    "Tablero de óxido de magnesio",
+    "Ferrocemento",
+    "Hempcrete",
+    "Fotocerámica (vidrio fotovoltaico)",
+    "Concreto Translúcido",
+    "Materiales de cambio de fase (PCMs)",
+    "Acero Corten",
+    "Composite madera-plástico",
+    "Pinturas intumescentes",
+    "Cobre (superficies antibacterianas)",
+    "Espuma de poliuretano",
+    "Concreto autocurativo",
+    "Ladrillos de PET reciclado",
+    "Asfalto",
+    "Cemento",
+    "Suelo",
+)
+
+def _norm_material_display(text):
+    import unicodedata
+    raw = unicodedata.normalize("NFKD", str(text or ""))
+    return "".join(ch for ch in raw if not unicodedata.combining(ch)).strip().casefold()
+
+_MATERIAL_DISPLAY_BY_NORM = {_norm_material_display(name): name for name in MATERIAL_CHOICES}
+
+def material_display_name(name):
+    """Devuelve el nombre canónico visible, tolerando archivos históricos."""
+    key = _norm_material_display(name)
+    return _MATERIAL_DISPLAY_BY_NORM.get(key, str(name or MATERIAL_CHOICES[0]))
 
 # FIX (bug #1): índice normalizado en minúsculas. La mayoría de las claves de
 # arriba tienen mayúsculas ("Hormigón", "Vidrio templado"...), pero el
@@ -126,6 +188,8 @@ materiales = {
 # índice, `estructura.material.lower() in materiales` casi nunca matcheaba y
 # todo caía en "suelo" en silencio.
 MATERIALES_LOWER = {k.lower(): v for k, v in materiales.items()}
+# Compatibilidad con proyectos/Excel previos que guardaron el duplicado sin tilde.
+MATERIALES_LOWER["concreto translucido"] = materiales["Concreto Translúcido"]
 
 
 def declinacion_solar(dia_del_año):
@@ -1197,71 +1261,107 @@ def generar_grafico(vars, frame):
 
 
 def editar_elemento(vars, arbol=None, estructura=None):
-    dialog = tk.Toplevel()
-    dialog.title("Editar Elemento")
-    dialog.geometry("300x400")
+    """Editor del Modelo con el mismo lenguaje visual que Edición (v35.6)."""
+    app = vars.get("_app_instance") if isinstance(vars, dict) else None
+    parent = getattr(app, "root", None)
+    dialog = tk.Toplevel(parent) if parent is not None else tk.Toplevel()
+    dialog.title("Editar elemento")
+    prepare_dialog(dialog, parent, modal=True, resizable=False)
 
+    cont = ttk.Frame(dialog, padding=(18, 16, 18, 16))
+    cont.pack(fill="both", expand=True)
+    cont.columnconfigure(0, weight=1)
+    es_arbol = arbol is not None
+    dialog_header(
+        cont,
+        "Editar árbol" if es_arbol else "Editar estructura",
+        "Ajustá los datos del elemento y guardá para regenerar el Modelo.",
+        layout="grid",
+    )
+    form = ttk.Frame(cont)
+    form.grid(row=1, column=0, sticky="ew")
+    form.columnconfigure(1, weight=1)
     entries = {}
-    if arbol:
+
+    if es_arbol:
         fields = [
-            ('X', arbol.x),
-            ('Y', arbol.y),
-            ('Altura (m)', arbol.h),
-            ('Densidad Copa', arbol.rho_copa),
-            ('Radio Copa', arbol.radio_copa)
+            ("X", arbol.x), ("Y", arbol.y), ("Altura (m)", arbol.h),
+            ("Densidad Copa", arbol.rho_copa), ("Radio Copa", arbol.radio_copa),
         ]
-    elif estructura:
+    else:
         fields = [
-            ('X1', estructura.x1),
-            ('Y1', estructura.y1),
-            ('X2', estructura.x2),
-            ('Y2', estructura.y2),
-            ('Altura (m)', estructura.altura),
-            ('Opacidad', estructura.opacidad),
-            ('Material', estructura.material)
+            ("X1", estructura.x1), ("Y1", estructura.y1),
+            ("X2", estructura.x2), ("Y2", estructura.y2),
+            ("Altura (m)", estructura.altura), ("Opacidad", estructura.opacidad),
+            ("Material", estructura.material),
         ]
 
     for i, (label, value) in enumerate(fields):
-        ttk.Label(dialog, text=label).grid(row=i, column=0, padx=5, pady=2)
-        entry = ttk.Entry(dialog)
-        entry.insert(0, str(value))
-        entry.grid(row=i, column=1, padx=5, pady=2)
+        ttk.Label(form, text=f"{label}:").grid(row=i, column=0, sticky="w", padx=(0, 14), pady=6)
+        if label == "Material":
+            entry = ttk.Combobox(form, values=MATERIAL_CHOICES, state="readonly", width=32)
+            entry.set(material_display_name(value))
+        else:
+            entry = ttk.Entry(form, width=34)
+            entry.insert(0, str(value))
+        entry.grid(row=i, column=1, sticky="ew", pady=6)
         entries[label] = entry
 
     combo_forma = None
-    if arbol:
+    if es_arbol:
         row_forma = len(fields)
-        ttk.Label(dialog, text="Forma de copa").grid(row=row_forma, column=0, padx=5, pady=2)
-        combo_forma = ttk.Combobox(dialog, values=CANOPY_SHAPES, state="readonly")
+        ttk.Label(form, text="Forma de copa:").grid(row=row_forma, column=0, sticky="w", padx=(0, 14), pady=6)
+        combo_forma = ttk.Combobox(form, values=CANOPY_SHAPES, state="readonly", width=32)
         combo_forma.set(normalize_canopy_shape(getattr(arbol, "forma_copa", DEFAULT_CANOPY_SHAPE)))
-        combo_forma.grid(row=row_forma, column=1, padx=5, pady=2)
+        combo_forma.grid(row=row_forma, column=1, sticky="ew", pady=6)
 
     def guardar_cambios():
         try:
-            if arbol:
-                arbol.x = float(entries['X'].get())
-                arbol.y = float(entries['Y'].get())
-                arbol.h = float(entries['Altura (m)'].get())
-                arbol.rho_copa = float(entries['Densidad Copa'].get())
-                arbol.radio_copa = float(entries['Radio Copa'].get())
+            if es_arbol:
+                x = float(entries["X"].get()); y = float(entries["Y"].get())
+                h = float(entries["Altura (m)"].get())
+                rho = float(entries["Densidad Copa"].get())
+                radio = float(entries["Radio Copa"].get())
+                if h <= 0 or radio <= 0:
+                    raise ValueError("altura_radio")
+                if not 0 <= rho <= 1:
+                    raise ValueError("densidad")
+                arbol.x, arbol.y, arbol.h = x, y, h
+                arbol.rho_copa, arbol.radio_copa = rho, radio
                 if combo_forma is not None:
                     arbol.forma_copa = normalize_canopy_shape(combo_forma.get())
-            elif estructura:
-                estructura.x1 = float(entries['X1'].get())
-                estructura.y1 = float(entries['Y1'].get())
-                estructura.x2 = float(entries['X2'].get())
-                estructura.y2 = float(entries['Y2'].get())
-                estructura.altura = float(entries['Altura (m)'].get())
-                estructura.opacidad = float(entries['Opacidad'].get())
-                estructura.material = entries['Material'].get()
+            else:
+                x1 = float(entries["X1"].get()); y1 = float(entries["Y1"].get())
+                x2 = float(entries["X2"].get()); y2 = float(entries["Y2"].get())
+                altura = float(entries["Altura (m)"].get())
+                opacidad = float(entries["Opacidad"].get())
+                if altura < 0:
+                    raise ValueError("altura")
+                if not 0 <= opacidad <= 1:
+                    raise ValueError("opacidad")
+                estructura.x1, estructura.y1, estructura.x2, estructura.y2 = x1, y1, x2, y2
+                estructura.altura, estructura.opacidad = altura, opacidad
+                estructura.material = entries["Material"].get()
             dialog.destroy()
-            vars['_update_required'] = True
-            generar_grafico(vars, vars['graph_frame'])
-        except ValueError:
-            messagebox.showerror("Error", "Valores inválidos")
+            vars["_update_required"] = True
+            generar_grafico(vars, vars["graph_frame"])
+            if app is not None and hasattr(app, "mark_dirty"):
+                app.mark_dirty()
+        except ValueError as exc:
+            msg = {
+                "altura_radio": "La altura y el radio de copa deben ser mayores que cero.",
+                "densidad": "La densidad de copa debe estar entre 0 y 1.",
+                "altura": "La altura no puede ser negativa.",
+                "opacidad": "La opacidad debe estar entre 0 y 1.",
+            }.get(str(exc), "Revisá los valores numéricos ingresados.")
+            messagebox.showerror("Valores inválidos", msg, parent=dialog)
 
-    ttk.Button(dialog, text="Guardar", command=guardar_cambios).grid(
-        row=len(fields) + (2 if arbol else 1), columnspan=2, pady=10)
+    actions = ttk.Frame(cont)
+    actions.grid(row=2, column=0, sticky="e", pady=(16, 0))
+    ttk.Button(actions, text="Cancelar", command=dialog.destroy).pack(side="left", padx=(0, 8))
+    ttk.Button(actions, text="Guardar cambios", command=guardar_cambios, style="DialogPrimary.TButton").pack(side="left")
+    dialog.bind("<Return>", lambda _e: guardar_cambios())
+    next(iter(entries.values())).focus_set()
 
 
 def generar_3d(vars, frame=None):

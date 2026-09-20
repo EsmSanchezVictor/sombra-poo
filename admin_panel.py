@@ -1,14 +1,21 @@
 import tkinter as tk
+from tkinter import ttk
 from add_user_window import AddUserWindow
+from ui.modal_style import prepare_dialog
 
 class AdminPanel:
     def __init__(self, root, db_manager):
         self.root = root
         self.db_manager = db_manager
         self.panel = tk.Toplevel(root)
+        prepare_dialog(self.panel, root, modal=False, resizable=False, minsize=(360, 200))
         self.panel.title("Panel de Administración")
         self.center_window(320, 180)
-        tk.Button(self.panel, text="Agregar Usuario", command=self.add_user).pack(pady=5)
+        body = ttk.Frame(self.panel, padding=(18, 16, 18, 16))
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Administración", style="Heading.TLabel").pack(anchor="w")
+        ttk.Label(body, text="Gestión de usuarios del sistema.", style="Muted.TLabel").pack(anchor="w", pady=(2, 14))
+        ttk.Button(body, text="Agregar usuario", command=self.add_user, style="DialogPrimary.TButton").pack(anchor="e")
         # Puedes agregar más botones para modificar/eliminar usuarios
     def center_window(self, width, height):
         self.panel.update_idletasks()

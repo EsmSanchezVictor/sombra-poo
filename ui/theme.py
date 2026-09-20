@@ -61,6 +61,23 @@ def aplicar_tema(root: tk.Misc, paleta: dict | None = None) -> ttk.Style:
     )
     style.map("Success.TButton", background=[("active", p["exito_hover"])])
 
+    style.configure("Dialog.TFrame", background=p["panel"])
+    style.configure("DialogFooter.TFrame", background=p["panel"])
+    style.configure(
+        "DialogSection.TLabel", background=p["panel"], foreground=p["texto"],
+        font=("Segoe UI", 10, "bold"),
+    )
+    style.configure(
+        "DialogPrimary.TButton", background=p["primario"], foreground="white",
+        padding=(12, 7), font=("Segoe UI", 9, "bold"),
+    )
+    style.map("DialogPrimary.TButton", background=[("active", p["primario_hover"])])
+    style.configure(
+        "DialogSuccess.TButton", background=p["exito"], foreground="white",
+        padding=(12, 7), font=("Segoe UI", 9, "bold"),
+    )
+    style.map("DialogSuccess.TButton", background=[("active", p["exito_hover"])])
+
     style.configure("TCombobox", padding=4)
     style.configure("TLabel", background=p["panel"], foreground=p["texto"], font=("Segoe UI", 9))
     style.configure(

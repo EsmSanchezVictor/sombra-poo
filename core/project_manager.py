@@ -7,10 +7,11 @@ import os
 import shutil
 import zipfile
 from datetime import datetime
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox
 
 from core.project import Project
 from ui import dialogs
+from ui.modal_style import ask_text
 
 
 class ProjectManager:
@@ -187,7 +188,7 @@ class ProjectManager:
         if not self.current_project:
             messagebox.showerror("Duplicar proyecto", "No hay un proyecto abierto para duplicar.")
             return False
-        new_name = simpledialog.askstring("Duplicar proyecto", "Nombre del proyecto duplicado:", parent=self.app.root)
+        new_name = ask_text(self.app.root, "Duplicar proyecto", "Ingresá el nombre de la copia:", accept_text="Duplicar")
         if not new_name:
             return False
         new_name = new_name.strip()
