@@ -11,7 +11,8 @@ from tkinter import messagebox
 import numpy as np
 
 
-import diseño as design
+import diseno as design
+from core.crown_shapes import DEFAULT_CANOPY_SHAPE, normalize_canopy_shape
 from core.scene_objects import ArbolEscena, EstructuraEscena
 from core.model_registry import methodology_manifest
 
@@ -348,7 +349,7 @@ class AppState:
                 "altura": float(getattr(obj, "altura", 0.0)),
                 "radio_copa": float(getattr(obj, "radio_copa", 0.0)),
             }
-            for attr in ("rho_copa", "opacidad", "id", "nombre"):
+            for attr in ("rho_copa", "especie", "forma_copa", "opacidad", "id", "nombre"):
                 if hasattr(obj, attr):
                     payload[attr] = self.make_json_safe(getattr(obj, attr))
             return payload
@@ -378,6 +379,9 @@ class AppState:
                 y=float(data.get("y", 0.0)),
                 altura=float(data.get("altura", 0.0)),
                 radio_copa=float(data.get("radio_copa", 0.0)),
+                rho_copa=float(data.get("rho_copa", 0.0)),
+                especie=str(data.get("especie", "") or ""),
+                forma_copa=normalize_canopy_shape(data.get("forma_copa", DEFAULT_CANOPY_SHAPE)),
             )
             if "rho_copa" in data:
                 setattr(obj, "rho_copa", float(data.get("rho_copa", 0.0)))
@@ -414,9 +418,10 @@ class AppState:
             y=float(getattr(arbol, "y", 0.0)),
             altura=float(getattr(arbol, "h", getattr(arbol, "altura", 0.0))),
             radio_copa=float(getattr(arbol, "radio_copa", 0.0)),
+            rho_copa=float(getattr(arbol, "rho_copa", 0.0)),
+            especie=str(getattr(arbol, "especie", "") or ""),
+            forma_copa=normalize_canopy_shape(getattr(arbol, "forma_copa", DEFAULT_CANOPY_SHAPE)),
         )
-        if hasattr(arbol, "rho_copa"):
-            setattr(obj, "rho_copa", float(getattr(arbol, "rho_copa", 0.0)))
         return obj
 
     def _estructura_to_scene_obj(self, estructura) -> EstructuraEscena:
@@ -443,6 +448,8 @@ class AppState:
             float(getattr(obj, "altura", 0.0)),
             float(getattr(obj, "rho_copa", 0.0)),
             float(getattr(obj, "radio_copa", 0.0)),
+            forma_copa=normalize_canopy_shape(getattr(obj, "forma_copa", DEFAULT_CANOPY_SHAPE)),
+            especie=str(getattr(obj, "especie", "") or ""),
         )
 
     def _scene_obj_to_estructura(self, obj: EstructuraEscena):
@@ -466,6 +473,8 @@ class AppState:
             "radio_copa": getattr(arbol, "radio_copa", 0),
             "altura": getattr(arbol, "h", getattr(arbol, "altura", 0)),
             "rho_copa": getattr(arbol, "rho_copa", 0),
+            "especie": getattr(arbol, "especie", ""),
+            "forma_copa": normalize_canopy_shape(getattr(arbol, "forma_copa", DEFAULT_CANOPY_SHAPE)),
         }
 
     def _serialize_estructura(self, estructura) -> dict:
@@ -484,7 +493,7 @@ class AppState:
 
     def _deserialize_arboles(self, items: list) -> list:
         return [
-            design.Arbol(float(i.get("x", 0)), float(i.get("y", 0)), float(i.get("altura", 0)), float(i.get("rho_copa", 0)), float(i.get("radio_copa", 0)))
+            design.Arbol(float(i.get("x", 0)), float(i.get("y", 0)), float(i.get("altura", 0)), float(i.get("rho_copa", 0)), float(i.get("radio_copa", 0)), forma_copa=normalize_canopy_shape(i.get("forma_copa", DEFAULT_CANOPY_SHAPE)), especie=str(i.get("especie", "") or ""))
             if isinstance(i, dict) else i
             for i in items
         ]

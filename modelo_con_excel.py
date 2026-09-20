@@ -10,6 +10,8 @@ import pandas as pd
 import math
 from core.scene_objects import adaptar_objetos_escena
 from core.species import color_copa, propiedades_especie
+from core.crown_shapes import CANOPY_SHAPES, DEFAULT_CANOPY_SHAPE, normalize_canopy_shape
+from ui.canopy_rendering import draw_canopy_2d
 from core.climate_profile import temperatura_diurna_ciclo, VIENTO_CATEGORIA_MS
 from core.solar_math import (
     solar_declination_deg, equation_of_time_degrees, standard_meridian_deg,
@@ -17,13 +19,13 @@ from core.solar_math import (
 )
 from tkinter import messagebox
 from plot_style import CMAP_TEMPERATURA
-from ui.solar_indicator import add_solar_indicator_2d
 from core.excel_scene import save_scene_excel, load_scene_excel, apply_parameters_to_vars
 from core.materials import get_surface_material, effective_structure_transmittance
 from core.surface_energy import (
     solve_surface_energy_balance, cloud_fraction_from_label, downwelling_longwave,
 )
 from ui.scene3d import render_scene_3d
+from ui.solar_indicator import add_solar_indicator_2d
 from core.vegetation import (
     VegetationConfig, phenology_factor, ground_latent_heat_flux_wm2,
     species_canopy_latent_flux_wm2,
@@ -40,12 +42,14 @@ class Material:
 
 
 class Arbol:
-    def __init__(self, x, y, h, rho_copa, radio_copa):
+    def __init__(self, x, y, h, rho_copa, radio_copa, forma_copa=DEFAULT_CANOPY_SHAPE, especie=""):
         self.x = x
         self.y = y
         self.h = h
         self.rho_copa = rho_copa
         self.radio_copa = radio_copa
+        self.forma_copa = normalize_canopy_shape(forma_copa)
+        self.especie = str(especie or "")
 
 
 class Estructura:
@@ -853,7 +857,8 @@ def cargar_excel(vars, filepath=None):
         for _, row in libro.arboles.iterrows():
             arbol = Arbol(
                 row['X'], row['Y'], row['Altura (m)'],
-                row['Densidad_copa (0-1)'], row['Radio_copa (m)']
+                row['Densidad_copa (0-1)'], row['Radio_copa (m)'],
+                forma_copa=row.get('Forma_copa', DEFAULT_CANOPY_SHAPE)
             )
             especie = row.get('Especie', '')
             if pd.notna(especie) and str(especie).strip():
@@ -1065,12 +1070,9 @@ def generar_grafico(vars, frame):
     contorno = ax.contourf(X, Y, T_display, niveles, cmap=CMAP_TEMPERATURA, alpha=0.8)
     ax.contour(X, Y, T_display, niveles, colors='k', linewidths=0.5)
     fig.colorbar(contorno, ax=ax, orientation='horizontal', pad=0.12).set_label(f'Temperatura superficial ({temp_unit})')
-    # Indicador solar discreto en planta: refleja azimut/elevación
-    # ya calculados, sin introducir nuevos cálculos.
     add_solar_indicator_2d(
-        ax,
-        vars.get("_render_solar_azimuth_deg"),
-        vars.get("_render_solar_altitude_deg"),
+        ax, vars.get("_render_solar_azimuth_deg"), vars.get("_render_solar_altitude_deg"),
+        corner="upper-right",
     )
     ax.set_xlabel(f'Distancia ({distance_unit})')
     ax.set_ylabel(f'Distancia ({distance_unit})')
@@ -1080,12 +1082,12 @@ def generar_grafico(vars, frame):
 
     # Dibujar los objetos con la misma convención visual que Edición.
     if vars.get('arboles'):
-        tamanos = [max(20, (a.radio_copa ** 2) * 8) for a in vars['arboles']]
-        ax.scatter(
-            [a.x for a in vars['arboles']], [a.y for a in vars['arboles']],
-            c='green', s=tamanos, alpha=0.6, edgecolors='darkgreen',
-            label='Árboles',
-        )
+        for idx, arbol in enumerate(vars['arboles']):
+            draw_canopy_2d(
+                ax, arbol, facecolor=color_copa(getattr(arbol, "especie", "")),
+                edgecolor="darkgreen", alpha=0.68, zorder=6,
+                label="Árboles" if idx == 0 else None,
+            )
     for estructura in vars.get('estructuras', []):
         if estructura.tipo == 'Sendero':
             ax.add_patch(plt.Rectangle(
@@ -1128,7 +1130,8 @@ def generar_grafico(vars, frame):
                         f"Árbol en ({arbol.x}, {arbol.y})\n"
                         f"Temperatura: {temp_sombra_display:.2f} {temp_unit}\n"
                         f"Altura: {arbol.h} m\n"
-                        f"Densidad copa: {arbol.rho_copa}"
+                        f"Densidad copa: {arbol.rho_copa}\n"
+                        f"Forma de copa: {normalize_canopy_shape(getattr(arbol, 'forma_copa', DEFAULT_CANOPY_SHAPE))}"
                     )
                     ax.set_title(detalles)
                     fig.canvas.draw_idle()
@@ -1225,6 +1228,14 @@ def editar_elemento(vars, arbol=None, estructura=None):
         entry.grid(row=i, column=1, padx=5, pady=2)
         entries[label] = entry
 
+    combo_forma = None
+    if arbol:
+        row_forma = len(fields)
+        ttk.Label(dialog, text="Forma de copa").grid(row=row_forma, column=0, padx=5, pady=2)
+        combo_forma = ttk.Combobox(dialog, values=CANOPY_SHAPES, state="readonly")
+        combo_forma.set(normalize_canopy_shape(getattr(arbol, "forma_copa", DEFAULT_CANOPY_SHAPE)))
+        combo_forma.grid(row=row_forma, column=1, padx=5, pady=2)
+
     def guardar_cambios():
         try:
             if arbol:
@@ -1233,6 +1244,8 @@ def editar_elemento(vars, arbol=None, estructura=None):
                 arbol.h = float(entries['Altura (m)'].get())
                 arbol.rho_copa = float(entries['Densidad Copa'].get())
                 arbol.radio_copa = float(entries['Radio Copa'].get())
+                if combo_forma is not None:
+                    arbol.forma_copa = normalize_canopy_shape(combo_forma.get())
             elif estructura:
                 estructura.x1 = float(entries['X1'].get())
                 estructura.y1 = float(entries['Y1'].get())
@@ -1248,7 +1261,7 @@ def editar_elemento(vars, arbol=None, estructura=None):
             messagebox.showerror("Error", "Valores inválidos")
 
     ttk.Button(dialog, text="Guardar", command=guardar_cambios).grid(
-        row=len(fields) + 1, columnspan=2, pady=10)
+        row=len(fields) + (2 if arbol else 1), columnspan=2, pady=10)
 
 
 def generar_3d(vars, frame=None):

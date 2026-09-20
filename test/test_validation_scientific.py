@@ -123,5 +123,5 @@ def test_csv_reader_template_and_export(tmp_path):
     out = tmp_path / "validacion.xlsx"
     exportar_reporte_validacion(str(out), report)
     assert out.exists()
-    xls = pd.ExcelFile(out)
-    assert set(["Resultados", "Metricas", "Calibracion", "Metadatos"]).issubset(xls.sheet_names)
+    with pd.ExcelFile(out) as xls:
+        assert set(["Resultados", "Metricas", "Calibracion", "Metadatos"]).issubset(xls.sheet_names)

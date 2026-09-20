@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import math
 
+from core.crown_shapes import DEFAULT_CANOPY_SHAPE, normalize_canopy_shape
+
 
 @dataclass
 class ObjetoEscena(ABC):
@@ -21,6 +23,9 @@ class ObjetoEscena(ABC):
 @dataclass
 class ArbolEscena(ObjetoEscena):
     radio_copa: float
+    rho_copa: float = 0.0
+    especie: str = ""
+    forma_copa: str = DEFAULT_CANOPY_SHAPE
 
     def calcular_sombra(self, azimut: float, elevacion: float) -> dict:
         elev = max(1e-3, elevacion)
@@ -67,6 +72,9 @@ def adaptar_objetos_escena(arboles: list, estructuras: list) -> list[ObjetoEscen
                 y=float(getattr(arbol, "y", 0.0)),
                 altura=float(getattr(arbol, "h", getattr(arbol, "altura", 0.0))),
                 radio_copa=float(getattr(arbol, "radio_copa", 0.0)),
+                rho_copa=float(getattr(arbol, "rho_copa", 0.0)),
+                especie=str(getattr(arbol, "especie", "") or ""),
+                forma_copa=normalize_canopy_shape(getattr(arbol, "forma_copa", DEFAULT_CANOPY_SHAPE)),
             )
         )
     for estructura in estructuras:

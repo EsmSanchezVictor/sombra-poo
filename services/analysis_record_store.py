@@ -8,6 +8,7 @@ métricas sin recalcular el análisis al seleccionar una miniatura.
 from __future__ import annotations
 
 from datetime import datetime
+from contextlib import contextmanager
 import json
 import os
 import sqlite3
@@ -44,8 +45,30 @@ class AnalysisRecordStore:
         conn.execute("PRAGMA journal_mode = DELETE")
         return conn
 
+    @contextmanager
+    def _connection(self):
+        """Conexión SQLite transaccional que SIEMPRE se cierra.
+
+        ``sqlite3.Connection`` usado directamente como context manager sólo
+        gestiona commit/rollback; no cierra el descriptor de la base. En una
+        aplicación de larga duración eso deja conexiones pendientes hasta que
+        el recolector de basura las detecta y emite ``ResourceWarning``.
+        """
+        conn = self._connect()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            finally:
+                conn.close()
+            raise
+        else:
+            conn.close()
+
     def _ensure_schema(self) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -143,7 +166,7 @@ class AnalysisRecordStore:
             entry["n"] = self.next_n()
 
         payload = json.dumps(self._json_safe(entry), ensure_ascii=False, separators=(",", ":"))
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO analysis_records(
@@ -198,12 +221,12 @@ class AnalysisRecordStore:
         return entry
 
     def next_n(self) -> int:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute("SELECT COALESCE(MAX(n), 0) AS max_n FROM analysis_records").fetchone()
         return int(row["max_n"] or 0) + 1
 
     def get(self, analysis_id: str) -> dict | None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT payload_json FROM analysis_records WHERE analysis_id=?",
                 (analysis_id,),
@@ -218,7 +241,7 @@ class AnalysisRecordStore:
         if complete_only:
             sql += " WHERE complete=1"
         sql += " ORDER BY n ASC, timestamp ASC, analysis_id ASC"
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(sql, args).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
 
@@ -341,6 +364,6 @@ class AnalysisRecordStore:
         sql = "SELECT COUNT(*) AS n FROM analysis_records"
         if complete_only:
             sql += " WHERE complete=1"
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(sql).fetchone()
         return int(row["n"])

@@ -534,7 +534,7 @@ class ProjectManager:
             return
         self.current_project.ensure_structure()
         try:
-            import diseño as design
+            import diseno as design
             path = design.guardar(
                 self.app.vars, self.app,
                 filepath=self.current_project.layout.edit_excel, notify=False,

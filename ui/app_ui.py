@@ -40,7 +40,6 @@ from services.meteorology_service import MeteorologyService, SOURCE_LABELS
 from services import analysis_service
 from services import report_service
 from ui import icon_factory
-from ui.solar_indicator import add_solar_indicator_2d
 from ui import panels as ui_panels
 from ui import theme
 from ui.layout import (
@@ -53,8 +52,10 @@ from ui.layout import (
 )
 from ui.dialogs import HerramientasDialogs
 from ui.menu_bar import MenuBar
+from ui.diurnal_animation import DiurnalAnimationPlayer, Diurnal3DAnimationPlayer
+from ui.solar_indicator import add_solar_indicator_2d
 from utils import export_to_excel
-import diseño as design
+import diseno as design
 import modelo_con_excel as modelo
 
 
@@ -157,32 +158,36 @@ class SombraApp:
             bg=self.palette["panel"],
             width=100,
             height=100,
-            highlightbackground=self.palette["border"],
-            highlightthickness=1,
+            bd=0,
+            relief="flat",
+            highlightthickness=0,
         )
         self.frame3 = tk.Frame(
             root,
             bg=self.palette["panel"],
             width=100,
             height=100,
-            highlightbackground=self.palette["border"],
-            highlightthickness=1,
+            bd=0,
+            relief="flat",
+            highlightthickness=0,
         )
         self.frame4 = tk.Frame(
             root,
             bg=self.palette["panel"],
             width=100,
             height=100,
-            highlightbackground=self.palette["border"],
-            highlightthickness=1,
+            bd=0,
+            relief="flat",
+            highlightthickness=0,
         )
         self.frame5 = tk.Frame(
             root,
             bg=self.palette["panel"],
             width=100,
             height=100,
-            highlightbackground=self.palette["border"],
-            highlightthickness=1,
+            bd=0,
+            relief="flat",
+            highlightthickness=0,
         )
         self.frame6 = tk.Frame(
             root,
@@ -2886,6 +2891,255 @@ class SombraApp:
             self.last_model_excel_path = saved
             self.mark_dirty()
 
+    def open_execution_dialog(self):
+        """Abre el selector de ejecución puntual / secuencia diurna.
+
+        La animación es cuasi-estacionaria: cada cuadro utiliza exactamente
+        el modelo científico actual en una hora distinta y se almacena antes
+        de reproducir. La reproducción no recalcula física.
+        """
+        if not self.require_project("ejecutar el modelo"):
+            return
+        if self.active_panel not in (2, 3):
+            # Para los otros paneles se conserva el comportamiento existente.
+            self.run_model_for_active_panel()
+            return
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Ejecutar simulación")
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        body = tk.Frame(dlg, padx=16, pady=14)
+        body.pack(fill="both", expand=True)
+
+        mode = tk.StringVar(value="animation")
+        tk.Label(body, text="Tipo de ejecución", font=("Arial", 10, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
+        )
+        tk.Radiobutton(body, text="Instantánea", variable=mode, value="instant").grid(
+            row=1, column=0, columnspan=2, sticky="w"
+        )
+        tk.Radiobutton(
+            body, text="Animación diurna (sombra + temperatura)",
+            variable=mode, value="animation",
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+        start_var = tk.DoubleVar(value=8.0)
+        end_var = tk.DoubleVar(value=18.0)
+        step_var = tk.IntVar(value=60)
+        speed_var = tk.IntVar(value=500)
+
+        tk.Label(body, text="Hora inicial").grid(row=3, column=0, sticky="w", pady=2)
+        tk.Spinbox(body, from_=0, to=23.75, increment=0.25, textvariable=start_var, width=8).grid(row=3, column=1, sticky="ew", pady=2)
+        tk.Label(body, text="Hora final").grid(row=4, column=0, sticky="w", pady=2)
+        tk.Spinbox(body, from_=0.25, to=24, increment=0.25, textvariable=end_var, width=8).grid(row=4, column=1, sticky="ew", pady=2)
+        tk.Label(body, text="Paso temporal").grid(row=5, column=0, sticky="w", pady=2)
+        ttk.Combobox(body, textvariable=step_var, values=(15, 30, 60), state="readonly", width=8).grid(row=5, column=1, sticky="ew", pady=2)
+        tk.Label(body, text="Velocidad reproducción").grid(row=6, column=0, sticky="w", pady=2)
+        ttk.Combobox(body, textvariable=speed_var, values=(1000, 750, 500, 300, 150), state="readonly", width=8).grid(row=6, column=1, sticky="ew", pady=2)
+        tk.Label(
+            body,
+            text=("Cada fotograma se calcula primero y luego se reproduce desde memoria. "
+                  "Es una secuencia cuasi-estacionaria: no incorpora inercia térmica temporal entre cuadros."),
+            justify="left", wraplength=360, fg="#666666", font=("Arial", 8),
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 10))
+
+        buttons = tk.Frame(body)
+        buttons.grid(row=8, column=0, columnspan=2, sticky="e")
+
+        def execute():
+            selected = mode.get()
+            if selected == "instant":
+                dlg.destroy()
+                self.run_model_for_active_panel()
+                return
+            try:
+                start = float(start_var.get())
+                end = float(end_var.get())
+                step = int(step_var.get())
+                speed = int(speed_var.get())
+            except (TypeError, ValueError):
+                messagebox.showerror("Animación", "Revise las horas, el paso y la velocidad.", parent=dlg)
+                return
+            if not (0.0 <= start < 24.0) or not (0.0 < end <= 24.0) or end <= start:
+                messagebox.showerror("Animación", "La hora final debe ser mayor que la inicial y ambas deben estar entre 0 y 24.", parent=dlg)
+                return
+            if step not in (15, 30, 60):
+                messagebox.showerror("Animación", "El paso debe ser 15, 30 o 60 minutos.", parent=dlg)
+                return
+            count = int(round((end - start) * 60.0 / step)) + 1
+            if count > 97:
+                messagebox.showerror("Animación", "La secuencia solicitada es demasiado larga.", parent=dlg)
+                return
+            dlg.destroy()
+            self._start_diurnal_animation(start, end, step, speed)
+
+        tk.Button(buttons, text="Cancelar", command=dlg.destroy).pack(side="right", padx=(6, 0))
+        tk.Button(buttons, text="Ejecutar", command=execute, bg="#4CAF50", fg="white").pack(side="right")
+        dlg.grab_set()
+        dlg.wait_visibility()
+        dlg.focus_set()
+
+    @staticmethod
+    def _snapshot_tk_mapping(mapping):
+        snapshot = {}
+        for key, value in mapping.items():
+            if isinstance(value, tk.Variable):
+                try:
+                    snapshot[key] = ("tk", value.get())
+                except tk.TclError:
+                    pass
+            elif key.startswith("_") and key not in {"_app_instance", "_current_fig"}:
+                # Metadatos transitorios que las fuentes meteorológicas pueden cambiar.
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    snapshot[key] = ("plain", value)
+        return snapshot
+
+    @staticmethod
+    def _restore_tk_mapping(mapping, snapshot):
+        for key, (kind, value) in snapshot.items():
+            if kind == "tk" and key in mapping and isinstance(mapping[key], tk.Variable):
+                try:
+                    mapping[key].set(value)
+                except tk.TclError:
+                    pass
+            elif kind == "plain":
+                mapping[key] = value
+
+    def _capture_diurnal_frame(self, mapping, hour, shadow, meta=None):
+        X = np.asarray(mapping.get("X"), dtype=np.float32).copy()
+        Y = np.asarray(mapping.get("Y"), dtype=np.float32).copy()
+        T = np.asarray(mapping.get("T"), dtype=np.float32).copy()
+        T_display = np.asarray(self.convert_temperature_for_display(T), dtype=np.float32)
+        return {
+            "hour": float(hour),
+            "X": X,
+            "Y": Y,
+            "T": T,
+            "T_display": T_display,
+            "shadow": np.asarray(shadow, dtype=np.float32).copy(),
+            "solar_altitude_deg": float(mapping.get("_render_solar_altitude_deg", 0.0)),
+            "solar_azimuth_deg": float(mapping.get("_render_solar_azimuth_deg", 0.0)),
+            "temp_unit": self.get_temperature_unit_symbol(),
+            "trees": tuple(mapping.get("arboles", ()) or ()),
+            "structures": tuple(mapping.get("estructuras", ()) or ()),
+            "meta": dict(meta or {}),
+        }
+
+    def _start_diurnal_animation(self, start_hour, end_hour, step_minutes, speed_ms):
+        """Calcula la secuencia de a un cuadro por ciclo Tk y luego la reproduce."""
+        if self.active_panel not in (2, 3):
+            messagebox.showinfo("Animación", "Abra Edición o Modelo para generar una secuencia diurna.")
+            return
+        mode = "diseno" if self.active_panel == 2 else "modelo"
+        mapping = self.vars if mode == "diseno" else self.vars_modelo
+
+        # En Modelo sincronizamos primero los controles visibles con vars_modelo.
+        if mode == "modelo":
+            self.generar_grafico_modelo()
+
+        snapshot = self._snapshot_tk_mapping(mapping)
+        previous_suspend = getattr(self, "_suspend_autosave_tracking", False)
+        self._suspend_autosave_tracking = True
+
+        total_minutes = int(round((float(end_hour) - float(start_hour)) * 60.0))
+        offsets = list(range(0, total_minutes + 1, int(step_minutes)))
+        if offsets[-1] != total_minutes:
+            offsets.append(total_minutes)
+        hours = [float(start_hour) + value / 60.0 for value in offsets]
+        frames = []
+
+        progress = tk.Toplevel(self.root)
+        progress.title("Calculando secuencia diurna")
+        progress.transient(self.root)
+        progress.resizable(False, False)
+        tk.Label(progress, text="Calculando sombras y temperaturas…", padx=18).pack(pady=(14, 5))
+        progress_var = tk.DoubleVar(value=0.0)
+        bar = ttk.Progressbar(progress, variable=progress_var, maximum=len(hours), length=360)
+        bar.pack(padx=18, pady=5)
+        status = tk.Label(progress, text="", padx=18)
+        status.pack(pady=(3, 12))
+        cancelled = {"value": False}
+        tk.Button(progress, text="Cancelar", command=lambda: cancelled.__setitem__("value", True)).pack(pady=(0, 12))
+        progress.grab_set()
+
+        def finish(success=True, error=None):
+            try:
+                self._restore_tk_mapping(mapping, snapshot)
+            finally:
+                self._suspend_autosave_tracking = previous_suspend
+            try:
+                progress.grab_release()
+                progress.destroy()
+            except tk.TclError:
+                pass
+            if not success:
+                if error is not None:
+                    messagebox.showerror("Animación", f"No se pudo completar la secuencia:\n{error}")
+                return
+            if not frames:
+                messagebox.showinfo("Animación", "No se generaron fotogramas válidos.")
+                return
+            view2d, view3d, notebook = self._get_scene_view_frames(mode)
+            old_player = getattr(view2d, "_sombra_diurnal_player", None)
+            if old_player is not None:
+                try:
+                    old_player.close()
+                except Exception:
+                    pass
+            old_player3d = getattr(view3d, "_sombra_diurnal_3d_player", None)
+            if old_player3d is not None:
+                try:
+                    old_player3d.close()
+                except Exception:
+                    pass
+            title = "Edición · evolución diurna" if mode == "diseno" else "Modelo · evolución diurna"
+            player2d = DiurnalAnimationPlayer(view2d, frames, self, title=title)
+            player2d.speed_ms.set(int(speed_ms))
+            player3d = Diurnal3DAnimationPlayer(view3d, frames, self, title=title)
+            player3d.speed_ms.set(int(speed_ms))
+            self.diurnal_animation_frames = frames
+            self.diurnal_animation_mode = mode
+            self.diurnal_animation_player_2d = player2d
+            self.diurnal_animation_player_3d = player3d
+            # La animación pedida se abre en 3D: un único viewport persistente.
+            notebook.select(view3d)
+            player3d.play()
+
+        def compute_one(index=0):
+            if cancelled["value"]:
+                finish(False)
+                return
+            if index >= len(hours):
+                finish(True)
+                return
+            hour = hours[index]
+            try:
+                mapping["hora"].set(hour)
+                if mode == "modelo":
+                    self.generar_grafico_modelo()
+                    shadow = self.last_shadow
+                    meta = self.last_meta or {}
+                else:
+                    # Forzar regeneración porque actualizar_grafico marca False al terminar.
+                    mapping["_update_required"] = True
+                    self.actualizar_grafico_diseno(self.frame7)
+                    shadow = mapping.get("_last_shadow")
+                    meta = mapping.get("_last_meta", {})
+                if shadow is None:
+                    raise RuntimeError("El modelo no devolvió la matriz de sombra del fotograma.")
+                frames.append(self._capture_diurnal_frame(mapping, hour, shadow, meta))
+                progress_var.set(index + 1)
+                hh = int(hour) % 24
+                mm = int(round((hour - int(hour)) * 60)) % 60
+                status.configure(text=f"{index + 1}/{len(hours)} · {hh:02d}:{mm:02d}")
+            except Exception as exc:
+                finish(False, exc)
+                return
+            self.root.after(1, lambda: compute_one(index + 1))
+
+        self.root.after(1, compute_one)
+
     def run_model_for_active_panel(self, force=False):
         if not self.require_project("ejecutar el modelo"):
             return
@@ -3178,7 +3432,7 @@ class SombraApp:
         _separador()
 
         grupo_modelo = _grupo("Modelo")
-        _boton(grupo_modelo, icon_factory.obtener_icono("play"), "Ejecutar", self.run_model_for_active_panel)
+        _boton(grupo_modelo, icon_factory.obtener_icono("play"), "Ejecutar", self.open_execution_dialog)
         _separador()
 
         grupo_analisis = _grupo("Análisis")
@@ -4351,9 +4605,8 @@ class SombraApp:
             bbox=dict(boxstyle="round", fc="white", ec="0.75", alpha=0.82),
         )
         add_solar_indicator_2d(
-            ax,
-            resultado_mapa.get("Solar_azimuth"),
-            resultado_mapa.get("Solar_altitude"),
+            ax, resultado_mapa.get("Solar_azimuth"), resultado_mapa.get("Solar_altitude"),
+            corner="upper-right",
         )
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")

@@ -718,3 +718,28 @@ Se reemplaza la compactación volumétrica de v23 por una reducción horizontal 
 - Temperatura incorpora Entrada simple / Entrada avanzada y oculta/desactiva parámetros avanzados hasta activarla.
 - Las opciones avanzadas ocultas ya no siguen actuando al volver a Simple.
 - Suite: 202 aprobados, 5 omitidos.
+
+## v35.3 — cierre de recursos SQLite
+- AnalysisRecordStore usa un context manager propio que cierra cada conexión SQLite.
+- DatabaseManager.close() es idempotente.
+- Validación estricta sin ResourceWarning: 212 passed, 5 skipped.
+
+## v35.4 — Formas de copa
+- Nuevo atributo `forma_copa` para árboles: Esférica, Cónica, Columnar, Piramidal, Extendida, Irregular y Llora.
+- Persistencia Excel/JSON retrocompatible.
+- Representación diferenciada en Edición/Modelo 2D y 3D y animación diurna.
+- Sin cambios en el kernel científico de sombra/radiación.
+- Validación: 218 passed, 5 skipped.
+
+## v35.4.1 — Corrección formulario Forma de copa y ZIP Unicode
+- Corrige empaquetado de `diseño.py` para Windows (antes podía extraerse como `dise├▒o.py`).
+- `Nuevo Árbol` muestra claramente Especie → Forma de copa → Altura → Densidad → Radio.
+- No modifica fórmulas científicas.
+
+## v35.4.2
+- corrección de arranque Windows para formas de copa;
+- módulo interno renombrado a `diseno.py` (ASCII);
+- imports internos migrados a `diseno`;
+- `core/crown_shapes.py` incluido en reemplazo acumulativo;
+- `diseño.py` queda como compatibilidad histórica;
+- 218 tests aprobados, 5 omitidos.

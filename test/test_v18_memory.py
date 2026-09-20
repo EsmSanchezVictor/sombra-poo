@@ -4,7 +4,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
-import diseño
+import diseno
 from core.memory_utils import current_rss_mb
 from image_processor import ImageProcessor
 from services.shadow_detector import ShadowDetector
@@ -60,11 +60,11 @@ def test_design_initialization_renders_only_once(monkeypatch):
         calls.append((vars_, frame_))
         return sentinel
 
-    monkeypatch.setattr(diseño, "actualizar_grafico", fake_update)
+    monkeypatch.setattr(diseno, "actualizar_grafico", fake_update)
     frame = SimpleNamespace(grid=lambda **kwargs: None)
     vars_ = {}
     app = object()
-    assert diseño.crear_area_grafico(vars_, frame, app) == sentinel
+    assert diseno.crear_area_grafico(vars_, frame, app) == sentinel
     assert len(calls) == 1
     assert vars_["_app_instance"] is app
 

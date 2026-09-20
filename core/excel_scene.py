@@ -24,9 +24,10 @@ import unicodedata
 import pandas as pd
 
 from core.model_registry import SCIENTIFIC_RELEASE, SCIENTIFIC_SCHEMA
+from core.crown_shapes import DEFAULT_CANOPY_SHAPE, normalize_canopy_shape
 
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 TREE_COLUMNS = [
     "X",
@@ -35,6 +36,7 @@ TREE_COLUMNS = [
     "Densidad_copa (0-1)",
     "Radio_copa (m)",
     "Especie",
+    "Forma_copa",
 ]
 
 STRUCTURE_COLUMNS = [
@@ -184,6 +186,10 @@ def _prepare_trees(df: pd.DataFrame) -> pd.DataFrame:
 
     if "Especie" not in df.columns:
         df["Especie"] = ""
+    df["Especie"] = df["Especie"].fillna("").astype(str)
+    if "Forma_copa" not in df.columns:
+        df["Forma_copa"] = DEFAULT_CANOPY_SHAPE
+    df["Forma_copa"] = df["Forma_copa"].apply(normalize_canopy_shape)
 
     for col in required:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -343,6 +349,7 @@ def save_scene_excel(
             "Densidad_copa (0-1)": float(getattr(a, "rho_copa", 0.0)),
             "Radio_copa (m)": float(getattr(a, "radio_copa", 0.0)),
             "Especie": str(getattr(a, "especie", "") or ""),
+            "Forma_copa": normalize_canopy_shape(getattr(a, "forma_copa", DEFAULT_CANOPY_SHAPE)),
         })
     df_arboles = pd.DataFrame(tree_rows, columns=TREE_COLUMNS)
 

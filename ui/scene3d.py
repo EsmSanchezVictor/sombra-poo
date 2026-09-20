@@ -36,8 +36,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from core.species import color_copa
+from core.crown_shapes import canopy_profile, normalize_canopy_shape
+from ui.canopy_rendering import draw_canopy_3d_mpl
 from plot_style import CMAP_TEMPERATURA
-from ui.solar_indicator import add_solar_indicator_2d
 
 
 @dataclass(frozen=True)
@@ -202,12 +203,12 @@ class _VTKOffscreenSceneController:
     QUALITY_RENDER_SCALE = 1.35
     MAX_RENDER_PIXELS = 2_600_000
 
-    def __init__(self, parent: tk.Misc, data: Scene3DData):
+    def __init__(self, parent: tk.Misc, data: Scene3DData, temperature_range: tuple[float, float] | None = None):
         import vtkmodules.vtkRenderingOpenGL2  # noqa: F401
         from vtkmodules.vtkCommonCore import vtkLookupTable, vtkPoints
         from vtkmodules.vtkCommonDataModel import vtkStructuredGrid
         from vtkmodules.vtkFiltersCore import vtkContourFilter, vtkTubeFilter
-        from vtkmodules.vtkFiltersSources import vtkCubeSource, vtkCylinderSource, vtkLineSource, vtkSphereSource
+        from vtkmodules.vtkFiltersSources import vtkConeSource, vtkCubeSource, vtkCylinderSource, vtkLineSource, vtkSphereSource
         from vtkmodules.vtkRenderingAnnotation import vtkCubeAxesActor, vtkScalarBarActor
         from vtkmodules.vtkRenderingCore import (
             vtkActor,
@@ -233,6 +234,22 @@ class _VTKOffscreenSceneController:
         self._last_size = (0, 0)
         self._initial_render_after = None
         self._platform_is_windows = sys.platform.startswith("win")
+        self._temperature_range = temperature_range
+        self._grid = None
+        self._ground_mapper = None
+        self._lut = None
+        self._contours = None
+        self._contour_mapper = None
+        self._contour_outline_mapper = None
+        self._key_light = None
+        self._sun_source = None
+        self._guide_source = None
+        self._shadow_grid = None
+        self._shadow_actor = None
+        self._shadow_mapper = None
+        self._shadow_lut = None
+        self._scene_center = None
+        self._scene_span = None
 
         toolbar = tk.Frame(parent, bd=0)
         toolbar.pack(side=tk.TOP, fill=tk.X)
@@ -251,12 +268,13 @@ class _VTKOffscreenSceneController:
         solar_summary = ""
         if data.solar_altitude_deg is not None and data.solar_azimuth_deg is not None:
             solar_summary = f" · ☀ Az {data.solar_azimuth_deg:.0f}° · El {data.solar_altitude_deg:.0f}°"
-        tk.Label(
+        self._solar_status_label = tk.Label(
             toolbar,
             text=f"Arrastrar: rotar · Rueda: zoom{solar_summary}",
             anchor="e",
             fg="#555555",
-        ).pack(side=tk.RIGHT, padx=8)
+        )
+        self._solar_status_label.pack(side=tk.RIGHT, padx=8)
 
         self._image_label = tk.Label(parent, bd=0, highlightthickness=0)
         self._image_label.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
@@ -309,7 +327,13 @@ class _VTKOffscreenSceneController:
         scalars.SetName("Temperatura")
         grid.GetPointData().SetScalars(scalars)
 
-        lo, hi = _finite_range(T)
+        if temperature_range is None:
+            lo, hi = _finite_range(T)
+        else:
+            lo, hi = float(temperature_range[0]), float(temperature_range[1])
+            if not (math.isfinite(lo) and math.isfinite(hi)) or hi <= lo:
+                lo, hi = _finite_range(T)
+        self._temperature_range = (lo, hi)
         lut = vtkLookupTable()
         lut.SetNumberOfTableValues(256)
         lut.SetRange(lo, hi)
@@ -318,12 +342,15 @@ class _VTKOffscreenSceneController:
             r, g, b, a = cmap(idx / 255.0)
             lut.SetTableValue(idx, float(r), float(g), float(b), float(a))
         lut.Build()
+        self._grid = grid
+        self._lut = lut
 
         ground_mapper = vtkDataSetMapper()
         ground_mapper.SetInputData(grid)
         ground_mapper.SetScalarRange(lo, hi)
         ground_mapper.SetLookupTable(lut)
         ground_mapper.ScalarVisibilityOn()
+        self._ground_mapper = ground_mapper
         ground = vtkActor()
         ground.SetMapper(ground_mapper)
         # v33: la temperatura se presenta como una capa analítica superpuesta
@@ -339,6 +366,7 @@ class _VTKOffscreenSceneController:
         span_x = max(1.0, xmax - xmin)
         span_y = max(1.0, ymax - ymin)
         span = max(span_x, span_y)
+        self._scene_span = span
 
         # Fuente/mapper de cubo reutilizada para base y estructuras.
         cube_source = vtkCubeSource()
@@ -374,12 +402,14 @@ class _VTKOffscreenSceneController:
             contours = vtkContourFilter()
             contours.SetInputData(grid)
             contours.GenerateValues(6, lo, hi)
+            self._contours = contours
             # Doble trazo: borde oscuro + línea coloreada por temperatura.
             # Así la capa térmica sigue al 50 %, pero cada isoterma conserva
             # saturación completa y se distingue de los objetos físicos.
             contour_outline_mapper = vtkPolyDataMapper()
             contour_outline_mapper.SetInputConnection(contours.GetOutputPort())
             contour_outline_mapper.ScalarVisibilityOff()
+            self._contour_outline_mapper = contour_outline_mapper
             contour_outline = vtkActor()
             contour_outline.SetMapper(contour_outline_mapper)
             contour_outline.SetPosition(0.0, 0.0, max(0.008, span * 0.00035))
@@ -393,6 +423,7 @@ class _VTKOffscreenSceneController:
             contour_mapper = vtkPolyDataMapper()
             contour_mapper.SetInputConnection(contours.GetOutputPort())
             contour_mapper.SetLookupTable(lut)
+            self._contour_mapper = contour_mapper
             contour_mapper.SetScalarRange(lo, hi)
             contour_mapper.ScalarVisibilityOn()
             contour_actor = vtkActor()
@@ -405,11 +436,26 @@ class _VTKOffscreenSceneController:
 
         sphere_source = vtkSphereSource()
         sphere_source.SetRadius(1.0)
-        # Una única malla más suave se reutiliza para todas las copas.
         sphere_source.SetThetaResolution(32)
         sphere_source.SetPhiResolution(24)
         sphere_mapper = vtkPolyDataMapper()
         sphere_mapper.SetInputConnection(sphere_source.GetOutputPort())
+
+        cone_source = vtkConeSource()
+        cone_source.SetRadius(1.0)
+        cone_source.SetHeight(2.0)
+        cone_source.SetDirection(0.0, 0.0, 1.0)
+        cone_source.SetResolution(32)
+        cone_mapper = vtkPolyDataMapper()
+        cone_mapper.SetInputConnection(cone_source.GetOutputPort())
+
+        pyramid_source = vtkConeSource()
+        pyramid_source.SetRadius(1.0)
+        pyramid_source.SetHeight(2.0)
+        pyramid_source.SetDirection(0.0, 0.0, 1.0)
+        pyramid_source.SetResolution(4)
+        pyramid_mapper = vtkPolyDataMapper()
+        pyramid_mapper.SetInputConnection(pyramid_source.GetOutputPort())
 
         cyl_source = vtkCylinderSource()
         cyl_source.SetRadius(1.0)
@@ -418,16 +464,36 @@ class _VTKOffscreenSceneController:
         cyl_mapper = vtkPolyDataMapper()
         cyl_mapper.SetInputConnection(cyl_source.GetOutputPort())
 
-        # Árboles: dimensiones horizontales y altura total respetan los datos;
-        # la forma elipsoidal de copa es solamente una convención gráfica.
+        def add_canopy_actor(mapper, pos, scale, rgb, opacity, tint=1.0):
+            canopy = vtkActor()
+            canopy.SetMapper(mapper)
+            canopy.SetScale(*scale)
+            canopy.SetPosition(*pos)
+            canopy.GetProperty().SetColor(
+                *tuple(min(1.0, max(0.0, c * tint)) for c in rgb)
+            )
+            canopy.GetProperty().SetOpacity(opacity)
+            canopy.GetProperty().SetInterpolationToPhong()
+            canopy.GetProperty().SetAmbient(0.18)
+            canopy.GetProperty().SetDiffuse(0.82)
+            canopy.GetProperty().SetSpecular(0.10)
+            canopy.GetProperty().SetSpecularPower(20)
+            renderer.AddActor(canopy)
+            return canopy
+
+        # Árboles: la forma de copa es un atributo de representación; el
+        # kernel de sombra/radiación no cambia en esta versión.
         for tree in data.trees:
             x = float(getattr(tree, "x", 0.0))
             y = float(getattr(tree, "y", 0.0))
-            h = max(0.2, float(getattr(tree, "h", 1.0) or 1.0))
+            h = max(0.2, float(getattr(tree, "h", getattr(tree, "altura", 1.0)) or 1.0))
             radius = max(0.15, float(getattr(tree, "radio_copa", 0.5) or 0.5))
-            crown_z_radius = max(0.2, min(radius * 0.72, h * 0.34))
-            crown_center_z = max(crown_z_radius, h - crown_z_radius)
-            trunk_height = max(0.15, crown_center_z - crown_z_radius * 0.78)
+            profile = canopy_profile(getattr(tree, "forma_copa", None), radius, h)
+            shape = str(profile["shape"])
+            crown_h = float(profile["crown_height"])
+            crown_base = float(profile["crown_base"])
+            crown_center_z = float(profile["crown_center"])
+            trunk_height = float(profile["trunk_height"])
             trunk_radius = max(0.06, min(radius * 0.10, h * 0.035))
 
             trunk = vtkActor()
@@ -447,41 +513,80 @@ class _VTKOffscreenSceneController:
             except Exception:
                 canopy_rgb = (0.18, 0.48, 0.16)
             rho = _optional_float(getattr(tree, "rho_copa", None))
-            # La copa debe leerse como objeto físico por encima de la capa
-            # térmica. Conservamos una leve variación por densidad, pero con
-            # opacidad alta para que no se funda con el mapa de temperatura.
             opacity = 0.96 if rho is None else min(0.995, max(0.92, 0.90 + 0.095 * rho))
 
-            # v30: copa multilobulada. La elipsoide única de v29 se veía
-            # demasiado geométrica. Los cinco lóbulos quedan contenidos
-            # dentro del radio de copa y de la altura originales: solo cambia
-            # la representación visual, nunca la geometría usada en cálculos.
-            lobe_specs = (
-                (0.00, 0.00, 0.00, 0.78, 0.78, 1.00, 1.00),
-                (0.28, 0.02, -0.05, 0.68, 0.64, 0.72, 0.92),
-                (-0.27, -0.03, -0.04, 0.66, 0.69, 0.74, 1.05),
-                (0.01, 0.28, -0.08, 0.64, 0.67, 0.70, 0.86),
-                (-0.03, -0.27, -0.06, 0.68, 0.63, 0.72, 0.98),
-            )
-            for dx, dy, dz, sx, sy, sz, tint in lobe_specs:
-                canopy = vtkActor()
-                canopy.SetMapper(sphere_mapper)
-                canopy.SetScale(radius * sx, radius * sy, crown_z_radius * sz)
-                canopy.SetPosition(
-                    x + radius * dx,
-                    y + radius * dy,
-                    crown_center_z + crown_z_radius * dz,
+            if shape == "Cónica":
+                add_canopy_actor(
+                    cone_mapper, (x, y, crown_center_z),
+                    (radius, radius, crown_h / 2.0), canopy_rgb, opacity,
                 )
-                canopy.GetProperty().SetColor(
-                    *tuple(min(1.0, max(0.0, c * tint)) for c in canopy_rgb)
+            elif shape == "Piramidal":
+                actor = add_canopy_actor(
+                    pyramid_mapper, (x, y, crown_center_z),
+                    (radius, radius, crown_h / 2.0), canopy_rgb, opacity,
                 )
-                canopy.GetProperty().SetOpacity(opacity)
-                canopy.GetProperty().SetInterpolationToPhong()
-                canopy.GetProperty().SetAmbient(0.18)
-                canopy.GetProperty().SetDiffuse(0.82)
-                canopy.GetProperty().SetSpecular(0.10)
-                canopy.GetProperty().SetSpecularPower(20)
-                renderer.AddActor(canopy)
+                actor.RotateZ(45.0)
+            elif shape == "Columnar":
+                add_canopy_actor(
+                    sphere_mapper, (x, y, crown_center_z),
+                    (radius * 0.56, radius * 0.56, crown_h / 2.0), canopy_rgb, opacity,
+                )
+            elif shape == "Extendida":
+                specs = (
+                    (0.00, 0.00, 0.00, 0.78, 0.48, 0.46, 1.00),
+                    (-0.34, 0.00, -0.03, 0.55, 0.40, 0.34, 0.96),
+                    (0.34, 0.00, -0.02, 0.55, 0.40, 0.34, 1.04),
+                )
+                for dx, dy, dz, sx, sy, sz, tint in specs:
+                    add_canopy_actor(
+                        sphere_mapper,
+                        (x + radius * dx, y + radius * dy, crown_center_z + crown_h * dz),
+                        (radius * sx, radius * sy, crown_h * sz),
+                        canopy_rgb, opacity, tint,
+                    )
+            elif shape == "Irregular":
+                specs = (
+                    (0.00, 0.00, 0.00, 0.72, 0.68, 0.48, 1.00),
+                    (0.34, 0.08, 0.02, 0.53, 0.45, 0.36, 0.92),
+                    (-0.30, -0.12, -0.04, 0.56, 0.52, 0.38, 1.05),
+                    (0.05, 0.32, -0.08, 0.46, 0.50, 0.32, 0.88),
+                )
+                for dx, dy, dz, sx, sy, sz, tint in specs:
+                    add_canopy_actor(
+                        sphere_mapper,
+                        (x + radius * dx, y + radius * dy, crown_center_z + crown_h * dz),
+                        (radius * sx, radius * sy, crown_h * sz),
+                        canopy_rgb, opacity, tint,
+                    )
+            elif shape == "Llora":
+                add_canopy_actor(
+                    sphere_mapper, (x, y, h - crown_h * 0.28),
+                    (radius * 0.72, radius * 0.70, crown_h * 0.28), canopy_rgb, opacity,
+                )
+                for idx, ang in enumerate(np.linspace(0.0, 2.0 * math.pi, 6, endpoint=False)):
+                    add_canopy_actor(
+                        sphere_mapper,
+                        (x + radius * 0.50 * math.cos(ang),
+                         y + radius * 0.50 * math.sin(ang),
+                         crown_base + crown_h * 0.43),
+                        (radius * 0.30, radius * 0.30, crown_h * 0.43),
+                        canopy_rgb, opacity * 0.96, 0.92 + 0.03 * (idx % 3),
+                    )
+            else:  # Esférica
+                lobe_specs = (
+                    (0.00, 0.00, 0.00, 0.78, 0.78, 0.50, 1.00),
+                    (0.28, 0.02, -0.04, 0.66, 0.62, 0.36, 0.92),
+                    (-0.27, -0.03, -0.03, 0.64, 0.67, 0.37, 1.05),
+                    (0.01, 0.28, -0.06, 0.62, 0.65, 0.35, 0.86),
+                    (-0.03, -0.27, -0.05, 0.66, 0.61, 0.36, 0.98),
+                )
+                for dx, dy, dz, sx, sy, sz, tint in lobe_specs:
+                    add_canopy_actor(
+                        sphere_mapper,
+                        (x + radius * dx, y + radius * dy, crown_center_z + crown_h * dz),
+                        (radius * sx, radius * sy, crown_h * sz),
+                        canopy_rgb, opacity, tint,
+                    )
 
         for structure in data.structures:
             tipo = str(getattr(structure, "tipo", ""))
@@ -568,6 +673,7 @@ class _VTKOffscreenSceneController:
         # Luz principal orientada con la geometría solar YA calculada, si
         # está disponible. Es iluminación visual; no genera nuevos resultados.
         center = ((xmin + xmax) / 2, (ymin + ymax) / 2, max_height * 0.35)
+        self._scene_center = center
         key = vtkLight()
         key.SetPositional(False)
         if data.solar_altitude_deg is not None and data.solar_azimuth_deg is not None:
@@ -588,6 +694,7 @@ class _VTKOffscreenSceneController:
         key.SetColor(1.00, 0.95, 0.86)
         key.SetIntensity(1.00)
         renderer.AddLight(key)
+        self._key_light = key
 
         fill = vtkLight()
         fill.SetPositional(False)
@@ -606,15 +713,15 @@ class _VTKOffscreenSceneController:
         rim.SetIntensity(0.18)
         renderer.AddLight(rim)
 
-        # Marcador solar representativo (opción 1): una esfera en el cielo
-        # y una guía tenue hacia la escena. Usa azimut/elevación ya calculados.
+        # Marcador solar representativo. No participa del encuadre de cámara:
+        # SetUseBounds(False) evita que el sol lejano reduzca visualmente la escena.
         if data.solar_altitude_deg is not None and data.solar_azimuth_deg is not None:
             alt = math.radians(data.solar_altitude_deg)
             azi = math.radians(data.solar_azimuth_deg)
             sx = math.sin(azi) * math.cos(alt)
             sy = math.cos(azi) * math.cos(alt)
             sz = max(0.10, math.sin(alt))
-            sun_distance = span * 2.15
+            sun_distance = span * 0.45
             sun_pos = (
                 center[0] + sx * sun_distance,
                 center[1] + sy * sun_distance,
@@ -625,6 +732,7 @@ class _VTKOffscreenSceneController:
             sun.SetThetaResolution(24)
             sun.SetPhiResolution(24)
             sun.SetCenter(*sun_pos)
+            self._sun_source = sun
             sun_mapper = vtkPolyDataMapper()
             sun_mapper.SetInputConnection(sun.GetOutputPort())
             sun_actor = vtkActor()
@@ -632,12 +740,13 @@ class _VTKOffscreenSceneController:
             sun_actor.GetProperty().SetColor(1.00, 0.84, 0.22)
             sun_actor.GetProperty().SetAmbient(0.70)
             sun_actor.GetProperty().SetDiffuse(0.30)
-            sun_actor.GetProperty().SetSpecular(0.10)
+            sun_actor.SetUseBounds(False)
             renderer.AddActor(sun_actor)
 
             guide = vtkLineSource()
             guide.SetPoint1(*sun_pos)
-            guide.SetPoint2(center[0] + sx * span * 0.35, center[1] + sy * span * 0.35, max(0.05, center[2] * 0.12))
+            guide.SetPoint2(center[0], center[1], max(0.05, center[2] * 0.12))
+            self._guide_source = guide
             guide_tube = vtkTubeFilter()
             guide_tube.SetInputConnection(guide.GetOutputPort())
             guide_tube.SetRadius(max(0.03, span * 0.0035))
@@ -648,7 +757,8 @@ class _VTKOffscreenSceneController:
             guide_actor = vtkActor()
             guide_actor.SetMapper(guide_mapper)
             guide_actor.GetProperty().SetColor(0.86, 0.64, 0.16)
-            guide_actor.GetProperty().SetOpacity(0.55)
+            guide_actor.GetProperty().SetOpacity(0.48)
+            guide_actor.SetUseBounds(False)
             renderer.AddActor(guide_actor)
 
         self._image_filter.SetInput(render_window)
@@ -668,6 +778,123 @@ class _VTKOffscreenSceneController:
         # ttk.Notebook puede no estar todavía mapeado y PhotoImage/OpenGL
         # pueden inicializarse demasiado pronto. Esperamos al ciclo idle.
         self._initial_render_after = self._image_label.after_idle(self._initial_render)
+
+    def _ensure_shadow_overlay(self, shadow: np.ndarray) -> None:
+        """Crea una única capa de sombra dinámica sobre el plano térmico."""
+        from vtkmodules.vtkCommonCore import vtkLookupTable
+        from vtkmodules.vtkCommonDataModel import vtkStructuredGrid
+        from vtkmodules.vtkRenderingCore import vtkActor, vtkDataSetMapper
+        from vtkmodules.util.numpy_support import numpy_to_vtk
+
+        if self._grid is None or self._renderer is None:
+            return
+        values = np.asarray(shadow, dtype=np.float32)
+        if values.shape != self._data.temperature.shape:
+            raise ValueError("La matriz de sombra no coincide con la malla térmica 3D")
+        shade = np.clip(1.0 - values, 0.0, 1.0).astype(np.float32, copy=False)
+        vtk_shadow = numpy_to_vtk(shade.ravel(order="C"), deep=True)
+        vtk_shadow.SetName("Sombra")
+
+        if self._shadow_grid is None:
+            dims = [0, 0, 0]
+            self._grid.GetDimensions(dims)
+            shadow_grid = vtkStructuredGrid()
+            shadow_grid.SetDimensions(*dims)
+            shadow_grid.SetPoints(self._grid.GetPoints())
+            shadow_grid.GetPointData().SetScalars(vtk_shadow)
+
+            lut = vtkLookupTable()
+            lut.SetNumberOfTableValues(256)
+            lut.SetRange(0.0, 1.0)
+            for idx in range(256):
+                fraction = idx / 255.0
+                # Sol prácticamente transparente; sombra cada vez más oscura.
+                alpha = 0.58 * (fraction ** 0.85)
+                lut.SetTableValue(idx, 0.05, 0.07, 0.09, alpha)
+            lut.Build()
+
+            mapper = vtkDataSetMapper()
+            mapper.SetInputData(shadow_grid)
+            mapper.SetScalarRange(0.0, 1.0)
+            mapper.SetLookupTable(lut)
+            mapper.ScalarVisibilityOn()
+            actor = vtkActor()
+            actor.SetMapper(mapper)
+            actor.SetPosition(0.0, 0.0, max(0.004, float(self._scene_span or 1.0) * 0.00018))
+            actor.GetProperty().LightingOff()
+            self._renderer.AddActor(actor)
+            self._shadow_grid = shadow_grid
+            self._shadow_lut = lut
+            self._shadow_mapper = mapper
+            self._shadow_actor = actor
+        else:
+            self._shadow_grid.GetPointData().SetScalars(vtk_shadow)
+            self._shadow_grid.Modified()
+
+    def update_animation_frame(self, frame: dict[str, Any], *, render: bool = True) -> None:
+        """Actualiza un fotograma SIN recrear viewport ni reencuadrar cámara."""
+        if self._closed or self._grid is None:
+            return
+        from vtkmodules.util.numpy_support import numpy_to_vtk
+
+        T = np.asarray(frame.get("T_display"), dtype=np.float32)
+        if T.shape != self._data.temperature.shape:
+            raise ValueError("El fotograma 3D tiene una resolución distinta a la escena inicial")
+        vtk_t = numpy_to_vtk(T.ravel(order="C"), deep=True)
+        vtk_t.SetName("Temperatura")
+        self._grid.GetPointData().SetScalars(vtk_t)
+        self._grid.Modified()
+        if self._contours is not None:
+            self._contours.Modified()
+
+        shadow = frame.get("shadow")
+        if shadow is not None:
+            self._ensure_shadow_overlay(np.asarray(shadow, dtype=np.float32))
+
+        alt_deg = float(frame.get("solar_altitude_deg", 0.0))
+        azi_deg = float(frame.get("solar_azimuth_deg", 0.0))
+        center = self._scene_center
+        span = float(self._scene_span or 1.0)
+        if center is not None:
+            alt = math.radians(alt_deg)
+            azi = math.radians(azi_deg)
+            sx = math.sin(azi) * math.cos(alt)
+            sy = math.cos(azi) * math.cos(alt)
+            sz = max(0.10, math.sin(alt))
+            if self._key_light is not None:
+                distance = span * 4.0
+                self._key_light.SetPosition(
+                    center[0] + sx * distance,
+                    center[1] + sy * distance,
+                    center[2] + sz * distance,
+                )
+                self._key_light.SetFocalPoint(*center)
+            sun_distance = span * 0.45
+            sun_pos = (
+                center[0] + sx * sun_distance,
+                center[1] + sy * sun_distance,
+                center[2] + sz * sun_distance,
+            )
+            if self._sun_source is not None:
+                self._sun_source.SetCenter(*sun_pos)
+                self._sun_source.Modified()
+            if self._guide_source is not None:
+                self._guide_source.SetPoint1(*sun_pos)
+                self._guide_source.SetPoint2(center[0], center[1], max(0.05, center[2] * 0.12))
+                self._guide_source.Modified()
+
+        try:
+            self._solar_status_label.configure(
+                text=f"Arrastrar: rotar · Rueda: zoom · ☀ Az {azi_deg:.0f}° · El {alt_deg:.0f}°"
+            )
+        except Exception:
+            pass
+        # CRÍTICO: no ResetCamera() aquí. La cámara permanece idéntica a través
+        # de toda la secuencia y solo cambian T, sombra, sol e iluminación.
+        if self._renderer is not None:
+            self._renderer.ResetCameraClippingRange()
+        if render:
+            self._render_to_tk(high_quality=False)
 
     def _initial_render(self) -> None:
         if self._closed:
@@ -936,23 +1163,12 @@ def _render_matplotlib_fallback(
     for tree in data.trees:
         x = float(getattr(tree, "x", 0.0))
         y = float(getattr(tree, "y", 0.0))
-        h = max(0.2, float(getattr(tree, "h", 1.0) or 1.0))
+        h = max(0.2, float(getattr(tree, "h", getattr(tree, "altura", 1.0)) or 1.0))
         r = max(0.15, float(getattr(tree, "radio_copa", 0.5) or 0.5))
-        ax.plot(
-            [x, x],
-            [y, y],
-            [0, max(0.2, h - r)],
-            color="saddlebrown",
-            linewidth=2.5,
-        )
-        ax.scatter(
-            [x],
-            [y],
-            [max(r, h - r * 0.55)],
-            s=max(70, r * r * 55),
-            color=color_copa(getattr(tree, "especie", "")),
-            alpha=0.82,
-            depthshade=True,
+        profile = canopy_profile(getattr(tree, "forma_copa", None), r, h)
+        ax.plot([x, x], [y, y], [0, float(profile["trunk_height"])], color="saddlebrown", linewidth=2.5)
+        draw_canopy_3d_mpl(
+            ax, tree, color=color_copa(getattr(tree, "especie", "")), alpha=0.88
         )
 
     for structure in data.structures:
@@ -975,7 +1191,6 @@ def _render_matplotlib_fallback(
                 Poly3DCollection(rect, facecolor=color, alpha=0.55)
             )
 
-    # Marcador solar representativo también en el fallback.
     if data.solar_altitude_deg is not None and data.solar_azimuth_deg is not None:
         xmin, xmax, ymin, ymax, max_height = _scene_extent(data)
         span = max(xmax - xmin, ymax - ymin, 1.0)
@@ -985,13 +1200,12 @@ def _render_matplotlib_fallback(
         sx = math.sin(azi) * math.cos(alt)
         sy = math.cos(azi) * math.cos(alt)
         sz = max(0.10, math.sin(alt))
-        sun_distance = span * 2.15
+        sun_distance = span * 0.45
         sun_x = center[0] + sx * sun_distance
         sun_y = center[1] + sy * sun_distance
         sun_z = center[2] + sz * sun_distance
         ax.scatter([sun_x], [sun_y], [sun_z], s=220, color="#ffd34d", edgecolors="#d88a00", depthshade=False)
         ax.plot([sun_x, center[0]], [sun_y, center[1]], [sun_z, max(0.05, center[2] * 0.12)], color="#d88a00", alpha=0.45, linewidth=1.4)
-        ax.text(sun_x, sun_y, sun_z, f"  ☀", fontsize=10, color="#6b4c00")
 
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")

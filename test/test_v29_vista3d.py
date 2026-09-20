@@ -2,7 +2,7 @@ import inspect
 from pathlib import Path
 import numpy as np
 
-import diseño
+import diseno
 import modelo_con_excel as modelo
 from ui.scene3d import scene_data_from_vars, vtk_backend_available
 
@@ -40,9 +40,9 @@ def test_scene3d_reuses_existing_results_without_mutating_t():
 
 
 def test_design_and_model_3d_no_longer_open_toplevel_windows():
-    assert "tk.Toplevel(" not in inspect.getsource(diseño.generar_3d)
+    assert "tk.Toplevel(" not in inspect.getsource(diseno.generar_3d)
     assert "tk.Toplevel(" not in inspect.getsource(modelo.generar_3d)
-    assert "render_scene_3d" in inspect.getsource(diseño.generar_3d)
+    assert "render_scene_3d" in inspect.getsource(diseno.generar_3d)
     assert "render_scene_3d" in inspect.getsource(modelo.generar_3d)
 
 

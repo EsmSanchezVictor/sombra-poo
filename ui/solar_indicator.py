@@ -1,7 +1,7 @@
-"""Indicadores solares discretos para vistas 2D/3D.
+"""Indicadores solares discretos para visualizaciones 2D.
 
-Estos helpers son exclusivamente visuales: representan la posición del sol
-usando azimut y elevación YA calculados por el proyecto.
+El módulo no recalcula geometría solar: solamente representa los valores de
+azimut/elevación ya calculados por Proyecto Sombra.
 """
 from __future__ import annotations
 
@@ -11,26 +11,31 @@ from typing import Any
 from matplotlib.patches import Circle
 
 
-def _as_float(value: Any) -> float | None:
+def _to_float(value: Any) -> float | None:
+    if hasattr(value, "get"):
+        try:
+            value = value.get()
+        except Exception:
+            return None
     try:
-        value = float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return None
-    return value if math.isfinite(value) else None
+    return result if math.isfinite(result) else None
 
 
-def add_solar_indicator_2d(ax, azimuth_deg: Any, altitude_deg: Any) -> None:
-    """Agrega un indicador solar limpio y discreto a un gráfico 2D.
-
-    Muestra un mini-compás con la proyección del azimut solar y una etiqueta
-    compacta con azimut/elevación. No depende de la escala del eje principal.
-    """
-    azimuth_deg = _as_float(azimuth_deg)
-    altitude_deg = _as_float(altitude_deg)
-    if azimuth_deg is None or altitude_deg is None:
+def add_solar_indicator_2d(ax, azimuth_deg: Any, altitude_deg: Any, *, corner: str = "upper-left") -> None:
+    """Dibuja un mini-compás solar fuera del contenido científico principal."""
+    azimuth = _to_float(azimuth_deg)
+    altitude = _to_float(altitude_deg)
+    if azimuth is None or altitude is None:
         return
 
-    inset = ax.inset_axes([0.015, 0.785, 0.235, 0.185])
+    if corner == "upper-right":
+        bounds = [0.755, 0.785, 0.23, 0.185]
+    else:
+        bounds = [0.015, 0.785, 0.23, 0.185]
+    inset = ax.inset_axes(bounds)
     inset.set_xlim(0.0, 1.0)
     inset.set_ylim(0.0, 1.0)
     inset.set_xticks([])
@@ -48,18 +53,14 @@ def add_solar_indicator_2d(ax, azimuth_deg: Any, altitude_deg: Any) -> None:
     inset.text(cx, cy + radius + 0.05, "N", ha="center", va="bottom", fontsize=6.5, color="0.35")
     inset.text(cx + radius + 0.05, cy, "E", ha="left", va="center", fontsize=6.5, color="0.35")
 
-    azi = math.radians(azimuth_deg)
-    dx = math.sin(azi)
-    dy = math.cos(azi)
-    x2 = cx + dx * radius * 0.82
-    y2 = cy + dy * radius * 0.82
+    azi = math.radians(azimuth)
+    x2 = cx + math.sin(azi) * radius * 0.82
+    y2 = cy + math.cos(azi) * radius * 0.82
     inset.annotate(
-        "",
-        xy=(x2, y2),
-        xytext=(cx, cy),
+        "", xy=(x2, y2), xytext=(cx, cy),
         arrowprops=dict(arrowstyle="-|>", lw=1.4, color="#d88a00", shrinkA=0, shrinkB=0),
     )
     inset.add_patch(Circle((x2, y2), radius * 0.16, facecolor="#ffd34d", edgecolor="#d88a00", linewidth=0.9))
     inset.text(0.48, 0.80, "Sol", fontsize=7.5, weight="bold", color="#6b4c00", ha="left", va="center")
-    inset.text(0.48, 0.55, f"Az {azimuth_deg:.0f}°", fontsize=6.8, color="0.25", ha="left", va="center")
-    inset.text(0.48, 0.33, f"El {altitude_deg:.0f}°", fontsize=6.8, color="0.25", ha="left", va="center")
+    inset.text(0.48, 0.55, f"Az {azimuth:.0f}°", fontsize=6.8, color="0.25", ha="left", va="center")
+    inset.text(0.48, 0.33, f"El {altitude:.0f}°", fontsize=6.8, color="0.25", ha="left", va="center")

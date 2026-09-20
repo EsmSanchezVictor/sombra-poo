@@ -439,11 +439,18 @@ class DatabaseManager:
         return max(0, deleted)
 
     def close(self):
-        try:
-            self.cursor.close()
-        except Exception:
-            pass
-        try:
-            self.connection.close()
-        except Exception:
-            pass
+        """Cierra recursos SQLite de forma segura e idempotente."""
+        cursor = getattr(self, "cursor", None)
+        connection = getattr(self, "connection", None)
+        self.cursor = None
+        self.connection = None
+        if cursor is not None:
+            try:
+                cursor.close()
+            except sqlite3.Error:
+                pass
+        if connection is not None:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
