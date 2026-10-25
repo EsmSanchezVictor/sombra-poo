@@ -11,6 +11,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 import importlib.util
 import json
+from core.safe_io import atomic_write_json
 import math
 import os
 import zoneinfo
@@ -326,6 +327,5 @@ def format_audit_text(report: ScientificAuditReport) -> str:
 
 def save_audit_json(path: str, report: ScientificAuditReport) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, report.to_dict(), indent=2, ensure_ascii=False)
     return path

@@ -58,16 +58,19 @@ def generar_informe_proyecto(app, project, output_path: str) -> str:
             print(f"[informe] No se pudo exportar la tabla a Excel: {exc}")
 
     sensibilidad_path = None
+    scenario = None
     try:
         from shadow_temp import Temperatura
         temp_ambient, hora, fecha, lat, lon = app._leer_parametros_tmrt()
-        calculador = Temperatura(
-            lat, lon, k_factor=getattr(app, "k_factor", 0.04),
-            model_mode=getattr(getattr(app, "tmrt_model_mode", None), "get", lambda: "standard")(),
-        )
+        if hasattr(app, "_resolve_temperature_scenario"):
+            scenario, _ = app._resolve_temperature_scenario(temp_ambient, hora, fecha, lat, lon)
+            calculador = scenario.calculator()
+            temp_ambient = scenario.air_temp_c
+        else:
+            calculador = Temperatura(lat, lon, k_factor=getattr(app, "k_factor", 0.04))
         sensibilidad_path, _, _ = analysis_service.curva_sensibilidad(
             calculador, temp_ambient, fecha, hora,
-            project.layout.sensitivity_chart,
+            project.layout.sensitivity_chart, scenario_config=scenario,
         )
     except Exception as exc:
         print(f"[informe] No se pudo generar la curva de sensibilidad: {exc}")
@@ -91,24 +94,35 @@ def generar_informe_proyecto(app, project, output_path: str) -> str:
             txt=f"Ubicacion: {loc.get('city', 'N/D')} ({loc.get('lat', 'N/D')}, {loc.get('lon', 'N/D')})",
             ln=True, align="C",
         )
-    model_mode = getattr(getattr(app, "tmrt_model_mode", None), "get", lambda: "standard")()
+    model_mode = scenario.tmrt_model if scenario is not None else "standard"
     model_name = "Avanzado - balance radiativo v1" if model_mode == "advanced" else "Estandar - empirico calibrable"
     pdf.cell(0, 8, txt=f"Modelo Tmrt activo: {model_name}", ln=True, align="C")
-    surface_mode = getattr(getattr(app, "surface_model_mode", None), "get", lambda: "standard")()
+    surface_mode = (getattr(app, "last_meta", None) or {}).get("surface_model", "standard")
     surface_name = ({
         "advanced": "Avanzado seco - balance energetico no lineal v1",
         "advanced_vegetation": "Avanzado vegetacion + ET - balance energetico v2",
     }.get(surface_mode, "Estandar - linealizado legacy"))
-    pdf.cell(0, 8, txt=f"Modelo de superficie activo: {surface_name}", ln=True, align="C")
-    met = getattr(app, "last_meteorology_data", None) or {}
-    source_mode = getattr(getattr(app, "radiation_source_mode", None), "get", lambda: "clear_sky")()
-    source_label = met.get("source_label") or {
+    pdf.cell(0, 8, txt=f"Ultimo modelo de superficie calculado: {surface_name}", ln=True, align="C")
+    met = ({"ghi": scenario.ghi, "dni": scenario.dni, "dhi": scenario.dhi,
+            "quality": scenario.quality, "derived_components": scenario.derived_components,
+            "warnings": scenario.warnings} if scenario is not None else {})
+    source_mode = scenario.source_mode if scenario is not None else "clear_sky"
+    source_label = (scenario.source_label if scenario is not None else None) or {
         "clear_sky": "Cielo despejado modelado",
         "manual_measured": "Medicion puntual ingresada",
         "manual_scenario": "Escenario radiativo manual",
         "observed_series": "Serie meteorologica importada",
     }.get(source_mode, source_mode)
     pdf.cell(0, 8, txt=f"Fuente radiativa: {source_label}", ln=True, align="C")
+    if scenario is not None:
+        pdf.set_font("Arial", "", 9)
+        pdf.cell(0, 6, txt=f"Escenario Tmrt: {scenario.date_iso} {scenario.hour_local:.2f} h | {scenario.timezone} | {scenario.input_mode}", ln=True)
+    status = (getattr(app, "last_meta", None) or {}).get("surface_diagnostics", {})
+    if status.get("converged") is not None:
+        pdf.set_font("Arial", "", 9)
+        pdf.cell(0, 6, txt=f"Ultimo balance: convergente={status['converged']} | limite={status.get('boundary_clipped')} | residuo={status.get('max_abs_residual_wm2', 0):.3g} W/m2", ln=True)
+        for warning in status.get("warnings", []):
+            pdf.multi_cell(0, 5, txt=warning)
     if met:
         quality = met.get("quality", "N/D")
         derived = ", ".join(met.get("derived_components", []) or []) or "ninguno"

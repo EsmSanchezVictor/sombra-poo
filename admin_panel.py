@@ -26,4 +26,4 @@ class AdminPanel:
         self.panel.geometry(f"{width}x{height}+{x}+{y}")
 
     def add_user(self):
-        AddUserWindow(self.panel, self.db_manager)
+        AddUserWindow(self.panel, self.db_manager, self)

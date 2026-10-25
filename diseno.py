@@ -1,4 +1,6 @@
 import os
+from core.effective_scenario import scenario_date
+from core.surface_energy import surface_diagnostics_summary
 import numpy as np
 import matplotlib.pyplot as plt
 import tkinter as tk
@@ -64,7 +66,7 @@ def _huso_horas(vars):
         dia_val = dia.get() if hasattr(dia, "get") else dia
         hora_val = hora.get() if hasattr(hora, "get") else hora
         try:
-            calculado = _huso_desde_timezone(str(tz_name), int(dia_val), float(hora_val))
+            calculado = _huso_desde_timezone(str(tz_name), int(dia_val), float(hora_val), year=scenario_date(vars).year)
             if calculado is not None:
                 return calculado
         except Exception:
@@ -534,6 +536,8 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
         next(iter(entries.values())).focus_set()
 
 def actualizar_grafico(vars, frame):
+    from services.scenario_service import prepare_surface_scenario
+    scenario = prepare_surface_scenario(vars)
     # Cerrar figura anterior ANTES de destruir el widget Tk. Esto rompe las
     # referencias de artistas/canvas y evita crecimiento de RAM al editar.
     fig_anterior = vars.pop('_current_fig', None)
@@ -550,19 +554,19 @@ def actualizar_grafico(vars, frame):
     X, Y = np.meshgrid(x, y)
     
     # Cálculos principales
-    theta_sol = angulo_solar(vars)
-    azimut_sol = azimut_solar(vars, theta_sol)
+    theta_sol = np.radians(scenario['solar_elevation'])
+    azimut_sol = np.radians(scenario['solar_azimuth'])
     # v29: metadatos SOLO visuales para orientar la iluminación VTK.
     # Son los mismos ángulos ya calculados; no participan en la física.
     vars["_render_solar_altitude_deg"] = float(np.degrees(theta_sol))
     vars["_render_solar_azimuth_deg"] = float(np.degrees(azimut_sol))
-    I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
+    I_sol = scenario["ghi"]
     
     # Cálculo térmico unificado con Modelo. El modo de superficie se lee
     # de Preferencias; estándar preserva la física legacy y avanzado usa
     # el balance no lineal/materiales ópticos de la v12.
     vars["_scene_objects"] = adaptar_objetos_escena(vars.get("arboles", []), vars.get("estructuras", []))
-    T_amb = temperatura_ambiente(vars)
+    T_amb = scenario["air_temp_k"]
     thermal = calcular_campo_termico_superficie(
         vars, X, Y, theta_sol, azimut_sol, I_sol, T_amb, debug=False
     )
@@ -712,6 +716,10 @@ def actualizar_grafico(vars, frame):
         "dia": int(vars["dia"].get()),
         "I_sol": float(I_sol),
         "surface_model_label": surface_model_label,
+        "surface_model": thermal["model"],
+        "date_iso": scenario["date_iso"],
+        "effective_scenario": scenario,
+        "surface_diagnostics": surface_diagnostics_summary(thermal.get("diagnostics")),
         "solar_altitude_deg": float(np.degrees(theta_sol)),
         "solar_azimuth_deg": float(np.degrees(azimut_sol)),
     }

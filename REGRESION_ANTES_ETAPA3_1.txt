@@ -1,0 +1,186 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+________________ test_binary_publication_with_windows_sync_rule ________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-1/test_binary_publication_with_w0')
+windows_file_sync_rule = ([], {11: <_io.BufferedReader name='/tmp/pytest-of-root/pytest-1/test_binary_publication_with_w0/.sombra-write-727qxh4i.npz'>})
+
+    def test_binary_publication_with_windows_sync_rule(tmp_path, windows_file_sync_rule):
+        target=tmp_path/'map.npz';target.write_bytes(b'old file')
+>       with atomic_output(target) as temporary:
+             ^^^^^^^^^^^^^^^^^^^^^
+
+test/test_stage3_1_windows_sync.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:144: in __exit__
+    next(self.gen)
+core/safe_io.py:55: in atomic_output
+    os.fsync(stream.fileno())
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+descriptor = 11
+
+    def strict_fsync(descriptor):
+        handle = handles.get(descriptor)
+        if handle is not None and not handle.closed:
+            if not handle.writable():
+>               raise OSError(errno.EBADF, 'Bad file descriptor')
+E               OSError: [Errno 9] Bad file descriptor
+
+test/test_stage3_1_windows_sync.py:31: OSError
+________________ test_real_excel_writer_with_windows_sync_rule _________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-1/test_real_excel_writer_with_wi0')
+windows_file_sync_rule = ([], {11: <_io.BufferedReader name='/tmp/pytest-of-root/pytest-1/test_real_excel_writer_with_wi0/.sombra-write-sg3l20w2.xlsx'>, 12: <_io.BufferedReader name='/tmp/openpyxl.irit0q95'>})
+
+    def test_real_excel_writer_with_windows_sync_rule(tmp_path, windows_file_sync_rule):
+        target=tmp_path/'scene.xlsx'
+>       save_scene_excel(target,[],[],variables())
+
+test/test_stage3_1_windows_sync.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+core/excel_scene.py:389: in save_scene_excel
+    with atomic_excel_writer(path) as writer:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:144: in __exit__
+    next(self.gen)
+core/excel_scene.py:404: in atomic_excel_writer
+    with atomic_output(path) as temporary:
+         ^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:144: in __exit__
+    next(self.gen)
+core/safe_io.py:55: in atomic_output
+    os.fsync(stream.fileno())
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+descriptor = 11
+
+    def strict_fsync(descriptor):
+        handle = handles.get(descriptor)
+        if handle is not None and not handle.closed:
+            if not handle.writable():
+>               raise OSError(errno.EBADF, 'Bad file descriptor')
+E               OSError: [Errno 9] Bad file descriptor
+
+test/test_stage3_1_windows_sync.py:31: OSError
+__________________ test_sqlite_backup_with_windows_sync_rule ___________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-1/test_sqlite_backup_with_window0')
+windows_file_sync_rule = ([], {11: <_io.BufferedReader name='/tmp/pytest-of-root/pytest-1/test_sqlite_backup_with_window0/copy.sqlite3'>})
+
+    def test_sqlite_backup_with_windows_sync_rule(tmp_path, windows_file_sync_rule):
+        source=tmp_path/'source.sqlite3';target=tmp_path/'copy.sqlite3'
+        conn=sqlite3.connect(source)
+        try:
+            conn.execute('CREATE TABLE example(value TEXT)')
+            conn.execute("INSERT INTO example VALUES('preserved')");conn.commit()
+        finally:conn.close()
+        before=source.read_bytes()
+>       backup_sqlite(source,target)
+
+test/test_stage3_1_windows_sync.py:70: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+services/project_storage.py:62: in backup_sqlite
+    os.fsync(stream.fileno())
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+descriptor = 11
+
+    def strict_fsync(descriptor):
+        handle = handles.get(descriptor)
+        if handle is not None and not handle.closed:
+            if not handle.writable():
+>               raise OSError(errno.EBADF, 'Bad file descriptor')
+E               OSError: [Errno 9] Bad file descriptor
+
+test/test_stage3_1_windows_sync.py:31: OSError
+_______ test_project_save_reopen_export_and_copy_with_windows_sync_rule ________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-1/test_project_save_reopen_expor0')
+windows_file_sync_rule = ([], {13: <_io.TextIOWrapper name='/workspace/scratch/ef1a31bb1bc3/.venv-stage3-clean/lib/python3.12/site-packages/mat...fd66491893eec583499a66e9/escena/.sombra-write-rb6zi30x.xlsx'>, 16: <_io.BufferedReader name='/tmp/openpyxl.asgroc5r'>})
+
+    def test_project_save_reopen_export_and_copy_with_windows_sync_rule(tmp_path, windows_file_sync_rule):
+        from core.project_manager import ProjectManager
+        import core.project_manager as manager_module
+        # No se abre Tk: se ejecutan los servicios y el flujo de guardado real.
+        project=Project(str(tmp_path/'Plaza'));project.ensure_structure()
+        records=AnalysisRecordStore(project.root_path)
+        records.upsert({'analysis_id':'tree1','n':1,'label':'Arbol 1'})
+        app=SimpleNamespace(vars=variables(),vars_modelo=variables(),settings={},is_dirty=True,
+            project_integrity_events=[],last_edit_excel_path=None,last_model_excel_path=None,
+            update_status_saved_time=lambda value:None)
+        state=SimpleNamespace(build_payload=lambda project:{'version':1,'next_n':2,'tag':'new'})
+        manager=ProjectManager(app,state);manager.current_project=project
+        # Se conserva la función UI: un fallo de guardado no debe disparar un diálogo Tk.
+        errors=[]
+        original=manager_module.messagebox.showerror
+        manager_module.messagebox.showerror=lambda *args:errors.append(args)
+        try:
+>           assert manager.save_project(), errors
+E           AssertionError: [('Guardar proyecto', 'No se pudo completar el guardado: [Errno 9] Bad file descriptor
+E             El estado anterior y la recuperación se conservan.')]
+E           assert False
+E            +  where False = save_project()
+E            +    where save_project = <core.project_manager.ProjectManager object at 0x7f9432d78290>.save_project
+
+test/test_stage3_1_windows_sync.py:96: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    sombra.storage:project_storage.py:280 Falló el guardado; se conserva el estado recuperable
+Traceback (most recent call last):
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/services/project_storage.py", line 247, in commit
+    scene_writer(kind,target)
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/project_manager.py", line 344, in <lambda>
+    scene_writer=(lambda kind, target: write_scene(kind,target,self.app)) if write_scenes else None)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/services/scene_persistence.py", line 29, in write_scene
+    return save_scene_excel(path,variables.get('arboles',[]),variables.get('estructuras',[]),variables,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/excel_scene.py", line 389, in save_scene_excel
+    with atomic_excel_writer(path) as writer:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py", line 144, in __exit__
+    next(self.gen)
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/excel_scene.py", line 404, in atomic_excel_writer
+    with atomic_output(path) as temporary:
+         ^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py", line 144, in __exit__
+    next(self.gen)
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/safe_io.py", line 55, in atomic_output
+    os.fsync(stream.fileno())
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/test/test_stage3_1_windows_sync.py", line 31, in strict_fsync
+    raise OSError(errno.EBADF, 'Bad file descriptor')
+OSError: [Errno 9] Bad file descriptor
+ERROR    sombra.projects:project_manager.py:364 No se pudo consolidar el proyecto
+Traceback (most recent call last):
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/project_manager.py", line 343, in _save_project_file
+    payload = project.storage.commit(path,payload,
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/services/project_storage.py", line 247, in commit
+    scene_writer(kind,target)
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/project_manager.py", line 344, in <lambda>
+    scene_writer=(lambda kind, target: write_scene(kind,target,self.app)) if write_scenes else None)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/services/scene_persistence.py", line 29, in write_scene
+    return save_scene_excel(path,variables.get('arboles',[]),variables.get('estructuras',[]),variables,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/excel_scene.py", line 389, in save_scene_excel
+    with atomic_excel_writer(path) as writer:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py", line 144, in __exit__
+    next(self.gen)
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/excel_scene.py", line 404, in atomic_excel_writer
+    with atomic_output(path) as temporary:
+         ^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py", line 144, in __exit__
+    next(self.gen)
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/safe_io.py", line 55, in atomic_output
+    os.fsync(stream.fileno())
+  File "/workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/test/test_stage3_1_windows_sync.py", line 31, in strict_fsync
+    raise OSError(errno.EBADF, 'Bad file descriptor')
+OSError: [Errno 9] Bad file descriptor
+=========================== short test summary info ============================
+FAILED test/test_stage3_1_windows_sync.py::test_binary_publication_with_windows_sync_rule
+FAILED test/test_stage3_1_windows_sync.py::test_real_excel_writer_with_windows_sync_rule
+FAILED test/test_stage3_1_windows_sync.py::test_sqlite_backup_with_windows_sync_rule
+FAILED test/test_stage3_1_windows_sync.py::test_project_save_reopen_export_and_copy_with_windows_sync_rule
+4 failed, 2 deselected in 1.72s

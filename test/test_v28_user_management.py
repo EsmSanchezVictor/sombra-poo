@@ -11,7 +11,7 @@ from database_manager import DatabaseManager
 def test_management_projection_never_exposes_hash_or_salt(tmp_path):
     db = DatabaseManager(str(tmp_path / "users.db"))
     try:
-        assert db.add_user("vale", "clave-segura", 1, "Vale", "Marcó", "123", "v@example.com", "555", "Calle", "10", "Paraná")
+        assert db.add_user("vale", "clave-segura-2026", 1, "Vale", "Marcó", "123", "v@example.com", "555", "Calle", "10", "Paraná")
         row = db.fetch_users_for_management()[0]
         assert "password_hash" not in row.keys()
         assert "salt" not in row.keys()
@@ -48,12 +48,12 @@ def test_existing_database_is_migrated_with_status_and_login_fields(tmp_path):
 def test_inactive_user_cannot_authenticate(tmp_path):
     db = DatabaseManager(str(tmp_path / "users.db"))
     try:
-        db.add_user("u1", "12345678", 0, "", "", "", "", "", "", "", "")
+        db.add_user("u1", "123456789012", 0, "", "", "", "", "", "", "", "")
         row = db.get_user("u1")
-        assert db.authenticate("u1", "12345678")
+        assert db.authenticate("u1", "123456789012")
         ok, err = db.set_user_active(row["id"], False)
         assert ok and err is None
-        assert not db.authenticate("u1", "12345678")
+        assert not db.authenticate("u1", "123456789012")
     finally:
         db.close()
 
@@ -61,7 +61,7 @@ def test_inactive_user_cannot_authenticate(tmp_path):
 def test_last_active_admin_cannot_be_deactivated_or_deleted(tmp_path):
     db = DatabaseManager(str(tmp_path / "users.db"))
     try:
-        db.add_user("admin", "12345678", 1, "", "", "", "", "", "", "", "")
+        db.add_user("admin", "123456789012", 1, "", "", "", "", "", "", "", "")
         user = db.get_user("admin")
         ok, _ = db.set_user_active(user["id"], False)
         assert not ok

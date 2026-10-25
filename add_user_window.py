@@ -2,6 +2,7 @@ import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 from ui.modal_style import prepare_dialog
+from core.auth_policy import password_error, username_error
 
 
 class AddUserWindow:
@@ -101,8 +102,9 @@ class AddUserWindow:
             return "Ingresá un nombre de usuario."
         if len(username) < 3:
             return "El nombre de usuario debe tener al menos 3 caracteres."
-        if len(self.password.get()) < 8:
-            return "La contraseña debe tener al menos 8 caracteres."
+        error = username_error(username) or password_error(self.password.get())
+        if error:
+            return error
         if self.password.get() != self.password2.get():
             return "Las contraseñas no coinciden."
         email = self.email.get().strip()

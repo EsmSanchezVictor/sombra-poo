@@ -26,11 +26,10 @@ Tmrt mediante la ecuación disponible en ``core.thermal_comfort``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, date, time
+from datetime import datetime, date, timedelta
 import math
 import os
 import unicodedata
-import zoneinfo
 from typing import Any
 
 import numpy as np
@@ -436,16 +435,8 @@ def _offset_timezone(fila: dict, fecha_local: date | None, hora: float | None) -
         return float(explicit)
     tz = fila.get("timezone")
     if tz and fecha_local is not None:
-        try:
-            hh = int(hora or 12.0)
-            mm = int(round(((hora or 12.0) - hh) * 60.0))
-            dt = datetime.combine(fecha_local, time(hh % 24, mm % 60))
-            local = dt.replace(tzinfo=zoneinfo.ZoneInfo(str(tz)))
-            off = local.utcoffset()
-            if off is not None:
-                return float(off.total_seconds() / 3600.0)
-        except Exception:
-            pass
+        from core.local_time import local_instant
+        return local_instant(fecha_local, 12.0 if hora is None else hora, str(tz)).utcoffset().total_seconds() / 3600.0
     lon = fila.get("lon")
     if lon is not None:
         # Último recurso; se marca como aproximación en el reporte.
@@ -477,7 +468,11 @@ def _elevacion_solar(fila: dict, defaults: dict | None = None) -> tuple[float | 
         aux["timezone"] = defaults.get("timezone")
     if aux.get("tz_offset") is None and defaults.get("tz_offset") is not None:
         aux["tz_offset"] = defaults.get("tz_offset")
-    offset = _offset_timezone(aux, fecha_local, float(hora))
+    from core.local_time import LocalTimeError
+    try:
+        offset = _offset_timezone(aux, fecha_local, float(hora))
+    except LocalTimeError as exc:
+        return None, str(exc)
     try:
         # Import local para evitar acoplamiento circular en el arranque.
         from shadow_temp import Temperatura
@@ -485,8 +480,10 @@ def _elevacion_solar(fila: dict, defaults: dict | None = None) -> tuple[float | 
         calc = Temperatura(
             latitude=float(lat), longitude=float(lon), tz_offset_hours=offset,
         )
-        day = fecha_local.timetuple().tm_yday
-        return float(calc.solar_altitude(day, float(hora))), "calculada"
+        instant = datetime.combine(fecha_local, datetime.min.time()) + timedelta(hours=float(hora))
+        day = instant.timetuple().tm_yday
+        hour = instant.hour + instant.minute / 60.0 + instant.second / 3600.0
+        return float(calc.solar_altitude(day, hour)), "calculada"
     except Exception:
         return None, "faltante"
 

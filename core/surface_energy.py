@@ -37,6 +37,11 @@ class SurfaceEnergyConfig:
     def validated(self) -> "SurfaceEnergyConfig":
         if self.sky_emissivity_model not in {"brutsaert", "blackbody"}:
             raise ValueError("sky_emissivity_model no reconocido")
+        for name in ('max_iterations', 'tolerance_k', 'residual_tolerance_wm2', 'min_surface_k', 'max_surface_k'):
+            if not math.isfinite(float(getattr(self, name))):
+                raise ValueError(f'{name} debe ser finito')
+        if int(self.max_iterations) != self.max_iterations:
+            raise ValueError('max_iterations debe ser entero')
         if self.max_iterations < 1:
             raise ValueError("max_iterations debe ser >= 1")
         if self.tolerance_k <= 0:
@@ -133,7 +138,33 @@ def solve_surface_energy_balance(
     ta = float(air_temp_k)
     if not math.isfinite(ta) or ta <= 0:
         raise ValueError("air_temp_k debe ser Kelvin positivo y finito")
-    hc = max(0.0, float(convective_coefficient_wm2k))
+    for name, item in (("incident_shortwave_wm2", incident_shortwave_wm2),
+                       ("solar_absorptance", solar_absorptance), ("longwave_emissivity", longwave_emissivity),
+                       ("convective_coefficient_wm2k", convective_coefficient_wm2k),
+                       ("thermal_conductivity_wmk", thermal_conductivity_wmk), ("coupling_depth_m", coupling_depth_m),
+                       ("rh_pct", rh_pct), ("cloud_fraction", cloud_fraction), ("latent_heat_flux_wm2", latent_heat_flux_wm2),
+                       ("substrate_temp_k", substrate_temp_k), ("longwave_down_override_wm2", longwave_down_override_wm2)):
+        if item is not None and not np.all(np.isfinite(np.asarray(item, dtype=float))):
+            raise ValueError(f"{name} debe contener valores finitos")
+    if not 0 <= float(rh_pct) <= 100 or not 0 <= float(cloud_fraction) <= 1:
+        raise ValueError("Humedad o fracción de nubes fuera de rango")
+    for name, item, lower, upper, strict_lower in (
+        ('incident_shortwave_wm2', incident_shortwave_wm2, 0, None, False),
+        ('solar_absorptance', solar_absorptance, 0, 1, False),
+        ('longwave_emissivity', longwave_emissivity, 0, 1, True),
+        ('thermal_conductivity_wmk', thermal_conductivity_wmk, 0, None, True),
+        ('coupling_depth_m', coupling_depth_m, 0, None, True),
+        ('latent_heat_flux_wm2', latent_heat_flux_wm2, 0, None, False),
+        ('substrate_temp_k', substrate_temp_k, 0, None, True),
+        ('longwave_down_override_wm2', longwave_down_override_wm2, 0, None, False)):
+        if item is None:
+            continue
+        arr = np.asarray(item, dtype=float)
+        if np.any(arr <= lower if strict_lower else arr < lower) or (upper is not None and np.any(arr > upper)):
+            raise ValueError(f'{name} fuera del dominio físico')
+    hc = float(convective_coefficient_wm2k)
+    if hc < 0:
+        raise ValueError("El coeficiente convectivo no puede ser negativo")
 
     sw = np.maximum(0.0, np.asarray(incident_shortwave_wm2, dtype=float))
     alpha = np.clip(np.asarray(solar_absorptance, dtype=float), 0.0, 1.0)
@@ -199,8 +230,8 @@ def solve_surface_energy_balance(
     q_ground = h_ground * (ts - tsub)
     residual = q_sw_abs + q_lw_in - q_lw_emit - q_conv - q_ground - le
     max_abs_residual = float(np.nanmax(np.abs(residual)))
-    at_lower = np.isclose(ts, cfg.min_surface_k, atol=max(cfg.tolerance_k, 1e-8))
-    at_upper = np.isclose(ts, cfg.max_surface_k, atol=max(cfg.tolerance_k, 1e-8))
+    at_lower = np.isclose(ts, cfg.min_surface_k, rtol=0.0, atol=max(cfg.tolerance_k, 1e-8))
+    at_upper = np.isclose(ts, cfg.max_surface_k, rtol=0.0, atol=max(cfg.tolerance_k, 1e-8))
     boundary_clipped = bool(np.any((at_lower | at_upper) & (np.abs(residual) > cfg.residual_tolerance_wm2)))
 
     return {
@@ -222,3 +253,21 @@ def solve_surface_energy_balance(
         "converged": converged,
         "model": "surface_energy_advanced_v1",
     }
+
+
+def surface_diagnostics_summary(diagnostics):
+    """Estado del solver para UI, animación y persistencia; sin matrices."""
+    if not diagnostics or "converged" not in diagnostics:
+        return {"status": "not_applicable", "converged": None, "boundary_clipped": None,
+                "iterations": None, "max_abs_residual_wm2": None, "warnings": []}
+    converged = bool(diagnostics["converged"])
+    clipped = bool(diagnostics.get("boundary_clipped", False))
+    warnings = []
+    if not converged:
+        warnings.append("El balance superficial no convergió; interpretar con cautela")
+    if clipped:
+        warnings.append("La temperatura superficial alcanzó un límite del solver")
+    return {"status": "ok" if converged and not clipped else "warning", "converged": converged,
+            "boundary_clipped": clipped, "iterations": int(diagnostics.get("iterations", 0)),
+            "max_abs_residual_wm2": float(diagnostics.get("max_abs_residual_wm2", 0.0)),
+            "warnings": warnings}

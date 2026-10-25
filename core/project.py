@@ -34,6 +34,7 @@ class Project:
         self.config_path = config_path or os.path.join(root_path, "config", "project.json")
         self.state_path = os.path.join(root_path, f"{self.name}.sombra")
         self.next_n = 1
+        self._storage = None
 
     @classmethod
     def from_config_path(cls, config_path: str) -> "Project":
@@ -59,6 +60,13 @@ class Project:
         # canónicas. El archivo recibido se usa solo para localizar/cargar el
         # proyecto; no debe convertirse en la ruta secundaria permanente.
         return cls(root_path)
+
+    @property
+    def storage(self):
+        if self._storage is None:
+            from services.project_storage import ProjectStorage
+            self._storage = ProjectStorage(self.root_path)
+        return self._storage
 
     @property
     def name(self) -> str:

@@ -1,0 +1,46 @@
+Etapa2 sources unmodified: 116
+Etapa1 sources unmodified: 112
+Unchanged scientific module: core/radiative_tmrt.py
+Unchanged scientific module: services/solar_engine.py
+Unchanged scientific module: core/effective_scenario.py
+Unchanged scientific module: core/model_registry.py
+Unchanged scientific module: core/surface_energy.py
+Unchanged scientific module: core/thermal_comfort.py
+Unchanged scientific module: core/meteorology.py
+Unchanged scientific module: core/solar_math.py
+Unchanged scientific module: services/scenario_service.py
+Unchanged scientific module: diseno.py
+Unchanged scientific module: modelo_con_excel.py
+VTK controller AST unchanged
+Extracted meteorology logic AST unchanged: _obtener_datos_solares
+Extracted meteorology logic AST unchanged: _resolve_temperature_scenario
+All Python source syntax checked
+core/project_manager.py 627 567
+ui/app_ui.py 5041 4985
+ui/scene3d.py 1231 1114
+Modified/new Python vs Etapa2:
+core/app_logging.py
+core/app_state.py
+core/app_version.py
+core/excel_scene.py
+core/project.py
+core/project_integrity.py
+core/project_layout.py
+core/project_lock.py
+core/project_manager.py
+core/project_schema.py
+core/safe_io.py
+main.py
+services/analysis_record_store.py
+services/meteorology_controller.py
+services/project_copy.py
+services/project_storage.py
+services/scene_persistence.py
+services/snapshot_service.py
+test/test_stage3_integration.py
+test/test_stage3_storage.py
+test/test_v31_vtk_windows.py
+test/test_v34_advanced_modes.py
+ui/app_ui.py
+ui/scene3d.py
+ui/scene3d_fallback.py

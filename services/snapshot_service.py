@@ -14,6 +14,7 @@ from tkinter import messagebox
 import numpy as np
 import pandas as pd
 
+from core.safe_io import atomic_output
 from core.model_registry import SCIENTIFIC_RELEASE, SCIENTIFIC_SCHEMA
 from services.analysis_record_store import AnalysisRecordStore
 
@@ -102,10 +103,14 @@ class SnapshotService:
             )
             # Compatibilidad con herramientas históricas que esperan xlsx.
             if getattr(selector, "area_seleccionada", None) is not None:
-                pd.DataFrame(selector.area_seleccionada).to_excel(matrix_path, index=False)
+                from core.excel_scene import atomic_excel_writer
+                with atomic_excel_writer(matrix_path) as writer:
+                    pd.DataFrame(selector.area_seleccionada).to_excel(writer, index=False)
                 self.app.last_matrix_path = matrix_path
             if getattr(selector, "area_referencia", None) is not None:
-                pd.DataFrame(selector.area_referencia).to_excel(reference_path, index=False)
+                from core.excel_scene import atomic_excel_writer
+                with atomic_excel_writer(reference_path) as writer:
+                    pd.DataFrame(selector.area_referencia).to_excel(writer, index=False)
                 self.app.last_mask_path = reference_path
 
         self._save_photo_analysis(photo_analysis_path)
@@ -206,7 +211,7 @@ class SnapshotService:
             "tmrt_sombra": None,
             "delta_tmrt": None,
             "modelo_tmrt": None,
-            "modelo_superficie": getattr(getattr(self.app, "surface_model_mode", None), "get", lambda: "standard")(),
+            "modelo_superficie": (getattr(self.app, "last_meta", None) or {}).get("surface_model"),
             "fraccion_suelo_vegetado": float(getattr(self.app, "settings", {}).get("ground_vegetation_fraction", 0.50)),
             "disponibilidad_hidrica_suelo": float(getattr(self.app, "settings", {}).get("vegetation_water_availability", 0.75)),
             "disponibilidad_hidrica_copa": float(getattr(self.app, "settings", {}).get("canopy_water_availability", 0.75)),
@@ -214,6 +219,8 @@ class SnapshotService:
             "complete": True,
         }
 
+        entry["effective_scenario_map"] = getattr(self.app, "tmrt_map_scenario", None)
+        entry["surface_result_metadata"] = getattr(self.app, "last_meta", None)
         met = getattr(self.app, "last_meteorology_data", None) or {}
         if met:
             entry.update({
@@ -227,6 +234,7 @@ class SnapshotService:
 
         tmrt_result = getattr(self.app, "tmrt_result", None)
         if tmrt_result:
+            entry["effective_scenario_point"] = tmrt_result.get("Effective_scenario")
             entry["tmrt_sol"] = tmrt_result.get("Tmrt_sol")
             entry["tmrt_sombra"] = tmrt_result.get("Tmrt_sombra")
             entry["delta_tmrt"] = tmrt_result.get("Delta_Tmrt")
@@ -247,6 +255,12 @@ class SnapshotService:
             except (ValueError, AttributeError):
                 pass
 
+        captured = entry.get("effective_scenario_point") or entry.get("effective_scenario_map")
+        if captured:
+            entry.update({"temp_ambient": captured["air_temp_c"], "modelo_tmrt": captured["tmrt_model"],
+                          "fuente_radiativa": captured["source_mode"], "fuente_radiativa_label": captured["source_label"],
+                          "calidad_meteorologica": captured["quality"], "ghi_wm2": captured["ghi"],
+                          "dni_wm2": captured["dni"], "dhi_wm2": captured["dhi"]})
         saved = store.upsert(entry, complete=True)
         self.app.snapshots = store.list_entries(complete_only=True)
         if hasattr(self.app, "poblar_lista_snapshots"):
@@ -271,7 +285,8 @@ class SnapshotService:
         arr = np.asarray(values)
         vm = np.asarray(valid_mask, dtype=bool) if valid_mask is not None and np.asarray(valid_mask).shape == arr.shape else np.ones(arr.shape, dtype=bool)
         fm = np.asarray(full_mask, dtype=bool) if full_mask is not None else np.empty((0, 0), dtype=bool)
-        np.savez_compressed(path, values=arr, valid_mask=vm, full_mask=fm)
+        with atomic_output(path) as temporary:
+            np.savez_compressed(temporary, values=arr, valid_mask=vm, full_mask=fm)
 
     def _save_photo_analysis(self, path) -> None:
         analysis = getattr(self.app, "shadow_photo_analysis", None) or {}
@@ -282,7 +297,8 @@ class SnapshotService:
                 arr = np.asarray(value)
                 arrays[key] = arr.astype(np.float32, copy=False) if np.issubdtype(arr.dtype, np.floating) else arr
         if arrays:
-            np.savez_compressed(path, **arrays)
+            with atomic_output(path) as temporary:
+                np.savez_compressed(temporary, **arrays)
 
     def _save_tmrt_hover(self, path) -> None:
         data = getattr(self.app, "tmrt_hover_data", None) or {}
@@ -293,7 +309,8 @@ class SnapshotService:
             elif isinstance(value, (int, float, np.number)):
                 arrays[key] = np.asarray(value)
         if arrays:
-            np.savez_compressed(path, **arrays)
+            with atomic_output(path) as temporary:
+                np.savez_compressed(temporary, **arrays)
 
     def _copy_if_exists(self, source: str | None, target: str, *, silent=True) -> None:
         if not source or not os.path.exists(source):
@@ -301,7 +318,8 @@ class SnapshotService:
         if os.path.abspath(source) == os.path.abspath(target):
             return
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        shutil.copy2(source, target)
+        with atomic_output(target) as temporary:
+            shutil.copy2(source, temporary)
 
     # --------------------------------------------------------------- métricas
     @staticmethod

@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox
 from admin_panel import AdminPanel
 from ui.modal_style import ask_text
+from ui.auth_flow import authenticate_with_required_change
 
 class LoginWindow:
     def __init__(self, root, db_manager):
@@ -64,7 +65,7 @@ class LoginWindow:
         # FIX (seguridad): comparación en texto plano reemplazada por la
         # verificación del hash PBKDF2, e índice corregido al esquema con
         # hash (is_admin está en la columna 4).
-        if self.db_manager.authenticate(username, password):
+        if authenticate_with_required_change(self.root, self.db_manager, username, password):
             user = self.db_manager.get_user(username)
             if user[4] == 1:
                 self.open_admin_panel()
@@ -74,18 +75,8 @@ class LoginWindow:
             messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
 
     def recover_password(self):
-        username = self.username_entry.get()
-        user = self.db_manager.get_user(username)
-
-        if user:
-            new_password = ask_text(self.root, "Recuperar contraseña", "Ingresá una nueva contraseña:", show="*", accept_text="Actualizar")
-            if new_password:
-                # FIX: update_password espera el id (columna 0), antes se le
-                # pasaba el username y el UPDATE no encontraba la fila.
-                self.db_manager.update_password(user[0], new_password)
-                messagebox.showinfo("Exito", "Contraseña actualizada correctamente.")
-        else:
-            messagebox.showerror("Error", "Usuario no encontrado.")
+        messagebox.showinfo("Restablecer contraseña",
+                            "Solicitá a un administrador autenticado que restablezca tu contraseña.", parent=self.root)
 
     def open_admin_panel(self):
         AdminPanel(self.root, self.db_manager)

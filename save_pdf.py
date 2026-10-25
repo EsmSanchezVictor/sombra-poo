@@ -39,14 +39,12 @@ class PDFReportGenerator:
 
     def add_image_with_selection(self, pdf):
         # Guardar imagen temporal con las áreas de cálculo y referencia
-        temp_img_file = tempfile.mktemp(".png")
-        self.app.fig1.savefig(temp_img_file)
-
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(200, 10, txt="Áreas de cálculo y referencia", ln=True)
-        pdf.image(temp_img_file, x=10, y=None, w=180)
-
-        os.remove(temp_img_file)  # Eliminar el archivo temporal
+        with tempfile.TemporaryDirectory(prefix="sombra-report-") as temporary:
+            temp_img_file = os.path.join(temporary, "seleccion.png")
+            self.app.fig1.savefig(temp_img_file)
+            pdf.set_font("Arial", "B", 12)
+            pdf.cell(200, 10, txt="Áreas de cálculo y referencia", ln=True)
+            pdf.image(temp_img_file, x=10, y=None, w=180)
 
     def add_contour_image(self, pdf):
         # CORRECCIÓN: self.app.fig2 es el lienzo vacío inicial del panel

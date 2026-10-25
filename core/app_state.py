@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 import os
+from core.safe_paths import safe_project_reference
 import tkinter as tk
 from tkinter import messagebox
 import numpy as np
@@ -15,12 +16,14 @@ import diseno as design
 from core.crown_shapes import DEFAULT_CANOPY_SHAPE, normalize_canopy_shape
 from core.scene_objects import ArbolEscena, EstructuraEscena
 from core.model_registry import methodology_manifest
+from core.app_version import APP_RELEASE
 
 @dataclass
 class ProjectMeta:
     name: str
     saved_at: str
     app: str = "sombra-poo"
+    app_release: str = APP_RELEASE
 
 
 class AppState:
@@ -68,6 +71,7 @@ class AppState:
         vars_data = self._serialize_vars(self.app.vars)
         return {
             "version": 1,
+            "state_schema_version": 2,
             "layout_version": 2,
             "meta": meta.__dict__,
             "name": project.name,
@@ -133,6 +137,8 @@ class AppState:
         }
 
     def apply_payload(self, payload: dict) -> None:
+        from core.project_schema import migrate_payload
+        payload = migrate_payload(payload)
         if payload.get("version") != 1:
             messagebox.showerror("Error", "Versión de proyecto no soportada.")
             return
@@ -536,9 +542,9 @@ class AppState:
     def _abs(self, root: str, value: str | None) -> str | None:
         if not value:
             return None
-        if os.path.isabs(value):
-            return value
-        candidate = os.path.join(root, value)
+        candidate = safe_project_reference(root, value)
+        if candidate is None:
+            return None
         if os.path.exists(candidate):
             return candidate
         # Compatibilidad de lectura con proyectos <= v18 migrados a la
@@ -554,8 +560,8 @@ class AppState:
         }
         for old, new_prefix in aliases.items():
             if rel.startswith(old):
-                mapped = os.path.join(root, new_prefix + rel[len(old):])
-                if os.path.exists(mapped):
+                mapped = safe_project_reference(root, new_prefix + rel[len(old):])
+                if mapped and os.path.exists(mapped):
                     return mapped
         return candidate
 

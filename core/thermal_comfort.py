@@ -54,16 +54,23 @@ def globo_negro_a_tmrt(tg: float, ta: float, v: float,
     con Tg, Ta en °C, v en m/s (medida a la altura del globo), D en m.
     Para globo de 150 mm: D^0.4 ≈ 0.4715.
     """
-    if tg is None or ta is None or v is None:
-        raise ValueError("Tg, Ta y v son obligatorios para convertir el globo.")
-    if v < 0:
-        raise ValueError("La velocidad del viento no puede ser negativa.")
-    if diametro <= 0 or emisividad <= 0:
-        raise ValueError("Diámetro y emisividad deben ser positivos.")
+    try:
+        tg, ta, v, diametro, emisividad = map(float, (tg, ta, v, diametro, emisividad))
+    except (TypeError, ValueError):
+        raise ValueError("Tg, Ta, viento, diámetro y emisividad deben ser numéricos") from None
+    if not all(math.isfinite(x) for x in (tg, ta, v, diametro, emisividad)):
+        raise ValueError("Las entradas del globo deben ser finitas")
+    if tg <= -273.15 or ta <= -273.15 or v < 0 or diametro <= 0 or not 0 < emisividad <= 1:
+        raise ValueError("Entradas físicas inválidas para el globo negro")
     globo_k = tg + 273.15
-    termino_viento = (1.1e8 * (v ** 0.6)) / (emisividad * (diametro ** 0.4))
-    tmrt_k = (globo_k ** 4 + termino_viento * (tg - ta)) ** 0.25
-    return tmrt_k - 273.15
+    try:
+        termino_viento = (1.1e8 * (v ** 0.6)) / (emisividad * (diametro ** 0.4))
+        radicando = globo_k ** 4 + termino_viento * (tg - ta)
+    except (OverflowError, ZeroDivisionError):
+        raise ValueError("La conversión del globo excede el rango numérico") from None
+    if not math.isfinite(radicando) or radicando <= 0:
+        raise ValueError("Radicando no positivo o no finito: la medición no permite obtener Tmrt")
+    return radicando ** 0.25 - 273.15
 
 
 # ---------------------------------------------------------------- humedad
@@ -136,6 +143,18 @@ def _extraer_resultado_utci(resultado):
     return np.asarray(resultado, dtype=np.float64)
 
 
+def utci_domain_mask(ta, tmrt, v, rh):
+    """Dominio operativo de pythermalcomfort: viento de referencia a 10 m.
+
+    Los extremos son inclusivos, como la implementación oficial valid_range.
+    RH también debe ser física. NaN/Inf y ΔTmrt fuera de rango son inválidos.
+    """
+    ta, tr, v, rh = np.broadcast_arrays(*[np.asarray(x, dtype=float) for x in (ta, tmrt, v, rh)])
+    return (np.isfinite(ta) & np.isfinite(tr) & np.isfinite(v) & np.isfinite(rh)
+            & (ta >= -50) & (ta <= 50) & (tr - ta >= -30) & (tr - ta <= 70)
+            & (v >= 0.5) & (v <= 17) & (rh >= 0) & (rh <= 100))
+
+
 def utci(ta: float, tmrt: float, v: float, rh: float) -> float | None:
     """UTCI oficial delegado en :mod:`pythermalcomfort` para un punto."""
     if _utci_pkg is None:
@@ -144,6 +163,8 @@ def utci(ta: float, tmrt: float, v: float, rh: float) -> float | None:
         raise ValueError("La velocidad del viento no puede ser negativa.")
     if rh < 0 or rh > 100:
         raise ValueError("RH debe estar entre 0 y 100.")
+    if not bool(utci_domain_mask(ta, tmrt, v, rh)):
+        return float("nan")
     resultado = _utci_pkg(tdb=float(ta), tr=float(tmrt), v=float(v), rh=float(rh))
     valores = _extraer_resultado_utci(resultado)
     if valores.size == 0:
@@ -172,10 +193,13 @@ def utci_array(ta: float, tmrt, v: float, rh: float):
     if tmrt_arr.size == 0:
         return np.asarray(tmrt_arr, dtype=np.float32)
 
+    valid_mask = utci_domain_mask(ta, tmrt_arr, v, rh)
+    if not np.any(valid_mask):
+        return np.full(tmrt_arr.shape, np.nan, dtype=np.float32)
     try:
         resultado = _utci_pkg(
             tdb=float(ta),
-            tr=tmrt_arr,
+            tr=np.where(valid_mask, tmrt_arr, float(ta)),
             v=float(v),
             rh=float(rh),
         )
@@ -187,7 +211,7 @@ def utci_array(ta: float, tmrt, v: float, rh: float):
                 valores = valores.reshape(tmrt_arr.shape)
             else:
                 valores = np.broadcast_to(valores, tmrt_arr.shape)
-        return np.asarray(valores, dtype=np.float32)
+        return np.where(utci_domain_mask(ta, tmrt_arr, v, rh), valores, np.nan).astype(np.float32)
     except (TypeError, ValueError, AttributeError):
         # Compatibilidad con versiones antiguas que solo aceptan escalares.
         flat = tmrt_arr.ravel()
@@ -203,6 +227,8 @@ def categoria_utci(valor: float | None) -> str:
     if valor is None:
         return "UTCI no disponible"
     valor = float(valor)
+    if not math.isfinite(valor):
+        return "Fuera de dominio UTCI"
     if valor < -40:
         return "Estrés por frío extremo"
     if valor < -27:
@@ -298,3 +324,11 @@ def grados_hora(series, umbral: float, por_encima: bool = True) -> float:
             total += d2_raw * dt_activo / 2.0
 
     return float(total)
+
+
+def formato_utci(valor):
+    """Valor y estado, sin mostrar NaN como temperatura válida."""
+    label = categoria_utci(valor)
+    if valor is None or not math.isfinite(float(valor)):
+        return f"N/D ({label})"
+    return f"{float(valor):.1f} °C ({label})"

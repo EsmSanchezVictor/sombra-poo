@@ -18,8 +18,8 @@ pvlib para la posición y radiación de cielo despejado.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import calendar
 import math
-import zoneinfo
 
 
 def equation_of_time_minutes(day_of_year: int | float) -> float:
@@ -54,21 +54,18 @@ def timezone_offset_hours(
     day_of_year: int,
     hour_local: float = 12.0,
     *,
-    year: int = 2026,
+    year: int | None = None,
 ) -> float | None:
     """UTC offset [h] de una zona IANA para el instante local indicado."""
     if not timezone_name:
         return None
-    try:
-        base = datetime(int(year), 1, 1) + timedelta(
-            days=int(day_of_year) - 1,
-            hours=float(hour_local),
-        )
-        local = base.replace(tzinfo=zoneinfo.ZoneInfo(str(timezone_name)))
-        offset = local.utcoffset()
-        return None if offset is None else float(offset.total_seconds() / 3600.0)
-    except Exception:
-        return None
+    from core.local_time import local_instant
+    year = int(year if year is not None else datetime.now().year)
+    day = float(day_of_year)
+    if not math.isfinite(day) or not day.is_integer() or not 1 <= day <= (366 if calendar.isleap(year) else 365):
+        raise ValueError(f"Día del año inválido para {year}: {day_of_year}")
+    fecha = datetime(year, 1, 1).date() + timedelta(days=int(day) - 1)
+    return local_instant(fecha, hour_local, timezone_name).utcoffset().total_seconds() / 3600.0
 
 
 def solar_declination_deg(day_of_year: int | float) -> float:

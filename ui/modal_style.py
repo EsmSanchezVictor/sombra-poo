@@ -255,7 +255,7 @@ def ask_password_pair(
     parent: tk.Misc | None,
     title: str = "Cambiar contraseña",
     *,
-    min_length: int = 8,
+    min_length: int = 12,
 ) -> tuple[str | None, str | None]:
     """Pide contraseña y confirmación en un único diálogo homogéneo."""
     result = {"value": (None, None)}
@@ -281,6 +281,11 @@ def ask_password_pair(
 
     def accept():
         a, b = p1.get(), p2.get()
+        from core.auth_policy import password_error
+        policy_error = password_error(a)
+        if policy_error:
+            error.configure(text=policy_error)
+            return
         if len(a) < min_length:
             error.configure(text=f"La contraseña debe tener al menos {min_length} caracteres.")
             return

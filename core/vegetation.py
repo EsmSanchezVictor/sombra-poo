@@ -69,17 +69,12 @@ def _clip01(value: Any) -> float:
 
 
 def wind_speed_mps(value: Any) -> float:
-    """Velocidad de viento usada por Penman-Monteith.
+    """Parser compartido; las funciones ET reciben viento a 2 m.
 
-    Las categorías históricas de la aplicación se interpretan como velocidad
-    representativa a ~2 m. Si el usuario provee un número se usa directamente.
+    La conversión desde una referencia a 10 m se hace en el llamador.
     """
-    if isinstance(value, str):
-        return {"nulo": 0.0, "moderado": 4.0, "fuerte": 10.0}.get(value.strip().lower(), 2.0)
-    try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
-        return 2.0
+    from core.climate_profile import viento_categoria_a_ms
+    return viento_categoria_a_ms(value)
 
 
 def saturation_vapor_pressure_kpa(temp_c: Any) -> np.ndarray:

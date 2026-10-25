@@ -1,5 +1,6 @@
 import os
 import json
+from core.safe_io import atomic_write_json
 import numpy as np
 import cv2
 import shutil
@@ -192,8 +193,7 @@ class DatasetSaver:
             
             # Guardar JSON dentro del proyecto.
             os.makedirs(current_project.layout.dataset_dir, exist_ok=True)
-            with open(current_project.layout.via_annotations, 'w', encoding='utf-8') as f:
-                json.dump(self.mask_data, f, indent=2, ensure_ascii=False)
+            atomic_write_json(current_project.layout.via_annotations, self.mask_data, indent=2, ensure_ascii=False)
                 
         except Exception as e:
             print(f"Error al actualizar JSON: {str(e)}")

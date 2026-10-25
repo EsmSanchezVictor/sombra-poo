@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from core.meteorology import MeteorologicalSeries, complete_radiation_components
+from core.local_time import resolve_local_datetime, instant_metadata
 
 
 SOURCE_LABELS = {
@@ -43,6 +44,7 @@ class MeteorologyService:
         if mode not in SOURCE_LABELS:
             mode = "clear_sky"
 
+        dt = resolve_local_datetime(dt, solar_engine.tz)
         azimuth, elevation = solar_engine.get_solar_position(lat, lon, dt)
         day = dt.timetuple().tm_yday
         warnings: list[str] = []
@@ -98,6 +100,7 @@ class MeteorologyService:
             "azimuth": float(azimuth),
             "elevation": float(elevation),
             "timezone": solar_engine.tz,
+            **instant_metadata(dt),
             "source_mode": mode,
             "source": mode,  # compatibilidad con código previo
             "source_label": SOURCE_LABELS[mode],

@@ -6,6 +6,8 @@ from ui.app_ui import SombraApp
 from add_user_window import AddUserWindow
 from modify_user_window import ModifyUserWindow
 from ui.modal_style import ask_password_pair
+from ui.auth_flow import authenticate_with_required_change
+from core.auth_policy import MIN_PASSWORD_LENGTH
 
 class MainApp:
     def __init__(self, root, db_manager):
@@ -147,8 +149,9 @@ class MainApp:
         # FIX (seguridad): antes se comparaba user[2] == password en texto
         # plano, y con el esquema nuevo de hash (PBKDF2+salt) el índice [2]
         # ya no es la contraseña. authenticate() verifica el hash.
-        if self.db_manager.authenticate(username, password):
+        if authenticate_with_required_change(self.root, self.db_manager, username, password):
             user = self.db_manager.get_user(username)
+            username = user["username"]
             self.current_user = username
             self.current_user_id = int(user[0])
             self.connection_start = datetime.now()
@@ -159,7 +162,9 @@ class MainApp:
             else:  # Regular user
                 self.open_main_app()
         else:
-            messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
+            delay = self.db_manager.retry_after(username)
+            message = f"Esperá {max(1, int(delay + 0.99))} segundos antes de volver a intentar." if delay else "Usuario o contraseña incorrectos."
+            messagebox.showerror("Error", message)
 
     def admin_options(self):
         self.exit_fullscreen()
@@ -562,7 +567,7 @@ class MainApp:
         p1, p2 = ask_password_pair(
             self.root,
             f"Restablecer contraseña · {user['username']}",
-            min_length=8,
+            min_length=MIN_PASSWORD_LENGTH,
         )
         if p1 is None:
             return

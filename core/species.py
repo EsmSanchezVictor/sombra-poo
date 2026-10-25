@@ -27,6 +27,7 @@ eliminarla la restaura a su valor de fábrica.
 from __future__ import annotations
 
 import json
+from core.safe_io import atomic_write_json
 import os
 
 ESPECIES = {
@@ -188,8 +189,7 @@ def _cargar_custom() -> dict:
 def _guardar_custom(datos: dict) -> None:
     ruta = _ruta_db()
     os.makedirs(os.path.dirname(ruta), exist_ok=True)
-    with open(ruta, "w", encoding="utf-8") as handle:
-        json.dump(datos, handle, indent=2, ensure_ascii=False, sort_keys=True)
+    atomic_write_json(ruta, datos, indent=2, ensure_ascii=False, sort_keys=True)
 
 
 def especies_db() -> dict:

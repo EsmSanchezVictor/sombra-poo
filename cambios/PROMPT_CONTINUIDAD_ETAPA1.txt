@@ -1,0 +1,8 @@
+Continuamos Proyecto Sombra. Base original estable: v35.6; v35.7 descartada.
+La entrega nueva v35.6-etapa1 implementa seguridad, usuarios, rutas, .3es y JSON atómico.
+Leé CONTEXTO_MAESTRO_ETAPA1.md, CAMBIOS_ETAPA1.md y VALIDACION_ETAPA1.md.
+Baseline nueva entrega: 285 aprobadas, 5 omitidas (pvlib), Linux/Python 3.12.14.
+No se ejecutaron GUI ni Windows; no afirmar validación de campo.
+Próximo trabajo autorizado: Etapa 2, coherencia científica, por subbloques cortos y pruebas.
+Mantener v35.6 para comparación y no incorporar código de v35.7.
+Entregar ZIP completo/reemplazo, instrucciones, resultados de pruebas, contexto y SHA256.

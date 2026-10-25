@@ -109,9 +109,12 @@ def viento_categoria_a_ms(categoria: str) -> float:
     if text in VIENTO_CATEGORIA_MS:
         return VIENTO_CATEGORIA_MS[text]
     try:
-        return max(0.0, float(text))
+        speed = float(text)
     except (TypeError, ValueError):
-        return 4.0
+        return VIENTO_CATEGORIA_MS["moderado"]
+    if not math.isfinite(speed) or speed < 0:
+        raise ValueError("El viento debe ser finito y no negativo")
+    return speed
 
 
 # ---------------------------------------------------------------- radiación
@@ -160,7 +163,7 @@ def descomponer_radiacion(
     dhi = kd * ghi
     directa_horizontal = max(0.0, ghi - dhi)
     seno = math.sin(math.radians(max(elevacion, 0.0)))
-    dni_normal = directa_horizontal / seno if seno > 0.01 else 0.0
+    dni_normal = directa_horizontal / seno if seno > 0.0 else 0.0
     return {
         "ghi": ghi,
         "dhi": dhi,

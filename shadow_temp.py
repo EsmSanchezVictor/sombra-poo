@@ -125,12 +125,8 @@ class Temperatura:
 
     def clear_sky_radiation(self, solar_altitude):
         """Fallback simple de GHI de cielo despejado (W/m²)."""
-        if float(solar_altitude) <= 0.0:
-            return 0.0
-        solar_constant = 1367.0
-        atmospheric_transmittance = 0.75
-        radiation = solar_constant * math.sin(math.radians(float(solar_altitude))) * atmospheric_transmittance
-        return max(float(radiation), 0.0)
+        from services.solar_engine import SolarEngine
+        return SolarEngine.fallback_radiation(solar_altitude)["ghi"]
 
     @classmethod
     def _tau_sombra_total(cls, shadow_type: str, full_shadow_transmittance=None) -> float:

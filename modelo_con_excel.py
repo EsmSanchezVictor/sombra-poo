@@ -1,4 +1,7 @@
 import os
+from core.effective_scenario import scenario_date, effective_model
+from core.climate_profile import velocidad_viento, viento_categoria_a_ms
+from core.surface_energy import surface_diagnostics_summary
 import numpy as np
 import matplotlib.pyplot as plt
 import tkinter as tk
@@ -206,7 +209,7 @@ def _meridiano_estandar(longitud, huso_horas=None):
     return standard_meridian_deg(longitud, huso_horas)
 
 
-def _huso_desde_timezone(timezone_name, dia_del_año, hora_local=12.0, year=2026):
+def _huso_desde_timezone(timezone_name, dia_del_año, hora_local=12.0, year=None):
     return timezone_offset_hours(
         timezone_name, dia_del_año, hora_local, year=year
     )
@@ -347,21 +350,8 @@ def calcular_coeficiente_conveccion(viento):
     exterior: h = 5.7 + 3.8 * v (v en m/s). Sigue aceptando categorías de
     texto por compatibilidad, traduciéndolas a una velocidad estimada.
     """
-    if isinstance(viento, str):
-        text = viento.strip().lower().replace(",", ".")
-        if text in _VIENTO_CATEGORIA_A_MS:
-            v = _VIENTO_CATEGORIA_A_MS[text]
-        else:
-            try:
-                # Series meteorológicas cargadas en una StringVar llegan como
-                # texto numérico (p. ej. "3.2"). Antes se trataban como una
-                # categoría desconocida y se sustituían silenciosamente por
-                # 2 m/s.
-                v = max(0.0, float(text))
-            except (TypeError, ValueError):
-                v = 2.0
-    else:
-        v = max(0.0, float(viento))
+    from core.climate_profile import viento_categoria_a_ms
+    v = viento_categoria_a_ms(viento)
     return 5.7 + 3.8 * v
 
 
@@ -584,7 +574,7 @@ def _canopy_et_diagnostics(X, Y, arboles, T_amb, rh, viento, I_sol, lw_local, di
         ph = phenology_factor(dia, latitud, bool(props.get("caducifolio", False)),
                               leaf_off_fraction=cfg.leaf_off_fraction)
         r = species_canopy_latent_flux_wm2(
-            air_temp_k=float(T_amb), rh_pct=rh, wind=viento,
+            air_temp_k=float(T_amb), rh_pct=rh, wind=velocidad_viento(2.0, viento_categoria_a_ms(viento)),
             ghi_wm2=float(I_sol), longwave_down_wm2=lw_mean,
             lai=float(props.get("lai_tipico", 3.0)),
             kc=float(props.get("kc_et", 1.0)), phenology=ph,
@@ -606,29 +596,18 @@ def _canopy_et_diagnostics(X, Y, arboles, T_amb, rh, viento, I_sol, lw_local, di
 
 
 def _surface_model_mode(vars):
-    app = vars.get("_app_instance") if isinstance(vars, dict) else None
+    app = vars.get('_app_instance') if isinstance(vars, dict) else None
+    mode = _var_value(vars, '_modo_modelo', 'advanced')
+    selected = _var_value(vars, '_surface_model_mode', 'standard')
     if app is not None:
-        # Los ajustes avanzados no deben seguir actuando de forma invisible
-        # cuando la interfaz correspondiente vuelve a modo simple.
-        try:
-            if vars is getattr(app, "vars_modelo", None) and app.modo_modelo.get() == "simple":
-                return "standard"
-            if vars is getattr(app, "vars", None) and app.modo_edicion.get() == "simple":
-                return "standard"
-        except Exception:
-            pass
-    if app is not None and hasattr(app, "surface_model_mode"):
-        try:
-            mode = app.surface_model_mode.get()
-            if mode in {"standard", "advanced", "advanced_vegetation"}:
-                return mode
-        except Exception:
-            pass
-    value = vars.get("_surface_model_mode", "standard") if isinstance(vars, dict) else "standard"
-    if hasattr(value, "get"):
-        value = value.get()
-    text = str(value).lower()
-    return text if text in {"standard", "advanced", "advanced_vegetation"} else "standard"
+        if vars is getattr(app, 'vars_modelo', None):
+            mode = app.modo_modelo.get()
+        elif vars is getattr(app, 'vars', None):
+            mode = app.modo_edicion.get()
+        if hasattr(app, 'surface_model_mode'):
+            selected = app.surface_model_mode.get()
+    return effective_model(mode, selected, surface=True)
+
 
 def _var_value(vars, key, default=None):
     value = vars.get(key, default)
@@ -688,6 +667,8 @@ def calcular_campo_termico_superficie(vars, X, Y, theta_sol, azimut_sol, I_sol, 
     Ta/RH/nubosidad, convección y conducción al sustrato, además de óptica de
     materiales transmisivos.
     """
+    if not np.isfinite(float(T_amb)) or float(T_amb) <= 0 or not np.isfinite(float(I_sol)) or float(I_sol) < 0:
+        raise ValueError('Temperatura Kelvin o radiación superficial inválida')
     mode = _surface_model_mode(vars)
     arboles = vars.get("arboles", [])
     estructuras = vars.get("estructuras", [])
@@ -700,7 +681,7 @@ def calcular_campo_termico_superficie(vars, X, Y, theta_sol, azimut_sol, I_sol, 
         )
     else:
         tau_arboles = calcular_sombra_arboles(X, Y, arboles, theta_sol, azimut_sol)
-    h_c = calcular_coeficiente_conveccion(_var_value(vars, "viento", "moderado"))
+    h_c = calcular_coeficiente_conveccion(_var_value(vars, "_effective_wind_ref_10m", _var_value(vars, "viento", "moderado")))
 
     if mode == "standard":
         sombra_estruct = sombra_estructuras(X, Y, estructuras, theta_sol, azimut_sol)
@@ -728,7 +709,7 @@ def calcular_campo_termico_superficie(vars, X, Y, theta_sol, azimut_sol, I_sol, 
     tau_total = np.clip(tau_arboles * tau_estruct, 0.0, 1.0)
     props = asignar_propiedades_avanzadas_grilla(X, Y, estructuras, debug=debug)
     incident_sw = np.maximum(0.0, float(I_sol)) * tau_total
-    rh = float(_var_value(vars, "humedad", 50.0) or 50.0)
+    rh = float(_var_value(vars, "_effective_rh_pct", _var_value(vars, "humedad", 50.0)))
     cloudiness = _var_value(vars, "nubosidad", "Despejado")
     cloud_override = vars.get("_cloud_fraction_override")
     if hasattr(cloud_override, "get"):
@@ -750,7 +731,7 @@ def calcular_campo_termico_superficie(vars, X, Y, theta_sol, azimut_sol, I_sol, 
         )
         ground_et = ground_latent_heat_flux_wm2(
             air_temp_k=float(T_amb), rh_pct=rh,
-            wind=_var_value(vars, "viento", "moderado"),
+            wind=velocidad_viento(2.0, viento_categoria_a_ms(_var_value(vars, "_effective_wind_ref_10m", _var_value(vars, "viento", "moderado")))),
             incident_shortwave_wm2=incident_sw,
             longwave_down_wm2=lw_local,
             vegetation_fraction=veg_fraction,
@@ -759,7 +740,7 @@ def calcular_campo_termico_superficie(vars, X, Y, theta_sol, azimut_sol, I_sol, 
         )
         latent_ground = ground_et["latent_heat_flux_wm2"]
         canopy_field, canopy_rows = _canopy_et_diagnostics(
-            X, Y, arboles, T_amb, rh, _var_value(vars, "viento", "moderado"),
+            X, Y, arboles, T_amb, rh, _var_value(vars, "_effective_wind_ref_10m", _var_value(vars, "viento", "moderado")),
             I_sol, lw_local, dia, latitud, cfg
         )
         vegetation_diag = {
@@ -1021,6 +1002,8 @@ def generar_grafico(vars, frame):
     if '_update_required' not in vars or not vars['_update_required']:
         return
 
+    from services.scenario_service import prepare_surface_scenario
+    scenario = prepare_surface_scenario(vars)
     for widget in frame.winfo_children():
         widget.destroy()
 
@@ -1042,16 +1025,8 @@ def generar_grafico(vars, frame):
     X, Y = np.meshgrid(x, y)
 
     # Cálculos principales
-    huso_var = vars.get("huso_horas")
-    huso_horas = huso_var.get() if hasattr(huso_var, "get") else huso_var
-    tz_var = vars.get("timezone")
-    timezone_name = tz_var.get() if hasattr(tz_var, "get") else tz_var
-    if timezone_name:
-        huso_tz = _huso_desde_timezone(timezone_name, vars["dia"].get(), vars["hora"].get())
-        if huso_tz is not None:
-            huso_horas = huso_tz
-    theta_sol = angulo_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), huso_horas)
-    azimut_sol = azimut_solar(vars["lat"].get(), vars["lon"].get(), vars["dia"].get(), vars["hora"].get(), theta_sol, huso_horas)
+    theta_sol = np.radians(scenario['solar_elevation'])
+    azimut_sol = np.radians(scenario['solar_azimuth'])
     # v29: metadatos SOLO visuales para orientar la iluminación VTK.
     vars["_render_solar_altitude_deg"] = float(np.degrees(theta_sol))
     vars["_render_solar_azimuth_deg"] = float(np.degrees(azimut_sol))
@@ -1063,8 +1038,8 @@ def generar_grafico(vars, frame):
         _rad_override = _rad_override.get()
     if _rad_override is None or _rad_override == "":
         I_sol = vars["I_sol_base"].get() * max(0, np.sin(theta_sol))
-        radiation_source = "legacy_panel4"
-        radiation_quality = "legacy_configured"
+        radiation_source = scenario["source_label"]
+        radiation_quality = scenario["quality"]
     else:
         I_sol = max(0.0, float(_rad_override))
         radiation_source = str(vars.get("_radiation_source_label", "Radiación externa"))
@@ -1215,7 +1190,8 @@ def generar_grafico(vars, frame):
                 f"Emisividad cielo: {surface_diag.get('sky_emissivity', 0.0):.3f}\n"
                 f"Coef. convección: {h_c:.1f} W/m²K\n"
                 f"LE suelo medio: {np.mean(surface_diag.get('q_latent', 0.0)):.1f} W/m²\n"
-                f"Residuo máx.: {np.max(np.abs(surface_diag.get('residual_wm2', 0.0))):.3g} W/m²"
+                f"Residuo máx.: {np.max(np.abs(surface_diag.get('residual_wm2', 0.0))):.3g} W/m²\n"
+                f"Convergente: {surface_diag.get('converged')} · límite: {surface_diag.get('boundary_clipped')} · iter.: {surface_diag.get('iterations')}"
             )
         else:
             info_text = (
@@ -1252,6 +1228,9 @@ def generar_grafico(vars, frame):
             "radiation_dhi": vars.get("_radiation_override_dhi"),
             "cloud_fraction": vars.get("_cloud_fraction_override"),
             "surface_model": surface_mode,
+            "date_iso": scenario["date_iso"],
+            "surface_diagnostics": surface_diagnostics_summary(surface_diag),
+            "effective_scenario": vars.get("_effective_scenario"),
             "surface_model_label": surface_model_label,
             "sky_emissivity": (float(surface_diag.get("sky_emissivity")) if surface_mode in {"advanced", "advanced_vegetation"} else None),
             "energy_residual_max_wm2": (float(np.max(np.abs(surface_diag.get("residual_wm2", 0.0)))) if surface_mode in {"advanced", "advanced_vegetation"} else None),

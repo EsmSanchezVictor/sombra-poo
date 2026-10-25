@@ -20,6 +20,7 @@ import unicodedata
 
 import numpy as np
 import pandas as pd
+from core.local_time import resolve_local_datetime, LocalTimeError, TIME_POLICY
 
 
 ALIASES = {
@@ -71,19 +72,31 @@ def _parse_timestamp(df: pd.DataFrame, timezone: str) -> pd.Series:
             "La serie meteorológica necesita una columna timestamp/datetime o columnas fecha + hora."
         )
 
-    parsed = pd.to_datetime(raw, errors="coerce", dayfirst=False)
-    if parsed.isna().all():
-        # Segundo intento útil para archivos locales día/mes/año.
-        parsed = pd.to_datetime(raw, errors="coerce", dayfirst=True)
-    if parsed.isna().all():
+    # Parsear individualmente preserva los offsets distintos de una hora
+    # repetida. Convertir primero toda la columna a UTC inventaría una zona
+    # para las filas naive. No se mezclan esas dos convenciones en un CSV.
+    parsed = []
+    for text in raw:
+        try:
+            ts = pd.Timestamp(text)
+        except (ValueError, TypeError):
+            ts = pd.NaT
+        parsed.append(ts)
+    if all(pd.isna(ts) for ts in parsed):
         raise ValueError("No se pudo interpretar ninguna fecha/hora de la serie meteorológica.")
-
-    # Pandas Series.dt.tz es None para timestamps naive.
-    if parsed.dt.tz is None:
-        parsed = parsed.dt.tz_localize(timezone, nonexistent="shift_forward", ambiguous="NaT")
-    else:
-        parsed = parsed.dt.tz_convert(timezone)
-    return parsed
+    conventions = {ts.tzinfo is not None for ts in parsed if not pd.isna(ts)}
+    if len(conventions) > 1:
+        raise ValueError("El CSV mezcla horas con y sin offset. Use una única convención temporal en todas las filas.")
+    localized = []
+    for row, ts in enumerate(parsed, start=2):
+        if pd.isna(ts):
+            localized.append(pd.NaT)
+            continue
+        try:
+            localized.append(resolve_local_datetime(ts, timezone))
+        except LocalTimeError as exc:
+            raise ValueError(f"Fila {row} del CSV: {exc}") from exc
+    return pd.Series(pd.DatetimeIndex(localized), index=df.index)
 
 
 def _numeric_clean(series: pd.Series, *, low: float | None = None, high: float | None = None) -> pd.Series:
@@ -185,15 +198,11 @@ class MeteorologicalSeries:
             "start": self.start.isoformat(),
             "end": self.end.isoformat(),
             "columns": self.available_columns,
+            "time_policy": TIME_POLICY,
         }
 
     def _target(self, dt) -> pd.Timestamp:
-        ts = pd.Timestamp(dt)
-        if ts.tzinfo is None:
-            ts = ts.tz_localize(self.timezone, nonexistent="shift_forward", ambiguous="NaT")
-        else:
-            ts = ts.tz_convert(self.timezone)
-        return ts
+        return pd.Timestamp(resolve_local_datetime(pd.Timestamp(dt), self.timezone))
 
     def sample_at(self, dt, *, max_gap_minutes: float = 90.0) -> MeteorologicalSample | None:
         target = self._target(dt)

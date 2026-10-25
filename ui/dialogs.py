@@ -7,6 +7,7 @@ como bound methods (asignados en __init__) para que menú, ribbon y
 Panel 4 no cambien.
 """
 from __future__ import annotations
+from core.effective_scenario import effective_model
 
 import os
 import queue
@@ -275,23 +276,16 @@ class HerramientasDialogs:
         pythermalcomfort, evitando bloquear el event loop de Tkinter.
         """
         temp_ambient, hora, fecha, lat, lon = self.app._leer_parametros_tmrt()
-        rh_source = (
-            self.app.vars_modelo["humedad"].get()
-            if getattr(self.app, "modo_modelo", None) is not None and self.app.modo_modelo.get() == "advanced"
-            else self.app.simple_rh.get()
-        )
-        rh = float(rh_source or 60.0)
-        if rh < 0 or rh > 100:
-            messagebox.showwarning("Humedad", "La humedad relativa debe estar entre 0 y 100.")
+        try:
+            scenario, solar_data = self.app._resolve_temperature_scenario(temp_ambient, hora, fecha, lat, lon)
+        except ValueError as exc:
+            messagebox.showwarning("Escenario", str(exc))
             return
-        v_ms = viento_categoria_a_ms(self.app.vars_modelo["viento"].get())
-        tz_offset = self.app._offset_timezone(fecha, hora)
-        calculador = Temperatura(
-            lat, lon, k_factor=self.app.k_factor, tz_offset_hours=tz_offset,
-            model_mode=self.app.tmrt_model_mode.get(),
-        )
-        solar_data = self.app._obtener_datos_solares(lat, lon, fecha, hora)
-        ghi = float(solar_data["ghi"])
+        temp_ambient = scenario.air_temp_c
+        rh = scenario.rh_pct
+        v_ms = scenario.wind_ref_10m_m_s
+        calculador = scenario.calculator()
+        ghi = scenario.ghi
 
         sombra_pct = 50.0
         if self.app.porcentaje_sombra is not None:
@@ -330,8 +324,8 @@ class HerramientasDialogs:
             utci_sol = thermal_comfort.utci(temp_ambient, tmrt_sol, v_ms, rh)
             utci_sombra = thermal_comfort.utci(temp_ambient, tmrt_sombra, v_ms, rh)
             lineas += [
-                f"UTCI sol = {utci_sol:.1f} °C ({thermal_comfort.categoria_utci(utci_sol)})",
-                f"UTCI sombra = {utci_sombra:.1f} °C ({thermal_comfort.categoria_utci(utci_sombra)})",
+                f"UTCI sol = {thermal_comfort.formato_utci(utci_sol)}",
+                f"UTCI sombra = {thermal_comfort.formato_utci(utci_sombra)}",
             ]
         else:
             lineas += [
@@ -483,18 +477,25 @@ class HerramientasDialogs:
             except ValueError:
                 messagebox.showwarning("Entrada", "Revisá los valores numéricos.", parent=dlg)
                 return
+            def provider(ta, hour, calculator):
+                from dataclasses import replace
+                conf, solar = self.app._resolve_temperature_scenario(ta, hour, fecha, lat, lon)
+                observed = conf.source_mode == 'observed_series'
+                return replace(conf, k_factor=calculator.k_factor,
+                               rh_pct=conf.rh_pct if observed and solar.get('rh_pct') is not None else datos['rh'],
+                               wind_ref_10m_m_s=conf.wind_ref_10m_m_s if observed and solar.get('wind_m_s') is not None else datos['viento'])
             horas = [float(h) for h in
                      np.arange(datos["hora_ini"], datos["hora_fin"] + 1)]
             calc = Temperatura(
                 lat, lon, k_factor=self.app.k_factor,
-                model_mode=self.app.tmrt_model_mode.get(),
+                model_mode=effective_model(self.app.modo_temperatura.get(), self.app.tmrt_model_mode.get()),
             )
             esc_a = scenario_tools.escenario_horario(
                 calc, fecha, horas, datos["ta_min"], datos["ta_max"],
-                datos["rh"], datos["viento"], datos["sombra_a"])
+                datos["rh"], datos["viento"], datos["sombra_a"], scenario_provider=provider)
             esc_b = scenario_tools.escenario_horario(
                 calc, fecha, horas, datos["ta_min"], datos["ta_max"],
-                datos["rh"], datos["viento"], datos["sombra_b"])
+                datos["rh"], datos["viento"], datos["sombra_b"], scenario_provider=provider)
             cmp = scenario_tools.comparar_escenarios(esc_a, esc_b)
             # banda de incertidumbre: k ± 20% (sensibilidad típica del
             # coeficiente de calibración; si se calibró con CSV se
@@ -502,17 +503,17 @@ class HerramientasDialogs:
             k_lo = self.app.k_factor * 0.8
             k_hi = self.app.k_factor * 1.2
             calc_lo = Temperatura(
-                lat, lon, k_factor=k_lo, model_mode=self.app.tmrt_model_mode.get()
+                lat, lon, k_factor=k_lo, model_mode=effective_model(self.app.modo_temperatura.get(), self.app.tmrt_model_mode.get())
             )
             calc_hi = Temperatura(
-                lat, lon, k_factor=k_hi, model_mode=self.app.tmrt_model_mode.get()
+                lat, lon, k_factor=k_hi, model_mode=effective_model(self.app.modo_temperatura.get(), self.app.tmrt_model_mode.get())
             )
             esc_b_lo = scenario_tools.escenario_horario(
                 calc_lo, fecha, horas, datos["ta_min"], datos["ta_max"],
-                datos["rh"], datos["viento"], datos["sombra_b"])
+                datos["rh"], datos["viento"], datos["sombra_b"], scenario_provider=provider)
             esc_b_hi = scenario_tools.escenario_horario(
                 calc_hi, fecha, horas, datos["ta_min"], datos["ta_max"],
-                datos["rh"], datos["viento"], datos["sombra_b"])
+                datos["rh"], datos["viento"], datos["sombra_b"], scenario_provider=provider)
             # La sombra no modifica Heat Index si Ta/RH son iguales. Para
             # comparar escenarios se grafica UTCI (si está disponible) o,
             # en su defecto, Tmrt.
@@ -1187,60 +1188,79 @@ class HerramientasDialogs:
         tk.Button(pie, text="Cerrar", command=dlg.destroy).pack(side="right", padx=6)
 
     def _dialogo_ranking_arboles(self):
-        """Ranking de efectividad de los árboles de la escena de diseño:
-        área de sombra proyectada a la fecha/hora actuales y su aporte a
-        la reducción de Tmrt promedio (k·GHI·(1−transmitancia))."""
-        arboles = list(self.app.vars.get("arboles") or []) + list(
-            self.app.vars_modelo.get("arboles") or [])
-        vistos = set()
-        unicos = []
-        for a in arboles:
-            clave = id(a)
-            if clave not in vistos:
-                vistos.add(clave)
-                unicos.append(a)
-        if not unicos:
-            messagebox.showinfo(
-                "Ranking de árboles",
-                "No hay árboles en la escena.\n\nAgregalos en el Panel 3 "
-                "(Modo diseño) y volvé a intentar.")
+        """Una escena elegida, con el contexto efectivo del panel Temperatura."""
+        from services.tree_ranking_service import rank_app_trees
+        from core.model_registry import TMRT_MODELS
+        from core.safe_io import atomic_write_json
+        available = [name for name, variables in (("Edición", self.app.vars), ("Modelo", self.app.vars_modelo))
+                     if variables.get("arboles")]
+        if not available:
+            messagebox.showinfo("Ranking de árboles", "Agregue árboles en Edición o Modelo para calcular el ranking.")
             return
-        temp_ambient, hora, fecha, lat, lon = self.app._leer_parametros_tmrt()
-        calc = Temperatura(lat, lon, k_factor=self.app.k_factor)
-        ranking = scenario_tools.ranking_arboles(unicos, calc, fecha, hora)
-
         dlg = tk.Toplevel(self.app.root)
-        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(620, 460))
-        dlg.title("Efectividad de los árboles de la escena")
-        dlg.geometry("700x520")
-        dlg.transient(self.app.root)
-        info = tk.Label(dlg, justify="left", anchor="w", font=("Consolas", 9), text=(
-            f"Fecha {fecha} · hora {hora:.1f} · k_factor {self.app.k_factor:.4f}\n"
-            f"Escena: {len(unicos)} árboles — sombra y ΔTmrt promedio calculados "
-            "sobre la grilla de 60×60 m."))
-        info.pack(fill="x", padx=12, pady=(10, 4))
-
-        fig = plt.Figure(figsize=(6.6, 3.2), dpi=100)
+        prepare_dialog(dlg, self.app.root, modal=False, resizable=True, minsize=(680, 560))
+        dlg.title("Potencial individual de los árboles")
+        dlg.geometry("820x660")
+        head = tk.Frame(dlg)
+        head.pack(fill="x", padx=12, pady=10)
+        tk.Label(head, text="Escena de árboles:").pack(side="left")
+        scene = tk.StringVar(dlg, value=available[0])
+        chooser = ttk.Combobox(head, textvariable=scene, values=available, state="readonly", width=12)
+        chooser.pack(side="left", padx=8)
+        info = tk.Label(dlg, justify="left", anchor="w", wraplength=780)
+        info.pack(fill="x", padx=12)
+        fig = plt.Figure(figsize=(7, 3.2), dpi=100)
         ax = fig.add_subplot(111)
         canvas = FigureCanvasTkAgg(fig, master=dlg)
         canvas.get_tk_widget().pack(fill="both", expand=True, padx=12)
+        details = tk.Text(dlg, height=6, wrap="word")
+        details.pack(fill="x", padx=12)
+        state = {}
 
-        nombres = [f"Árbol {i + 1} (especie: {getattr(r['arbol'], 'especie', '—')})"
-                   for i, r in enumerate(ranking)]
-        ax.barh(range(len(ranking)), [r["delta_tmrt_prom"] for r in ranking],
-                color="#1E88E5")
-        ax.set_yticks(range(len(ranking)))
-        ax.set_yticklabels(nombres, fontsize=8)
-        ax.invert_yaxis()
-        ax.set_xlabel("ΔTmrt promedio sobre la escena (°C)")
-        ax.grid(True, alpha=0.3, axis="x")
-        fig.tight_layout()
-        canvas.draw()
+        def recalculate(_event=None):
+            state.clear()
+            try:
+                config, results = rank_app_trees(self.app, scene.get())
+            except ValueError as exc:
+                ax.clear()
+                canvas.draw()
+                details.delete("1.0", "end")
+                info.config(text=str(exc))
+                export_button.config(state="disabled")
+                return
+            state.update(results=results, scene=scene.get())
+            export_button.config(state="normal")
+            info.config(text=(f"Contexto de Temperatura: {config.instant_local_iso} · {TMRT_MODELS[config.tmrt_model]['label']}\n"
+                              f"{config.source_label} · GHI {config.ghi:.1f} W/m² · Ta {config.air_temp_c:.1f} °C\n"
+                              "Cada árbol se evalúa solo en 60×60 m centrados en (0, 0). No representa el aporte marginal en la escena completa."))
+            names = [f"Árbol {r['tree_index']} · {getattr(r['arbol'], 'especie', '') or 'sin especie'}" for r in results]
+            ax.clear()
+            ax.barh(range(len(results)), [r["delta_tmrt_prom"] for r in results], color="#1E88E5")
+            ax.set_yticks(range(len(results)))
+            ax.set_yticklabels(names, fontsize=8)
+            ax.invert_yaxis()
+            ax.set_xlabel("Reducción de Tmrt media en el dominio (°C)")
+            ax.grid(True, alpha=0.3, axis="x")
+            fig.tight_layout()
+            canvas.draw()
+            details.delete("1.0", "end")
+            details.insert("end", "\n".join(f"{names[i]}: área {r['area_sombra_m2']:.1f} m² · cobertura {r['cobertura_frac']*100:.1f}% · ΔTmrt {r['delta_tmrt_prom']:.2f} °C" for i, r in enumerate(results)))
 
-        lineas = [f"{nombres[i]}: área {r['area_sombra_m2']:.1f} m² · "
-                  f"cobertura {r['cobertura_frac'] * 100:.1f}% · "
-                  f"ΔTmrt {r['delta_tmrt_prom']:.2f} °C"
-                  for i, r in enumerate(ranking)]
-        tk.Label(dlg, text="\n".join(lineas), justify="left", anchor="w",
-                 font=("Consolas", 8)).pack(fill="x", padx=12)
-        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=6)
+        def export():
+            if not state:
+                return
+            path = filedialog.asksaveasfilename(parent=dlg, title="Guardar ranking con procedencia", defaultextension=".json",
+                                              filetypes=[("Ranking JSON", "*.json")])
+            if path:
+                try:
+                    atomic_write_json(path, scenario_tools.ranking_export_payload(state["results"], scene_name=state["scene"]))
+                except Exception as exc:
+                    messagebox.showerror("Exportar ranking", str(exc), parent=dlg)
+
+        tk.Button(head, text="Recalcular", command=recalculate).pack(side="left")
+        export_button = tk.Button(head, text="Exportar JSON", command=export, state="disabled")
+        export_button.pack(side="right")
+        chooser.bind("<<ComboboxSelected>>", recalculate)
+        tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=8)
+        dlg.bind("<Destroy>", lambda event: plt.close(fig) if event.widget is dlg else None)
+        recalculate()

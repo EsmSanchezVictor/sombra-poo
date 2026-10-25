@@ -18,9 +18,12 @@ import shutil
 from typing import Iterable
 
 from core.project_layout import ProjectLayout
+from core.project_lock import project_lock
+from core.project_schema import ANALYSIS_SCHEMA_VERSION, validate_analysis_schema
+from core.safe_paths import validate_analysis_id, safe_project_reference, sanitize_entry
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = ANALYSIS_SCHEMA_VERSION
 
 
 class AnalysisRecordStore:
@@ -40,9 +43,14 @@ class AnalysisRecordStore:
 
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = DELETE")
+        try:
+            validate_analysis_schema(conn)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = DELETE")
+        except Exception:
+            conn.close()
+            raise
         return conn
 
     @contextmanager
@@ -54,18 +62,19 @@ class AnalysisRecordStore:
         aplicación de larga duración eso deja conexiones pendientes hasta que
         el recolector de basura las detecta y emite ``ResourceWarning``.
         """
-        conn = self._connect()
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
+        with project_lock(self.project_root):
+            conn = self._connect()
             try:
-                conn.rollback()
-            finally:
+                yield conn
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                finally:
+                    conn.close()
+                raise
+            else:
                 conn.close()
-            raise
-        else:
-            conn.close()
 
     def _ensure_schema(self) -> None:
         with self._connection() as conn:
@@ -113,9 +122,11 @@ class AnalysisRecordStore:
                 """
             )
             conn.execute(
-                "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)",
+                "INSERT OR IGNORE INTO metadata(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
             )
+            if conn.execute('PRAGMA user_version').fetchone()[0] != SCHEMA_VERSION:
+                conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
 
     @staticmethod
     def new_analysis_id() -> str:
@@ -153,9 +164,9 @@ class AnalysisRecordStore:
         return str(value)
 
     def upsert(self, entry: dict, *, complete: bool | None = None) -> dict:
-        entry = dict(entry or {})
+        entry = sanitize_entry(self.project_root, entry or {})
         analysis_id = entry.get("analysis_id") or self.new_analysis_id()
-        entry["analysis_id"] = analysis_id
+        entry["analysis_id"] = validate_analysis_id(analysis_id)
         if complete is None:
             complete = bool(entry.get("complete", not entry.get("provisional", False)))
         entry["complete"] = bool(complete)
@@ -226,6 +237,7 @@ class AnalysisRecordStore:
         return int(row["max_n"] or 0) + 1
 
     def get(self, analysis_id: str) -> dict | None:
+        validate_analysis_id(analysis_id)
         with self._connection() as conn:
             row = conn.execute(
                 "SELECT payload_json FROM analysis_records WHERE analysis_id=?",
@@ -233,7 +245,7 @@ class AnalysisRecordStore:
             ).fetchone()
         if not row:
             return None
-        return json.loads(row["payload_json"])
+        return sanitize_entry(self.project_root, json.loads(row["payload_json"]))
 
     def list_entries(self, *, complete_only: bool = True) -> list[dict]:
         sql = "SELECT payload_json FROM analysis_records"
@@ -243,7 +255,7 @@ class AnalysisRecordStore:
         sql += " ORDER BY n ASC, timestamp ASC, analysis_id ASC"
         with self._connection() as conn:
             rows = conn.execute(sql, args).fetchall()
-        return [json.loads(row["payload_json"]) for row in rows]
+        return [sanitize_entry(self.project_root, json.loads(row["payload_json"])) for row in rows]
 
     def migrate_legacy_snapshots(self, snapshots: Iterable[dict] | None) -> int:
         """Importa el historial JSON viejo una sola vez de forma idempotente.
@@ -287,7 +299,9 @@ class AnalysisRecordStore:
     def _resolve_existing_path(self, rel_or_abs: str | None) -> str | None:
         if not rel_or_abs:
             return None
-        path = rel_or_abs if os.path.isabs(rel_or_abs) else os.path.join(self.project_root, rel_or_abs)
+        path = safe_project_reference(self.project_root, rel_or_abs)
+        if path is None:
+            return None
         if os.path.exists(path):
             return path
         rel = str(rel_or_abs).replace("\\", "/")
@@ -297,8 +311,8 @@ class AnalysisRecordStore:
         }
         for old, new in aliases.items():
             if rel.startswith(old):
-                candidate = os.path.join(self.project_root, new + rel[len(old):])
-                if os.path.exists(candidate):
+                candidate = safe_project_reference(self.project_root, new + rel[len(old):])
+                if candidate and os.path.exists(candidate):
                     return candidate
         return None
 

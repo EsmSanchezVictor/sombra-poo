@@ -1,3 +1,25 @@
+# Actualización v35.6-etapa3.2 — tiempo local y ranking
+
+Leer INSTRUCCIONES_ETAPA3_2.md, CAMBIOS_ETAPA3_2.md y VALIDACION_ETAPA3_2.md. 532 pruebas aprobadas en Linux; Windows real y campo pendientes. Los textos siguientes son antecedentes.
+
+---
+
+# Corrección v35.6-etapa3.1 — guardado en Windows
+
+Corrige Errno 9 al sincronizar archivos/backup SQLite con descriptor de sólo lectura. Leer INSTRUCCIONES_ETAPA3_1.md y VALIDACION_ETAPA3_1.md. 453 pruebas aprobadas; Windows real pendiente. Los textos siguientes corresponden a entregas anteriores.
+
+---
+
+# Actualización v35.6-etapa3 — guardado recuperable e integridad
+
+Entrega acumulativa de Etapas 1, 2 y 3. Leer INSTRUCCIONES_ETAPA3.md, CAMBIOS_ETAPA3.md, VALIDACION_ETAPA3.md y CONTEXTO_MAESTRO_ETAPA3.md.
+
+Aplicación v35.6-etapa3; fórmulas científicas conservadas de Etapa 2. 447 pruebas aprobadas en instalación limpia Linux/Python 3.12; revisión Windows/Tk/VTK y calibración de campo pendientes.
+
+Los cambios enumerados debajo son antecedentes históricos.
+
+---
+
 # Actualización v29 — Vista 3D VTK integrada
 
 - Nuevo renderer 3D basado en VTK estándar, con iluminación Phong, MSAA, cámara interactiva y geometría volumétrica simplificada.

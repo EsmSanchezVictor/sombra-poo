@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from core.safe_io import atomic_write_json
 import os
 
 
@@ -63,8 +64,7 @@ class SettingsManager:
 
     def write(self, data: dict) -> None:
         """Persiste settings.json en disco."""
-        with open(self.settings_path, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2, ensure_ascii=False)
+        atomic_write_json(self.settings_path, data, indent=2, ensure_ascii=False)
 
     def apply_to_app(self, app, settings: dict) -> None:
         """Aplica preferencias a la UI sin recalcular."""

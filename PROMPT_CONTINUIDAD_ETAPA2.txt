@@ -1,0 +1,7 @@
+Continuamos Proyecto Sombra. Base preservada: v35.6; v35.7 descartada.
+Entrega más reciente: v35.6-etapa2 acumulativa, Etapas 1 y 2 implementadas.
+Leé CONTEXTO_MAESTRO_ETAPA2.md, CAMBIOS_ETAPA2.md, VALIDACION_ETAPA2.md y manifiesto.
+Regresión: 377 aprobadas; fallback simulado 371 aprobadas/6 omitidas. 87 pruebas nuevas.
+No se ejecutó GUI real, Windows ni calibración de campo.
+Seguir Etapa 3 por subbloques: robustez multiartefacto, hashes, logging, migradores, refactor incremental, CI/dependencias/distribución. Revisar ambigüedad horaria DST y ranking empírico si se amplía el alcance científico.
+Conservar v35.6 y Etapas previas, sin reutilizar v35.7. Entregar ZIP completo y reemplazo, documentación, pruebas, contexto y SHA256.

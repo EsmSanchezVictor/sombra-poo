@@ -1,0 +1,143 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+___________ test_invalid_local_time_not_silently_changed[dt0-False] ____________
+
+dt = datetime.datetime(2024, 3, 10, 2, 30), pvlib = False
+
+    @pytest.mark.parametrize('pvlib',[False,True])
+    @pytest.mark.parametrize('dt',[datetime(2024,3,10,2,30),datetime(2024,11,3,1,30)])
+    def test_invalid_local_time_not_silently_changed(dt,pvlib):
+        engine=SolarEngine(tz='America/New_York',use_pvlib=pvlib)
+>       with pytest.raises(ValueError,match='inexistente|ambigua'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+../stage3_2_repro.py:13: Failed
+____________ test_invalid_local_time_not_silently_changed[dt0-True] ____________
+
+dt = datetime.datetime(2024, 3, 10, 2, 30), pvlib = True
+
+    @pytest.mark.parametrize('pvlib',[False,True])
+    @pytest.mark.parametrize('dt',[datetime(2024,3,10,2,30),datetime(2024,11,3,1,30)])
+    def test_invalid_local_time_not_silently_changed(dt,pvlib):
+        engine=SolarEngine(tz='America/New_York',use_pvlib=pvlib)
+>       with pytest.raises(ValueError,match='inexistente|ambigua'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+../stage3_2_repro.py:13: Failed
+___________ test_invalid_local_time_not_silently_changed[dt1-False] ____________
+
+dt = datetime.datetime(2024, 11, 3, 1, 30), pvlib = False
+
+    @pytest.mark.parametrize('pvlib',[False,True])
+    @pytest.mark.parametrize('dt',[datetime(2024,3,10,2,30),datetime(2024,11,3,1,30)])
+    def test_invalid_local_time_not_silently_changed(dt,pvlib):
+        engine=SolarEngine(tz='America/New_York',use_pvlib=pvlib)
+>       with pytest.raises(ValueError,match='inexistente|ambigua'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+../stage3_2_repro.py:13: Failed
+____________ test_invalid_local_time_not_silently_changed[dt1-True] ____________
+
+dt = datetime.datetime(2024, 11, 3, 1, 30), pvlib = True
+
+    @pytest.mark.parametrize('pvlib',[False,True])
+    @pytest.mark.parametrize('dt',[datetime(2024,3,10,2,30),datetime(2024,11,3,1,30)])
+    def test_invalid_local_time_not_silently_changed(dt,pvlib):
+        engine=SolarEngine(tz='America/New_York',use_pvlib=pvlib)
+>       with pytest.raises(ValueError,match='inexistente|ambigua'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+../stage3_2_repro.py:13: Failed
+_____________________ test_repeated_observations_preserved _____________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-6/test_repeated_observations_pre0')
+
+    def test_repeated_observations_preserved(tmp_path):
+        f=tmp_path/'data.csv';f.write_text('timestamp,ghi\n2024-11-03T01:30:00-04:00,100\n2024-11-03T01:30:00-05:00,300\n')
+>       series=MeteorologicalSeries.from_csv(f,timezone='America/New_York')
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+../stage3_2_repro.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+core/meteorology.py:138: in from_csv
+    timestamp = _parse_timestamp(df, timezone)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+core/meteorology.py:82: in _parse_timestamp
+    if parsed.dt.tz is None:
+       ^^^^^^^^^
+../.venv-stage3-clean/lib/python3.12/site-packages/pandas/core/generic.py:6321: in __getattr__
+    return object.__getattribute__(self, name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../.venv-stage3-clean/lib/python3.12/site-packages/pandas/core/accessor.py:224: in __get__
+    accessor_obj = self._accessor(obj)
+                   ^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <class 'pandas.core.indexes.accessors.CombinedDatetimelikeProperties'>
+data = 0    2024-11-03 01:30:00-04:00
+1    2024-11-03 01:30:00-05:00
+Name: timestamp, dtype: object
+
+    def __new__(cls, data: Series):  # pyright: ignore[reportInconsistentConstructor]
+        # CombinedDatetimelikeProperties isn't really instantiated. Instead
+        # we need to choose which parent (datetime or timedelta) is
+        # appropriate. Since we're checking the dtypes anyway, we'll just
+        # do all the validation here.
+    
+        if not isinstance(data, ABCSeries):
+            raise TypeError(
+                f"cannot convert an object of type {type(data)} to a datetimelike index"
+            )
+    
+        orig = data if isinstance(data.dtype, CategoricalDtype) else None
+        if orig is not None:
+            data = data._constructor(
+                orig.array,
+                name=orig.name,
+                copy=False,
+                dtype=orig._values.categories.dtype,
+                index=orig.index,
+            )
+    
+        if isinstance(data.dtype, ArrowDtype) and data.dtype.kind in "Mm":
+            return ArrowTemporalProperties(data, orig)
+        if lib.is_np_dtype(data.dtype, "M"):
+            return DatetimeProperties(data, orig)
+        elif isinstance(data.dtype, DatetimeTZDtype):
+            return DatetimeProperties(data, orig)
+        elif lib.is_np_dtype(data.dtype, "m"):
+            return TimedeltaProperties(data, orig)
+        elif isinstance(data.dtype, PeriodDtype):
+            return PeriodProperties(data, orig)
+    
+>       raise AttributeError("Can only use .dt accessor with datetimelike values")
+E       AttributeError: Can only use .dt accessor with datetimelike values
+
+../.venv-stage3-clean/lib/python3.12/site-packages/pandas/core/indexes/accessors.py:643: AttributeError
+__________________ test_advanced_ranking_needs_actual_context __________________
+
+    def test_advanced_ranking_needs_actual_context():
+        calc=Temperatura(-31.4,-64.2,model_mode='advanced')
+>       with pytest.raises(ValueError,match='escenario efectivo'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+../stage3_2_repro.py:25: Failed
+=============================== warnings summary ===============================
+stage3_2_repro.py::test_repeated_observations_preserved
+  /workspace/scratch/ef1a31bb1bc3/sombra_etapa3_1/core/meteorology.py:74: FutureWarning: In a future version of pandas, parsing datetimes with mixed time zones will raise an error unless `utc=True`. Please specify `utc=True` to opt in to the new behaviour and silence this warning. To create a `Series` with mixed offsets and `object` dtype, please use `apply` and `datetime.datetime.strptime`
+    parsed = pd.to_datetime(raw, errors="coerce", dayfirst=False)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../stage3_2_repro.py::test_invalid_local_time_not_silently_changed[dt0-False]
+FAILED ../stage3_2_repro.py::test_invalid_local_time_not_silently_changed[dt0-True]
+FAILED ../stage3_2_repro.py::test_invalid_local_time_not_silently_changed[dt1-False]
+FAILED ../stage3_2_repro.py::test_invalid_local_time_not_silently_changed[dt1-True]
+FAILED ../stage3_2_repro.py::test_repeated_observations_preserved - Attribute...
+FAILED ../stage3_2_repro.py::test_advanced_ranking_needs_actual_context - Fai...
+6 failed, 1 warning in 1.88s

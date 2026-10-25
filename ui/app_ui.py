@@ -1,3 +1,4 @@
+from core.effective_scenario import EffectiveScenarioConfig, scenario_date, effective_model
 from datetime import datetime, timedelta
 import zoneinfo
 import os
@@ -360,6 +361,7 @@ class SombraApp:
         self.tmrt_result = None
         self.snapshots = []  # NUEVO: historial de elementos analizados (imagen+sombra+curva+Tmrt) del proyecto actual
         self.ref_gray_mean = None
+        self.tmrt_map_scenario = None
         self.tmrt_map = None
         self.original_rgb = None
         self._shadow_hover_cid = None
@@ -904,7 +906,8 @@ class SombraApp:
         def _abs(rel_path):
             if not rel_path:
                 return None
-            return rel_path if os.path.isabs(rel_path) else os.path.join(root, rel_path)
+            from core.safe_paths import safe_project_reference
+            return safe_project_reference(root, rel_path)
 
         # Limpiar completamente el estado visual del elemento anterior antes
         # de restaurar el seleccionado. Luego fijamos el ID para que un futuro
@@ -1076,6 +1079,7 @@ class SombraApp:
                 "Tmrt_sombra": tmrt_sombra,
                 "Delta_Tmrt": entry.get("delta_tmrt"),
                 "Modelo_Tmrt": entry.get("modelo_tmrt"),
+                "Effective_scenario": entry.get("effective_scenario_point"),
             }
             if hasattr(self, "lbl_tmrt_sol") and tmrt_sol is not None:
                 self.lbl_tmrt_sol.config(text=f"Tmrt al sol: {tmrt_sol:.2f} °C")
@@ -1212,6 +1216,7 @@ class SombraApp:
 
     def _render_stored_tmrt_map(self, entry):
         """Redibuja la curva guardada a partir de sus matrices, sin física."""
+        self.tmrt_map_scenario = entry.get("effective_scenario_map")
         mapa = np.asarray(self.tmrt_map, dtype=np.float32)
         finite = mapa[np.isfinite(mapa)]
         if not finite.size:
@@ -1337,6 +1342,7 @@ class SombraApp:
         self.shadow_photo_analysis = None
         self.last_shadow_classification_path = None
         self.ref_gray_mean = None
+        self.tmrt_map_scenario = None
         self.tmrt_map = None
         self.tmrt_hover_data = None
         # Liberar la fotografía pesada del elemento anterior antes de leer
@@ -1888,18 +1894,7 @@ class SombraApp:
         return True
 
     def _fecha_modelo_actual(self):
-        iso = self.vars_modelo.get("_date_iso") if isinstance(self.vars_modelo, dict) else None
-        if hasattr(iso, "get"):
-            iso = iso.get()
-        if iso:
-            try:
-                return datetime.strptime(str(iso), "%Y-%m-%d").date()
-            except ValueError:
-                pass
-        day = int(float(self.vars_modelo["dia"].get()))
-        year = int(self.vars_modelo.get("_year", datetime.now().year))
-        day = max(1, min(day, 366))
-        return (datetime(year, 1, 1) + timedelta(days=day - 1)).date()
+        return scenario_date(self.vars_modelo)
 
     def generar_grafico_modelo(self):
         if not self.require_project("generar el gráfico del modelo"):
@@ -1934,84 +1929,13 @@ class SombraApp:
             if not self._validate_kelvin_input():
                 return
         self.vars_modelo["_modo_modelo"] = self.modo_modelo.get()
-        self.vars_modelo["_surface_model_mode"] = self.surface_model_mode.get()
-
-        # Fuente radiativa efectiva. En modo simple se mantiene el esquema
-        # rápido histórico; fuentes meteorológicas/pvlib son opciones detalladas.
-        self.vars_modelo["_radiation_override_ghi"] = None
-        self.vars_modelo["_radiation_override_dni"] = None
-        self.vars_modelo["_radiation_override_dhi"] = None
-        self.vars_modelo["_radiation_source_label"] = "Configuración histórica Panel 4"
-        self.vars_modelo["_radiation_quality"] = "legacy_configured"
-        self.vars_modelo["_cloud_fraction_override"] = None
-        self.vars_modelo["_air_temp_override_k"] = None
-        source_mode = (
-            self.radiation_source_mode.get()
-            if self.modo_modelo.get() == "advanced" else "clear_sky"
-        )
-        use_clear_sky_engine = (
-            self.modo_modelo.get() == "advanced"
-            and source_mode == "clear_sky"
-            and bool(self.use_pvlib_engine.get())
-            and bool(getattr(self.solar_engine, "pvlib_available", False))
-        )
-        use_external_radiation = (
-            source_mode in {"manual_measured", "manual_scenario", "observed_series"}
-            or use_clear_sky_engine
-        )
-        if use_external_radiation:
-            try:
-                fecha_modelo = self._fecha_modelo_actual()
-                lat = float(self.vars_modelo["lat"].get())
-                lon = float(self.vars_modelo["lon"].get())
-                hora = float(self.vars_modelo["hora"].get())
-                manual_ghi = float(self.vars_modelo["I_sol_base"].get()) if source_mode.startswith("manual_") else None
-                met = self._obtener_datos_solares(lat, lon, fecha_modelo, hora, manual_ghi=manual_ghi)
-
-                # En cielo claro modelado, la categoría de nubosidad genera un
-                # escenario atenuado. Datos observados/medidos no se atenúan dos veces.
-                if source_mode == "clear_sky":
-                    cloud_var = self.vars_modelo.get("nubosidad", "Despejado")
-                    cloudiness = cloud_var.get() if hasattr(cloud_var, "get") else str(cloud_var)
-                    factor_cloud = factor_ghi_nubosidad(cloudiness)
-                    if factor_cloud != 1.0:
-                        scenario_ghi = max(0.0, float(met["ghi"]) * float(factor_cloud))
-                        comp = descomponer_radiacion(
-                            scenario_ghi, float(met.get("elevation", 0.0)), cloudiness
-                        )
-                        met = dict(met)
-                        met["ghi"] = scenario_ghi
-                        met["dni"] = float(comp["dni_normal"])
-                        met["dhi"] = float(comp["dhi"])
-                        met["source_label"] = f"{met.get('source_label', 'Cielo claro')} · {cloudiness}"
-                        met["quality"] = f"{met.get('quality', 'modeled')} + escenario_nubosidad"
-
-                self.vars_modelo["_radiation_override_ghi"] = float(met["ghi"])
-                self.vars_modelo["_radiation_override_dni"] = float(met["dni"])
-                self.vars_modelo["_radiation_override_dhi"] = float(met["dhi"])
-                self.vars_modelo["_radiation_source_label"] = met.get("source_label", source_mode)
-                self.vars_modelo["_radiation_quality"] = met.get("quality", "external")
-                if source_mode == "observed_series":
-                    if met.get("ta_c") is not None:
-                        observed_ta_k = float(met["ta_c"]) + 273.15
-                        self.vars_modelo["T_amb_base"].set(observed_ta_k)
-                        self.vars_modelo["_air_temp_override_k"] = observed_ta_k
-                        if self.modo_modelo.get() == "simple":
-                            self.simple_temp_air_c.set(float(met["ta_c"]))
-                    if met.get("rh_pct") is not None:
-                        self.vars_modelo["humedad"].set(float(met["rh_pct"]))
-                        if self.modo_modelo.get() == "simple":
-                            self.simple_rh.set(float(met["rh_pct"]))
-                    if met.get("wind_m_s") is not None:
-                        self.vars_modelo["viento"].set(float(met["wind_m_s"]))
-                    if met.get("cloud_fraction") is not None:
-                        self.vars_modelo["_cloud_fraction_override"] = float(met["cloud_fraction"])
-            except Exception as exc:
-                messagebox.showerror("Meteorología", f"No se pudo resolver la fuente meteorológica seleccionada:\n{exc}")
-                return
-
+        self.vars_modelo['_app_instance'] = self
         view2d, _view3d, notebook = self._get_scene_view_frames("modelo")
-        result = modelo.generar_grafico(self.vars_modelo, view2d)
+        try:
+            result = modelo.generar_grafico(self.vars_modelo, view2d)
+        except ValueError as exc:
+            messagebox.showerror('Escenario inválido', str(exc))
+            return
         if result:
             notebook.select(view2d)
             self.last_T = result.get("T")
@@ -3313,16 +3237,16 @@ class SombraApp:
         if not self.require_project("generar curva de sensibilidad"):
             return
         temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
-        calculador = Temperatura(
-            lat, lon, k_factor=self.k_factor, model_mode=self.tmrt_model_mode.get()
-        )
+        scenario, _ = self._resolve_temperature_scenario(temp_ambient, hora, fecha, lat, lon)
+        calculador = scenario.calculator()
+        temp_ambient = scenario.air_temp_c
 
         project = self.project_manager.current_project
         analisis_dir = project.layout.project_results_dir
         os.makedirs(analisis_dir, exist_ok=True)
         chart_path = project.layout.sensitivity_chart
         resultado_path, _, _ = analysis_service.curva_sensibilidad(
-            calculador, temp_ambient, fecha, hora, str(chart_path),
+            calculador, temp_ambient, fecha, hora, str(chart_path), scenario_config=scenario,
         )
         self.last_sensitivity_chart_path = str(resultado_path)
         self.mark_dirty()
@@ -3382,6 +3306,11 @@ class SombraApp:
             shadow = np.array(self.last_shadow, dtype=float)
             sombra_pct = (1 - shadow).mean() * 100
             lines.append(f"% sombra promedio: {sombra_pct:.2f}%")
+        status = (self.last_meta or {}).get("surface_diagnostics", {})
+        if status.get("converged") is not None:
+            lines.append(f"Balance convergente: {status['converged']} · iteraciones: {status.get('iterations')}")
+            lines.append(f"Residuo máximo: {status.get('max_abs_residual_wm2', 0):.3g} W/m²")
+            lines.extend(status.get("warnings", []))
         messagebox.showinfo("Estadísticas rápidas", "\n".join(lines))
 
     def show_about(self):
@@ -3682,8 +3611,8 @@ class SombraApp:
             img = entry.get("image")
             if not img:
                 continue
-            path = img if os.path.isabs(img) else (
-                os.path.join(root_path, img) if root_path else None)
+            from core.safe_paths import safe_project_reference
+            path = safe_project_reference(root_path, img) if root_path else None
             if not path or not os.path.exists(path):
                 continue
             try:
@@ -3899,13 +3828,8 @@ class SombraApp:
         return datetime.combine(fecha, datetime.min.time()) + timedelta(hours=hora)
 
     def _offset_timezone(self, fecha, hora):
-        try:
-            tz = zoneinfo.ZoneInfo(self._timezone_actual())
-            instante = self._construir_instante(fecha, hora).replace(tzinfo=tz)
-            offset = instante.utcoffset()
-            return None if offset is None else offset.total_seconds() / 3600.0
-        except Exception:
-            return None
+        from core.local_time import local_instant
+        return local_instant(fecha, hora, self._timezone_actual()).utcoffset().total_seconds() / 3600.0
 
     @staticmethod
     def _optional_float_text(value):
@@ -3919,54 +3843,9 @@ class SombraApp:
             raise ValueError("El valor radiativo debe ser finito.")
         return number
 
-    def _obtener_datos_solares(
-        self, latitude, longitude, fecha, hora, *, manual_ghi=None,
-        mode_override=None, use_pvlib_override=None,
-    ):
-        """Resuelve posición solar + radiación con procedencia explícita.
-
-        Fuentes disponibles (v14):
-        - clear_sky: cielo despejado modelado (pvlib si se solicita/está disponible,
-          fallback analítico en caso contrario);
-        - manual_measured: medición puntual ingresada por el usuario;
-        - manual_scenario: escenario hipotético ingresado manualmente;
-        - observed_series: serie meteorológica CSV importada.
-
-        Los componentes faltantes DNI/DHI pueden derivarse, pero esa derivación
-        queda registrada en ``quality``/``derived_components``.
-        """
-        instante = self._construir_instante(fecha, hora)
-        tz = self._timezone_actual()
-        try:
-            self.solar_engine.set_timezone(tz)
-        except Exception:
-            self.solar_engine.set_timezone("America/Argentina/Buenos_Aires")
-        use_pvlib = (
-            bool(use_pvlib_override) if use_pvlib_override is not None
-            else bool(self.use_pvlib_engine.get())
-        )
-        self.solar_engine.set_use_pvlib(use_pvlib)
-
-        mode = (
-            str(mode_override) if mode_override is not None
-            else (self.radiation_source_mode.get() if hasattr(self, "radiation_source_mode") else "clear_sky")
-        )
-        if manual_ghi is None:
-            manual_ghi = self._optional_float_text(getattr(self, "manual_ghi", ""))
-        manual_dni = self._optional_float_text(getattr(self, "manual_dni", ""))
-        manual_dhi = self._optional_float_text(getattr(self, "manual_dhi", ""))
-        max_gap = float(self.settings.get("meteorology_max_gap_minutes", 90.0))
-        data = self.meteorology_service.resolve(
-            mode=mode,
-            solar_engine=self.solar_engine,
-            lat=float(latitude), lon=float(longitude), dt=instante,
-            manual_ghi=manual_ghi,
-            manual_dni=manual_dni,
-            manual_dhi=manual_dhi,
-            max_gap_minutes=max_gap,
-        )
-        self.last_meteorology_data = data
-        return data
+    def _obtener_datos_solares(self, latitude, longitude, fecha, hora, *, manual_ghi=None, mode_override=None, use_pvlib_override=None):
+        from services.meteorology_controller import resolve_solar_data
+        return resolve_solar_data(self,latitude,longitude,fecha,hora,manual_ghi=manual_ghi,mode_override=mode_override,use_pvlib_override=use_pvlib_override)
 
     def cargar_serie_meteorologica(self):
         """Importa una serie CSV y, si hay proyecto, guarda una copia dentro.
@@ -4040,6 +3919,10 @@ class SombraApp:
         except Exception:
             return None
 
+    def _resolve_temperature_scenario(self, temp_ambient, hora, fecha, lat, lon):
+        from services.meteorology_controller import resolve_temperature_context
+        return resolve_temperature_context(self,temp_ambient,hora,fecha,lat,lon)
+
     def calculate_temperature_in_shade(self):
         if not self.require_project("calcular temperatura en sombra"):
             return
@@ -4081,28 +3964,9 @@ class SombraApp:
             fecha_str = self.entry_date.get().replace('\ufeff', '').strip()
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
             
-            tz_offset = self._offset_timezone(fecha, hora)
-            temp_input_mode = getattr(self, "modo_temperatura", tk.StringVar(value="simple")).get()
-            if temp_input_mode == "advanced":
-                effective_tmrt_mode = self.tmrt_model_mode.get()
-                solar_data = self._obtener_datos_solares(latitude, longitude, fecha, hora)
-            else:
-                # Modo simple no hereda opciones avanzadas ocultas.
-                effective_tmrt_mode = "standard"
-                solar_data = self._obtener_datos_solares(
-                    latitude, longitude, fecha, hora,
-                    mode_override="clear_sky", use_pvlib_override=False,
-                )
-            self.temp_calculator = Temperatura(
-                latitude, longitude, k_factor=self.k_factor, tz_offset_hours=tz_offset,
-                model_mode=effective_tmrt_mode,
-            )
-            # Si la fuente es una serie observada, Ta disponible en esa serie
-            # pasa a ser la temperatura de aire del cálculo. Si no existe, se
-            # conserva el valor ingresado por el usuario y queda trazado como
-            # fallback de entrada.
-            if solar_data.get("source_mode") == "observed_series" and solar_data.get("ta_c") is not None:
-                temp_ambient = float(solar_data["ta_c"])
+            scenario, solar_data = self._resolve_temperature_scenario(temp_ambient, hora, fecha, latitude, longitude)
+            self.temp_calculator = scenario.calculator()
+            temp_ambient = scenario.air_temp_c
             transmittance_override = None
             full_shadow_transmittance = None
             if not manual_text and self.shadow_photo_analysis is not None:
@@ -4122,6 +3986,7 @@ class SombraApp:
                 full_shadow_transmittance=full_shadow_transmittance,
                 transmittance_override=transmittance_override,
             )
+            result["Effective_scenario"] = scenario.to_dict()
             result["Fuente_solar"] = solar_data.get("source_label", solar_data.get("source", "fallback"))
             result["Fuente_solar_codigo"] = solar_data.get("source_mode", "clear_sky")
             result["Calidad_meteorologica"] = solar_data.get("quality")
@@ -4134,11 +3999,12 @@ class SombraApp:
                     ghi=float(solar_data["ghi"]),
                     dni=solar_data.get("dni"), dhi=solar_data.get("dhi"),
                     solar_elevation_deg=float(solar_data["elevation"]),
-                    model_mode=self.tmrt_model_mode.get(),
+                    model_mode=scenario.tmrt_model,
                     k_factor=self.k_factor,
                     source_quality=solar_data.get("quality"),
                     advanced_config=getattr(self.temp_calculator, "advanced_config", None),
                 )
+                uncertainty["effective_scenario"] = scenario.to_dict()
                 result["Incertidumbre_operativa"] = uncertainty
             except Exception as exc:
                 result["Incertidumbre_operativa"] = None
@@ -4462,6 +4328,11 @@ class SombraApp:
         # El mapa se voltea para conservar la orientación visual que ya
         # utiliza la aplicación en la curva de nivel.
         temp_ambient, hora, fecha, lat, lon = self._leer_parametros_tmrt()
+        try:
+            scenario, solar_data = self._resolve_temperature_scenario(temp_ambient, hora, fecha, lat, lon)
+        except ValueError as exc:
+            messagebox.showerror("Escenario de temperatura", str(exc))
+            return
         analisis_foto = self.image_processor.analizar_sombra_fotografica(
             self.shape_selector.area_seleccionada,
             self.shape_selector.area_referencia,
@@ -4486,14 +4357,8 @@ class SombraApp:
             np.asarray(analisis_foto["local_attenuation_map"], dtype=np.float32)
         )
 
-        tz_offset = self._offset_timezone(fecha, hora)
-        calculador = Temperatura(
-            lat, lon, k_factor=self.k_factor, tz_offset_hours=tz_offset,
-            model_mode=self.tmrt_model_mode.get(),
-        )
-        solar_data = self._obtener_datos_solares(lat, lon, fecha, hora)
-        if solar_data.get("source_mode") == "observed_series" and solar_data.get("ta_c") is not None:
-            temp_ambient = float(solar_data["ta_c"])
+        calculador = scenario.calculator()
+        temp_ambient = scenario.air_temp_c
         resultado_mapa = calculador.calculate_tmrt_map(
             temp_ambient,
             mapa_sombra_volteado,
@@ -4649,6 +4514,7 @@ class SombraApp:
         # Guardamos exactamente las matrices que corresponden a la figura
         # activa. El hover consulta estas matrices, no vuelve a estimar el
         # valor a partir del color del gráfico.
+        self.tmrt_map_scenario = scenario.to_dict()
         self.tmrt_map = mapa_temperatura
         self.tmrt_hover_data = {
             "tmrt": mapa_temperatura,
@@ -4910,7 +4776,6 @@ class SombraApp:
         try:
             fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
             dia_del_año = fecha.timetuple().tm_yday
-            dia_var.set(dia_del_año)
             # v14: conservar también la fecha calendario exacta para poder
             # consultar series meteorológicas con año real.
             for _vars in (getattr(self, "vars", {}), getattr(self, "vars_modelo", {})):
@@ -4920,6 +4785,8 @@ class SombraApp:
                         _vars["_year"] = fecha.year
                 except Exception:
                     pass
+            # Los observadores del día deben ver el año nuevo ya actualizado.
+            dia_var.set(dia_del_año)
         except ValueError:
             messagebox.showerror("Error", "Formato de fecha inválido. Use AAAA-MM-DD")
     def _scene_view_parent(self, mode):

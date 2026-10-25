@@ -13,7 +13,7 @@ def test_session_records_user_and_multiple_projects(tmp_path):
     db = DatabaseManager(str(db_path))
     try:
         assert db.add_user(
-            "vale", "clave-segura", 0, "Vale", "C", "", "", "", "", "", ""
+            "vale", "clave-segura-2026", 0, "Vale", "C", "", "", "", "", "", ""
         )
         session_id = db.start_session("vale")
         assert session_id > 0
@@ -55,7 +55,7 @@ def test_session_records_user_and_multiple_projects(tmp_path):
 def test_session_without_project_is_kept(tmp_path):
     db = DatabaseManager(str(tmp_path / "users.db"))
     try:
-        db.add_user("solo", "clave", 0, "", "", "", "", "", "", "", "")
+        db.add_user("solo", "clave-prueba-2026", 0, "", "", "", "", "", "", "", "")
         session_id = db.start_session("solo")
         db.end_session(session_id)
         row = next(row for row in db.fetch_session_history() if row[0] == session_id)
@@ -68,7 +68,7 @@ def test_session_without_project_is_kept(tmp_path):
 def test_history_survives_user_deletion(tmp_path):
     db = DatabaseManager(str(tmp_path / "users.db"))
     try:
-        db.add_user("temporal", "clave", 0, "", "", "", "", "", "", "", "")
+        db.add_user("temporal", "clave-prueba-2026", 0, "", "", "", "", "", "", "", "")
         user = db.get_user("temporal")
         session_id = db.start_session("temporal")
         db.start_project_work(session_id, "Proyecto Histórico")

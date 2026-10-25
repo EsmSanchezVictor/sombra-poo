@@ -59,6 +59,8 @@ PARAM_TO_VAR = {
     "T_min_K": "T_min",
     "T_max_K": "T_max",
     "dia_del_ano": "dia",
+    "ano_escenario": "_year",
+    "fecha_escenario": "_date_iso",
     "latitud": "lat",
     "longitud": "lon",
     "hora_local": "hora",
@@ -283,6 +285,14 @@ def extract_parameters(
         if var_key in vars_dict:
             params[excel_key] = _safe_scalar(_value(vars_dict[var_key]))
 
+    from core.effective_scenario import scenario_date
+    fecha = scenario_date(vars_dict)
+    params["ano_escenario"] = fecha.year
+    params["fecha_escenario"] = fecha.isoformat()
+    if vars_dict.get('_effective_scenario'):
+        import json
+        params['ultimo_escenario_calculado_json'] = json.dumps(vars_dict['_effective_scenario'], ensure_ascii=False)
+
     if app is not None:
         for attr, key in (
             ("simple_cloudiness", "nubosidad"),
@@ -376,12 +386,32 @@ def save_scene_excel(
     )
     df_params = pd.DataFrame(_rows_from_parameters(params), columns=PARAM_COLUMNS)
 
-    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+    with atomic_excel_writer(path) as writer:
         df_arboles.to_excel(writer, sheet_name="Árboles", index=False)
         df_estructuras.to_excel(writer, sheet_name="Estructuras", index=False)
         df_params.to_excel(writer, sheet_name="Parametros", index=False)
 
     return str(path)
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def atomic_excel_writer(path):
+    """Descarta un Excel incompleto y cierra el descriptor incluso si pandas falla."""
+    from core.safe_io import atomic_output
+    with atomic_output(path) as temporary:
+        with open(temporary, 'wb') as stream:
+            writer = pd.ExcelWriter(stream, engine='openpyxl')
+            try:
+                yield writer
+            except BaseException:
+                # No intentar serializar un workbook incompleto desde __exit__.
+                writer.book.close()
+                raise
+            else:
+                writer.close()
 
 
 def _coerce_for_var(current: Any, value: Any) -> Any:
@@ -400,6 +430,9 @@ def _coerce_for_var(current: Any, value: Any) -> Any:
 
 def apply_parameters_to_vars(vars_dict: Mapping[str, Any], params: Mapping[str, Any]) -> None:
     """Aplica parámetros conocidos sin tocar objetos de escena ni metadatos."""
+    for key, target_key in (("ano_escenario", "_year"), ("fecha_escenario", "_date_iso")):
+        if key in params and target_key not in vars_dict:
+            vars_dict[target_key] = params[key]
     for excel_key, var_key in PARAM_TO_VAR.items():
         if excel_key not in params or var_key not in vars_dict:
             continue

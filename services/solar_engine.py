@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from datetime import datetime
 import math
-import zoneinfo
 
 from core.solar_math import solar_position_deg
+from core.local_time import resolve_local_datetime, instant_metadata, iana_zone
 
 try:
     import pandas as pd
@@ -26,32 +26,18 @@ def _tz_offset_hours(tz: str, dt: datetime | None = None) -> float | None:
     A diferencia de la versión anterior, no fija el cálculo al 1/1/2026:
     respeta horario de verano cuando la zona lo utiliza.
     """
-    try:
-        zona = zoneinfo.ZoneInfo(tz)
-        base = dt or datetime.now()
-        if base.tzinfo is None:
-            local = base.replace(tzinfo=zona)
-        else:
-            local = base.astimezone(zona)
-        offset = local.utcoffset()
-        return None if offset is None else float(offset.total_seconds() / 3600.0)
-    except Exception:
-        return None
+    local = resolve_local_datetime(dt or datetime.now(), tz)
+    return float(local.utcoffset().total_seconds() / 3600.0)
 
 
 def _pandas_timestamp_local(dt: datetime, tz: str):
-    """DatetimeIndex timezone-aware robusto para pvlib."""
-    ts = pd.Timestamp(dt)
-    if ts.tzinfo is None:
-        ts = ts.tz_localize(tz, nonexistent="shift_forward", ambiguous="NaT")
-    else:
-        ts = ts.tz_convert(tz)
-    return pd.DatetimeIndex([ts])
+    """Mismo instante estricto para pvlib y fallback."""
+    return pd.DatetimeIndex([pd.Timestamp(resolve_local_datetime(dt, tz))])
 
 
 class SolarEngine:
     def __init__(self, use_pvlib: bool = False, tz: str = "America/Argentina/Buenos_Aires"):
-        self.tz = tz
+        self.set_timezone(tz)
         self.use_pvlib = False
         self.set_use_pvlib(use_pvlib)
 
@@ -65,13 +51,14 @@ class SolarEngine:
         return self.use_pvlib
 
     def set_timezone(self, tz: str | None) -> None:
-        if not tz:
+        if not tz and hasattr(self, "tz"):
             return
         # Validar ahora para fallar temprano ante un nombre inválido.
-        zoneinfo.ZoneInfo(str(tz))
+        iana_zone(tz)
         self.tz = str(tz)
 
     def _fallback_position(self, lat: float, lon: float, dt: datetime) -> tuple[float, float]:
+        dt = resolve_local_datetime(dt, self.tz)
         day = dt.timetuple().tm_yday
         hour = dt.hour + dt.minute / 60.0 + dt.second / 3600.0
         offset = _tz_offset_hours(self.tz, dt)
@@ -105,25 +92,26 @@ class SolarEngine:
                 "source": "pvlib",
             }
 
-        _, elev_raw = self._fallback_position(lat, lon, dt)
-        elev = max(0.0, float(elev_raw))
-        # Fallback histórico de cielo despejado, ahora desacoplado del modelo
-        # de Tmrt para que la geometría solar tenga una única implementación.
-        ghi = 0.0 if elev <= 0.0 else 1367.0 * math.sin(math.radians(elev)) * 0.75
-        if elev <= 0.0 or ghi <= 0.0:
-            return {"ghi": 0.0, "dni": 0.0, "dhi": 0.0, "source": "fallback"}
+        _, elev = self._fallback_position(lat, lon, dt)
+        return self.fallback_radiation(elev)
 
-        # Fracción difusa operativa del fallback. A diferencia de la versión
-        # anterior, el DNI se deriva de (GHI-DHI), por lo que la recomposición
-        # devuelve exactamente GHI.
-        dhi = 0.20 * ghi
-        direct_horizontal = max(0.0, ghi - dhi)
+    @staticmethod
+    def fallback_radiation(elevation):
+        """GHI analítica histórica; componentes conservan GHI = DNI·sin(elev)+DHI."""
+        elev = float(elevation)
+        if not math.isfinite(elev):
+            raise ValueError("La elevación solar debe ser finita")
+        if elev <= 0:
+            return {"ghi": 0.0, "dni": 0.0, "dhi": 0.0, "source": "fallback"}
         seno = math.sin(math.radians(elev))
-        dni = direct_horizontal / seno if seno > 1e-6 else 0.0
-        return {"ghi": ghi, "dni": float(dni), "dhi": float(dhi), "source": "fallback"}
+        ghi = 1367.0 * seno * 0.75
+        dhi = 0.20 * ghi
+        dni = 1367.0 * 0.75 * 0.80
+        return {"ghi": ghi, "dni": dni, "dhi": dhi, "source": "fallback"}
 
     def get_solar_data(self, lat: float, lon: float, dt: datetime) -> dict:
         """Posición + radiación coherentes en una sola llamada lógica."""
+        dt = resolve_local_datetime(dt, self.tz)
         azimuth, elevation = self.get_solar_position(lat, lon, dt)
         rad = self.get_radiation(lat, lon, dt)
         return {
@@ -131,4 +119,5 @@ class SolarEngine:
             "azimuth": float(azimuth),
             "elevation": float(elevation),
             "timezone": self.tz,
+            **instant_metadata(dt),
         }

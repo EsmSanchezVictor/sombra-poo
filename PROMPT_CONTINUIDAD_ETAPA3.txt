@@ -1,0 +1,8 @@
+Continuamos Proyecto Sombra. Entrega actual v35.6-etapa3 acumulativa; base v35.6 y Etapas 1/2 preservadas. v35.7 descartada.
+Leé CONTEXTO_MAESTRO_ETAPA3.md, CAMBIOS_ETAPA3.md, INSTRUCCIONES_ETAPA3.md, VALIDACION_ETAPA3.md y manifiesto SHA256.
+Estado: usuarios/seguridad, coherencia efectiva científica, guardado recuperable de JSON/Excel/SQLite, hashes/incidentes, copias/exportaciones seguras, esquemas/migradores, logging y refactor incremental implementados.
+Pruebas en instalación limpia Linux/Python 3.12.14: 447 aprobadas. Sin opcionales (simulado): 441 aprobadas/6 omitidas. 70 casos nuevos. CI Linux/Windows preparado, no ejecutado remotamente.
+Las generaciones automáticas no copian versiones anteriores de fotos/mapas: detectan cambios por hash; el respaldo .3es es completo. No fusionar ni borrar cuarentenas/journals sin revisión.
+Aplicación v35.6-etapa3; release científico v35.6-etapa2. Ecuaciones y controlador VTK conservados.
+Pendiente: smoke real Windows/Tk/VTK, estabilidad prolongada/instalador, política DST ambigua/inexistente y ranking empírico; calibración Tmrt/Ta local/vegetación con mediciones de campo.
+No afirmar distribución final ni calibración de campo. Conservar versiones/datos y entregar evidencia verificable y contexto con cada bloque.

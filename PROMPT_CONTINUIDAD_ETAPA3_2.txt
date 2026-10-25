@@ -1,0 +1,6 @@
+Continuamos Proyecto Sombra desde v35.6-etapa3.2 (base anterior Etapa3.1 preservada).
+Leer CONTEXTO_MAESTRO_ETAPA3_2.md, CAMBIOS_ETAPA3_2.md, INSTRUCCIONES_ETAPA3_2.md y VALIDACION_ETAPA3_2.md.
+Cerrados por código DST estricto y ranking coherente con contexto efectivo Tmrt, escena única y exportación JSON con procedencia.
+532 tests Linux/Python3.12.14; fallback simulado523/9skip; reproducción independiente6fallosantes/6aprobadosdespués.
+Aplicación y ciencia v35.6-etapa3.2; scientificschema1.2/effectivescenario2, ecuaciones mismas versiones. Guardado Windows3.1 incluido sin cambios.
+Sigue pendiente comprobar instalación Windows real (usuario aún no confirmó guardar/reabrir), GUI/Tk/VTK/memoria, distribución Windows/CI/instalador y mediciones/calibración de campo. No afirmar validación física por tests ni borrar respaldos/journals.

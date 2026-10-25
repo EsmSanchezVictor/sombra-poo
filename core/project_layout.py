@@ -10,9 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import json
+from core.safe_io import atomic_write_json
 import os
 import shutil
 import filecmp
+from core.safe_paths import validate_analysis_id, contained_path, safe_component
 
 
 LAYOUT_VERSION = 2
@@ -90,14 +92,22 @@ class ProjectLayout:
     def elements_excel(self): return os.path.join(self.project_results_dir, "elementos_proyecto.xlsx")
 
     def ensure(self) -> None:
-        for path in (
+        paths = (
             self.config_dir, self.images_dir, self.meteorology_dir,
             self.validation_inputs_dir, self.scene_dir, self.analysis_dir,
             self.analysis_elements_dir, self.dataset_dir, self.project_results_dir,
             self.validation_results_dir, self.reports_dir, self.backups_dir,
-        ):
+        )
+        for path in paths:
+            contained_path(self.root, path)
+        for path in (self.analysis_db, self.edit_excel, self.model_excel, self.structure_manifest,
+                     self.inventory_manifest, self.via_annotations, self.validation_report,
+                     self.audit_json, self.audit_txt, self.full_report, self.last_element_report):
+            contained_path(self.root, path)
+        for path in paths:
             os.makedirs(path, exist_ok=True)
-        self.write_structure_manifest()
+        if not os.path.isfile(self.structure_manifest):
+            self.write_structure_manifest()
 
     def write_structure_manifest(self) -> None:
         payload = {
@@ -126,55 +136,22 @@ class ProjectLayout:
             },
         }
         os.makedirs(self.config_dir, exist_ok=True)
-        with open(self.structure_manifest, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2, ensure_ascii=False)
+        atomic_write_json(self.structure_manifest, payload, indent=2, ensure_ascii=False)
 
     def write_inventory(self) -> None:
-        """Escribe un índice liviano de los archivos vivos del proyecto.
-
-        No es la fuente primaria de datos (esa función la cumplen .sombra y
-        SQLite); sirve para auditoría, diagnóstico y para verificar rápidamente
-        qué artefactos persistentes existen. Se excluyen respaldos y legacy.
-        """
-        files = []
-        excluded = {os.path.abspath(self.backups_dir), os.path.abspath(self.legacy_dir)}
-        for folder, dirs, names in os.walk(self.root):
-            dirs[:] = [
-                d for d in dirs
-                if os.path.abspath(os.path.join(folder, d)) not in excluded
-            ]
-            for name in names:
-                full = os.path.join(folder, name)
-                if os.path.abspath(full) == os.path.abspath(self.inventory_manifest):
-                    continue
-                try:
-                    stat = os.stat(full)
-                except OSError:
-                    continue
-                files.append({
-                    "path": os.path.relpath(full, self.root).replace("\\", "/"),
-                    "size_bytes": int(stat.st_size),
-                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-                })
-        payload = {
-            "layout_version": LAYOUT_VERSION,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
-            "file_count": len(files),
-            "files": sorted(files, key=lambda item: item["path"]),
-        }
-        os.makedirs(self.config_dir, exist_ok=True)
-        with open(self.inventory_manifest, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2, ensure_ascii=False)
+        from core.project_integrity import IntegrityTracker
+        atomic_write_json(self.inventory_manifest, IntegrityTracker().inventory(self.root))
 
     def element_dir(self, analysis_id: str) -> str:
-        path = os.path.join(self.analysis_elements_dir, str(analysis_id))
-        for child in ("areas", "sombra", "termico"):
-            os.makedirs(os.path.join(path, child), exist_ok=True)
+        path = contained_path(self.analysis_elements_dir, validate_analysis_id(analysis_id), allow_absolute=False)
+        children = [contained_path(self.root, os.path.join(path, child)) for child in ("areas", "sombra", "termico")]
+        for child in children:
+            os.makedirs(child, exist_ok=True)
         return path
 
     def element_paths(self, analysis_id: str) -> dict[str, str]:
         base = self.element_dir(analysis_id)
-        return {
+        paths = {
             "matrix": os.path.join(base, "areas", "matriz_calculo.xlsx"),
             "reference": os.path.join(base, "areas", "matriz_referencia.xlsx"),
             "calc_data": os.path.join(base, "areas", "calculo.npz"),
@@ -187,14 +164,15 @@ class ProjectLayout:
             "curve": os.path.join(base, "termico", "curva_tmrt.png"),
             "temperature_summary": os.path.join(base, "termico", "resumen_tmrt.png"),
         }
+        return {key: contained_path(self.root, value) for key, value in paths.items()}
 
     def rel(self, path: str | None) -> str | None:
         if not path:
             return None
         try:
-            return os.path.relpath(os.path.abspath(path), self.root)
-        except Exception:
-            return path
+            return os.path.relpath(contained_path(self.root, os.path.abspath(path)), self.root)
+        except (ValueError, OSError):
+            return None
 
     def import_input_file(self, source_path: str, destination_dir: str) -> str:
         """Importa un archivo de entrada sin sobrescribir ni duplicar idénticos.
@@ -209,18 +187,18 @@ class ProjectLayout:
         proyecto tienen nombres estables y se actualizan en el mismo archivo.
         """
         source = os.path.abspath(source_path)
-        destination_dir = os.path.abspath(destination_dir)
+        destination_dir = contained_path(self.root, os.path.abspath(destination_dir))
         if not os.path.isfile(source):
             raise FileNotFoundError(source)
         os.makedirs(destination_dir, exist_ok=True)
         try:
             if os.path.commonpath([source, destination_dir]) == destination_dir:
-                return source
+                return contained_path(destination_dir, source)
         except ValueError:
             pass
 
-        basename = os.path.basename(source)
-        candidate = os.path.join(destination_dir, basename)
+        basename = safe_component(os.path.basename(source))
+        candidate = contained_path(destination_dir, basename, allow_absolute=False)
         if os.path.exists(candidate):
             try:
                 if filecmp.cmp(source, candidate, shallow=False):
@@ -230,7 +208,7 @@ class ProjectLayout:
             stem, ext = os.path.splitext(basename)
             version = 2
             while True:
-                candidate = os.path.join(destination_dir, f"{stem}_v{version}{ext}")
+                candidate = contained_path(destination_dir, safe_component(f"{stem}_v{version}{ext}"), allow_absolute=False)
                 if not os.path.exists(candidate):
                     break
                 try:
@@ -239,18 +217,21 @@ class ProjectLayout:
                 except OSError:
                     pass
                 version += 1
-        shutil.copy2(source, candidate)
+        from core.safe_io import atomic_output
+        with atomic_output(candidate) as temporary:
+            shutil.copy2(source, temporary)
         return candidate
 
     # ------------------------------ migración de carpetas previas
     def _move_tree_contents(self, old_rel: str, new_dir: str) -> None:
-        old = os.path.join(self.root, old_rel)
+        old = contained_path(self.root, old_rel, allow_absolute=False)
+        new_dir = contained_path(self.root, new_dir)
         if not os.path.isdir(old) or os.path.abspath(old) == os.path.abspath(new_dir):
             return
         os.makedirs(new_dir, exist_ok=True)
         for name in os.listdir(old):
-            src = os.path.join(old, name)
-            dst = os.path.join(new_dir, name)
+            src = contained_path(self.root, os.path.join(old, name))
+            dst = contained_path(self.root, os.path.join(new_dir, name))
             if os.path.isdir(src):
                 if os.path.exists(dst):
                     self._merge_dirs(src, dst)
@@ -270,9 +251,12 @@ class ProjectLayout:
             pass
 
     def _merge_dirs(self, src: str, dst: str) -> None:
+        src = contained_path(self.root, src)
+        dst = contained_path(self.root, dst)
         os.makedirs(dst, exist_ok=True)
         for name in os.listdir(src):
-            s = os.path.join(src, name); d = os.path.join(dst, name)
+            s = contained_path(self.root, os.path.join(src, name))
+            d = contained_path(self.root, os.path.join(dst, name))
             if os.path.isdir(s):
                 self._merge_dirs(s, d)
             elif not os.path.exists(d):
@@ -285,7 +269,8 @@ class ProjectLayout:
             pass
 
     def _stash_legacy(self, src: str, rel_parent: str) -> None:
-        target_dir = os.path.join(self.legacy_dir, rel_parent)
+        src = contained_path(self.root, src)
+        target_dir = contained_path(self.legacy_dir, rel_parent, allow_absolute=False)
         os.makedirs(target_dir, exist_ok=True)
         target = os.path.join(target_dir, os.path.basename(src))
         if not os.path.exists(target):
@@ -293,10 +278,10 @@ class ProjectLayout:
 
     def archive_legacy_folder(self, rel: str) -> None:
         """Mueve una carpeta antigua restante bajo _legacy_v18/."""
-        src = os.path.join(self.root, rel)
+        src = contained_path(self.root, rel, allow_absolute=False)
         if not os.path.exists(src):
             return
-        dst = os.path.join(self.legacy_dir, rel)
+        dst = contained_path(self.legacy_dir, rel, allow_absolute=False)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         if os.path.exists(dst):
             self._merge_dirs(src, dst)
@@ -310,25 +295,25 @@ class ProjectLayout:
         conoce el ``analysis_id`` de cada registro.
         """
         self.ensure()
-        old_db = os.path.join(self.root, "datos", "analisis.sqlite3")
+        old_db = contained_path(self.root, "datos/analisis.sqlite3", allow_absolute=False)
         if os.path.exists(old_db) and not os.path.exists(self.analysis_db):
             os.makedirs(self.analysis_dir, exist_ok=True)
             shutil.move(old_db, self.analysis_db)
         self._move_tree_contents("imagenes", self.images_dir)
         self._move_tree_contents("meteorologia", self.meteorology_dir)
-        old_via = os.path.join(self.root, "mascaras.json")
+        old_via = contained_path(self.root, "mascaras.json", allow_absolute=False)
         if os.path.exists(old_via) and not os.path.exists(self.via_annotations):
             os.makedirs(self.dataset_dir, exist_ok=True)
             shutil.move(old_via, self.via_annotations)
-        old_dataset = os.path.join(self.root, "DataSetSombra")
+        old_dataset = contained_path(self.root, "DataSetSombra", allow_absolute=False)
         if os.path.isdir(old_dataset):
             self._move_tree_contents("DataSetSombra", self.dataset_dir)
 
         # Resultados globales conocidos.
-        old_analysis = os.path.join(self.root, "resultados", "analisis")
+        old_analysis = contained_path(self.root, "resultados/analisis", allow_absolute=False)
         if os.path.isdir(old_analysis):
             for name in list(os.listdir(old_analysis)):
-                src = os.path.join(old_analysis, name)
+                src = contained_path(self.root, os.path.join(old_analysis, name))
                 if not os.path.isfile(src):
                     continue
                 low = name.lower()
@@ -338,6 +323,7 @@ class ProjectLayout:
                     dst = os.path.join(self.validation_results_dir, name)
                 else:
                     dst = os.path.join(self.project_results_dir, name)
+                dst = contained_path(self.root, dst)
                 if not os.path.exists(dst):
                     shutil.move(src, dst)
             try:

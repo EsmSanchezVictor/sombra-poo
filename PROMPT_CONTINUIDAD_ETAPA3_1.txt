@@ -1,0 +1,5 @@
+Continuamos Proyecto Sombra. Última entrega v35.6-etapa3.1: corrección de Errno 9 al guardar en Windows (fsync de archivo rb → helper r+b sin truncar). Etapa 3 y v35.6 originales preservadas.
+Leé CONTEXTO_MAESTRO_ETAPA3_1.md, CAMBIOS_ETAPA3_1.md, INSTRUCCIONES_ETAPA3_1.md y VALIDACION_ETAPA3_1.md, luego el contexto de Etapa 3.
+453 tests aprobados en Linux/Python 3.12.14; fallback simulado 447 aprobados/6 omitidos. Seis regresiones nuevas, cuatro reprodujeron el EBADF antes del arreglo. Windows real todavía no ejecutado.
+Próximo control inmediato: aplicar corrección en carpeta con main.py, reiniciar, Guardar con respaldo y reabrir. Ante fallo, revisar sombra.log sin borrar recuperación ni datos.
+Versión científica sigue siendo v35.6-etapa2; sin cambios físicos o de esquema. Mantener límites y pendientes Windows/Tk/VTK, DST/ranking y campo del contexto de Etapa 3.

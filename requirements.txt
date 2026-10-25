@@ -2,6 +2,8 @@
 opencv-python>=4.9,<5
 numpy>=1.26,<3
 pandas>=2.2,<3
+# Base IANA disponible también en Windows, sin depender del sistema.
+tzdata>=2024.1
 openpyxl>=3.1,<4
 matplotlib>=3.8,<4
 Pillow>=10,<13

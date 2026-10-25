@@ -90,7 +90,7 @@ def test_surface_advanced_mode_cannot_leak_into_hidden_simple_ui():
 def test_delete_session_history_preserves_active_session_and_cascades_projects(tmp_path):
     db = DatabaseManager(str(tmp_path / "users.db"))
     try:
-        assert db.add_user("admin", "clave", True, "A", "Admin", "1", "a@a.com", "", "", "", "X")
+        assert db.add_user("admin", "clave-prueba-2026", True, "A", "Admin", "1", "a@a.com", "", "", "", "X")
         old_session = db.start_session("admin")
         db.start_project_work(old_session, "Viejo", project_root="/old")
         db.end_session(old_session)
@@ -127,9 +127,11 @@ def test_v34_ui_wiring_uses_correct_model_vars_and_hides_advanced_sections():
     assert 'variable=app.surface_model_mode' in panels
 
     assert 'self.modo_temperatura = tk.StringVar(value="simple")' in app_ui
-    assert 'mode_override="clear_sky", use_pvlib_override=False' in app_ui
-    assert 'use_clear_sky_engine = (' in app_ui
-    assert 'self.vars_modelo["_air_temp_override_k"] = observed_ta_k' in app_ui
+    controller = (root / "services" / "meteorology_controller.py").read_text(encoding="utf-8")
+    assert 'mode_override=None if advanced else "clear_sky"' in controller
+    assert "resolve_temperature_context(self," in app_ui
+    assert 'def _resolve_temperature_scenario' in app_ui
+    assert "self.vars_modelo['_app_instance'] = self" in app_ui
 
     assert '"vars_modelo": self._serialize_vars(self.app.vars_modelo)' in state
     assert '"tmrt_model_mode"' in state

@@ -142,6 +142,7 @@ def exportar_tabla_excel(snapshots: list, output_path: str) -> str:
     columnas que la tabla del informe PDF, para quien prefiera analizar
     los datos en otra herramienta (Excel, pandas, R, lo que sea)."""
     import pandas as pd
+    import json
 
     filas = []
     for entry in snapshots:
@@ -165,6 +166,14 @@ def exportar_tabla_excel(snapshots: list, output_path: str) -> str:
             "Modelo Tmrt": entry.get("modelo_tmrt"),
             "Temp. ambiente (°C)": entry.get("temp_ambient"),
             "Fecha": entry.get("timestamp"),
+            "Fuente radiativa": entry.get("fuente_radiativa_label", entry.get("fuente_radiativa")),
+            "Calidad meteorológica": entry.get("calidad_meteorologica"),
+            "GHI (W/m²)": entry.get("ghi_wm2"),
+            "DNI (W/m²)": entry.get("dni_wm2"),
+            "DHI (W/m²)": entry.get("dhi_wm2"),
+            "Escenario punto JSON": json.dumps(entry.get("effective_scenario_point"), ensure_ascii=False),
+            "Escenario mapa JSON": json.dumps(entry.get("effective_scenario_map"), ensure_ascii=False),
+            "Metadatos superficie JSON": json.dumps(entry.get("surface_result_metadata"), ensure_ascii=False),
         })
     df = pd.DataFrame(filas)
     df.to_excel(output_path, index=False)
@@ -172,7 +181,7 @@ def exportar_tabla_excel(snapshots: list, output_path: str) -> str:
 
 
 def curva_sensibilidad(temp_calculator, temp_ambient: float, fecha, hora: float,
-                        output_path: str, shadow_type: str = "tree", temp_unit: str = "°C"):
+                        output_path: str, shadow_type: str = "tree", temp_unit: str = "°C", scenario_config=None):
     """Recorre 0-100% de sombra con la ubicación/fecha/hora/temperatura
     actuales y grafica cómo responde el Tmrt en sombra según el propio
     modelo — sin necesitar ninguna imagen. Sirve para entender la forma
@@ -181,13 +190,17 @@ def curva_sensibilidad(temp_calculator, temp_ambient: float, fecha, hora: float,
 
     Devuelve (output_path, porcentajes, valores_tmrt_sombra).
     """
+    if scenario_config is not None:
+        temp_calculator = scenario_config.calculator()
+        temp_ambient = scenario_config.air_temp_c
+    calculation_kwargs = scenario_config.calculation_kwargs() if scenario_config is not None else dict(date_value=fecha, time_value=hora)
     porcentajes = np.linspace(0, 100, 41)
     tmrt_sombra = []
     tmrt_sol_ref = None
     for p in porcentajes:
         resultado = temp_calculator.calculate_tmrt(
             temp_ambient, float(p), shadow_type=shadow_type,
-            date_value=fecha, time_value=hora,
+            **calculation_kwargs,
         )
         tmrt_sombra.append(resultado["Tmrt_sombra"])
         if tmrt_sol_ref is None:
