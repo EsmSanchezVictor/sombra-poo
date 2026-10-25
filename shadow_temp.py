@@ -90,7 +90,7 @@ class Temperatura:
     @property
     def model_label(self):
         return (
-            "Avanzado · balance radiativo v1"
+            "Avanzado · balance radiativo v2"
             if self.model_mode == self.MODEL_ADVANCED
             else "Estándar · empírico calibrable"
         )
@@ -332,7 +332,7 @@ class Temperatura:
             "Solar_altitude": round(solar_altitude, 2),
             "Modelo_Tmrt": selected_model,
             "Modelo_Tmrt_label": (
-                "Avanzado · balance radiativo v1"
+                "Avanzado · balance radiativo v2"
                 if selected_model == self.MODEL_ADVANCED
                 else "Estándar · empírico calibrable"
             ),
@@ -422,7 +422,7 @@ class Temperatura:
             "Transmitancia_tau": round(tau, 4),
             "Modelo_Tmrt": selected_model,
             "Modelo_Tmrt_label": (
-                "Avanzado · balance radiativo v1"
+                "Avanzado · balance radiativo v2"
                 if selected_model == self.MODEL_ADVANCED
                 else "Estándar · empírico calibrable"
             ),

@@ -153,7 +153,7 @@ def setup_panel_1(app):
         if not app.tmrt_model_status_label.winfo_exists():
             return
         texto = (
-            "Avanzado · balance radiativo v1"
+            "Avanzado · balance radiativo v2"
             if app.tmrt_model_mode.get() == "advanced"
             else "Estándar · empírico calibrable (predeterminado)"
         )

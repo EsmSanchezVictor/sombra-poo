@@ -17,8 +17,8 @@ TMRT_MODELS = {
         "status": "predeterminado",
     },
     "advanced": {
-        "label": "Avanzado · balance radiativo v1",
-        "version": "advanced_radiative_v1",
+        "label": "Avanzado · balance radiativo v2",
+        "version": "advanced_radiative_v2",
         "status": "requiere validación local",
     },
 }

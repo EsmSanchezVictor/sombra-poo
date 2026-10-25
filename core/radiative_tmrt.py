@@ -10,7 +10,13 @@ IMPORTANTE
 Es un *modelo avanzado v1*, no un reemplazo de SOLWEIG/ENVI-met.  Con los datos
 que hoy dispone la aplicación se hacen estas aproximaciones deliberadas:
 
-* persona de pie, con factor de área proyectada fijo ``f_p = 0.28``;
+* persona de pie, con factor de área proyectada ``f_p`` dependiente de la
+  elevación solar (``projected_area_mode="elevation"``, predeterminado desde
+  el modelo v2; Jendritzky et al. 1990, ver
+  :func:`projected_area_factor_standing`). El modelo v1 usaba ``f_p`` fijo en
+  0.28 (``projected_area_mode="fixed"``, sigue disponible para reproducir
+  resultados anteriores): con el sol alto el valor fijo sobreestima el aporte
+  de la radiación directa;
 * absorptividad solar humana ``alpha_sw = 0.70``;
 * emisividad/absorptividad de onda larga ``epsilon_lw = 0.97``;
 * factor angular hemisférico ``f_a = 0.50``;
@@ -37,6 +43,29 @@ import numpy as np
 SIGMA = 5.670374419e-8  # W m-2 K-4
 
 
+PROJECTED_AREA_MODES = ("fixed", "elevation")
+MODEL_VERSION_BY_AREA_MODE = {
+    "fixed": "advanced_radiative_v1",
+    "elevation": "advanced_radiative_v2",
+}
+
+
+def projected_area_factor_standing(solar_elevation_deg: float) -> float:
+    """Factor de área proyectada ``f_p`` de una persona de pie según elevación.
+
+    Regresión de Jendritzky et al. (1990) sobre fotografías de una persona real,
+    de uso estándar en biometeorología (Klima-Michel-Modell, RayMan, ERA5-HEAT)::
+
+        f_p = 0.308 * cos( a * (0.998 - a**2 / 50000) )     a = elevación [°]
+
+    Vale ~0.31 con el sol en el horizonte y ~0.10 con el sol a 82°. Con
+    elevación <= 0 devuelve el valor del horizonte (no se usa de noche porque
+    DNI = 0). Es independiente de la orientación de la persona respecto del sol.
+    """
+    a = min(90.0, max(0.0, float(solar_elevation_deg)))
+    return 0.308 * math.cos(math.radians(a * (0.998 - a * a / 50000.0)))
+
+
 @dataclass(frozen=True)
 class AdvancedTmrtConfig:
     """Parámetros del balance radiativo humano simplificado."""
@@ -46,6 +75,9 @@ class AdvancedTmrtConfig:
     projected_area_factor: float = 0.28
     angular_factor: float = 0.50
     ground_albedo: float = 0.20
+    # "elevation" (v2, predeterminado): f_p = projected_area_factor_standing(elevación).
+    # "fixed" (v1, legado): usa projected_area_factor para reproducir resultados previos.
+    projected_area_mode: str = "elevation"
 
     def validated(self) -> "AdvancedTmrtConfig":
         vals = {
@@ -68,6 +100,10 @@ class AdvancedTmrtConfig:
             raise ValueError("angular_factor debe estar entre 0 y 1.")
         if not 0.0 <= self.ground_albedo <= 1.0:
             raise ValueError("ground_albedo debe estar entre 0 y 1.")
+        if self.projected_area_mode not in PROJECTED_AREA_MODES:
+            raise ValueError(
+                "projected_area_mode debe ser uno de " + ", ".join(PROJECTED_AREA_MODES) + "."
+            )
         return self
 
 
@@ -146,8 +182,12 @@ def calculate_radiative_tmrt(
 
     # Onda corta incidente ponderada por geometría corporal.
     reflected_sw = cfg.ground_albedo * ghi
+    if cfg.projected_area_mode == "elevation":
+        f_p = projected_area_factor_standing(solar_elevation_deg)
+    else:
+        f_p = cfg.projected_area_factor
     directional_sw = (
-        cfg.projected_area_factor * dni
+        f_p * dni
         + cfg.angular_factor * dhi
         + cfg.angular_factor * reflected_sw
     )
@@ -189,5 +229,6 @@ def calculate_radiative_tmrt(
         "shortwave_effective": sw_value,
         "longwave_equivalent": float(longwave_equivalent),
         "reflected_shortwave": float(reflected_sw),
-        "model": "advanced_radiative_v1",
+        "projected_area_factor_used": float(f_p),
+        "model": MODEL_VERSION_BY_AREA_MODE[cfg.projected_area_mode],
     }

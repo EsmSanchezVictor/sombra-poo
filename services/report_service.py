@@ -95,7 +95,7 @@ def generar_informe_proyecto(app, project, output_path: str) -> str:
             ln=True, align="C",
         )
     model_mode = scenario.tmrt_model if scenario is not None else "standard"
-    model_name = "Avanzado - balance radiativo v1" if model_mode == "advanced" else "Estandar - empirico calibrable"
+    model_name = "Avanzado - balance radiativo v2" if model_mode == "advanced" else "Estandar - empirico calibrable"
     pdf.cell(0, 8, txt=f"Modelo Tmrt activo: {model_name}", ln=True, align="C")
     surface_mode = (getattr(app, "last_meta", None) or {}).get("surface_model", "standard")
     surface_name = ({

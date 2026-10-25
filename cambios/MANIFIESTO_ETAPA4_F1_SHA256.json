@@ -1,0 +1,19 @@
+{
+  "release": "v35.6-etapa3.2+etapa4-F1",
+  "parent_release": "v35.6-etapa3.2",
+  "nota": "Parche acumulativo: sustituye estos archivos por ruta. APP_RELEASE/SCIENTIFIC_RELEASE sin cambios.",
+  "tmrt_avanzado": "advanced_radiative_v2",
+  "sha256": {
+    "core/radiative_tmrt.py": "41116a5844877b37d66edaa5de6a3b4683092c85e936e4fcb034249b774c8837",
+    "core/uncertainty.py": "ebfaf9ebd180b6bbc16b646130f2518803986ab82dcc1696660ee323be0f36a1",
+    "core/model_registry.py": "7573d62eb97cfc1f28e8b7bbb90fcd31d483a34ce8dcef01235ecadba7a3db96",
+    "ui/app_ui.py": "2d49598772067f8440b8d5ea21fdfa1a0432906c0541eee377b220a2990d7e6b",
+    "ui/panels.py": "1b27b4f05f2f727ba8ae5a0df7dbda5c3f733751ebed7881e97d7df438dccd33",
+    "services/report_service.py": "ae08b31cba6a8879af3d000564b67a975f17139041ed984a351ec24c4f7a2aac",
+    "shadow_temp.py": "0551ffa86af6b32f680d92ec58f507b3e7f89718c32abbdc571f8b99a8e38e0b",
+    "test/test_stage4_fp_elevation.py": "736b5578f6704f41d8d656c12d42fecb74c56de76222613e3c0ad61923573fc7",
+    "cambios/CAMBIOS_ETAPA4_F1.md": "06d56b934156e28138228b2d5c8231294316213a2bfc81270a3e141bb0fbbc55",
+    "cambios/PLAN_TRABAJO_ETAPA4.md": "1f0e84a388f94b13379924088cc51a550c73d9af50e27d2f10b51b06e757e1cb",
+    "scripts/limpiar_repo.ps1": "9e93efdf5c33c98d5f87ad8f5caaed448fc4a826fede6e1c1826baf711d6308f"
+  }
+}

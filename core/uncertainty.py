@@ -13,7 +13,11 @@ from typing import Any
 
 import numpy as np
 
-from core.radiative_tmrt import AdvancedTmrtConfig, calculate_radiative_tmrt
+from core.radiative_tmrt import (
+    AdvancedTmrtConfig,
+    calculate_radiative_tmrt,
+    projected_area_factor_standing,
+)
 
 
 @dataclass(frozen=True)
@@ -108,7 +112,12 @@ def estimate_tmrt_uncertainty(
         tmrt_sun = np.empty(n, dtype=float)
         tmrt_shade = np.empty(n, dtype=float)
         alpha = np.clip(rng.normal(adv_cfg.shortwave_absorptivity, cfg.advanced_absorptivity_sigma, n), 0.0, 1.0)
-        projected = np.clip(rng.normal(adv_cfg.projected_area_factor, cfg.advanced_projected_factor_sigma, n), 0.0, 1.0)
+        fp_base = (
+            projected_area_factor_standing(solar_elevation_deg)
+            if adv_cfg.projected_area_mode == "elevation"
+            else adv_cfg.projected_area_factor
+        )
+        projected = np.clip(rng.normal(fp_base, cfg.advanced_projected_factor_sigma, n), 0.0, 1.0)
         albedo = np.clip(rng.normal(adv_cfg.ground_albedo, cfg.advanced_ground_albedo_sigma, n), 0.0, 1.0)
         dni0 = None if dni is None else max(0.0, float(dni))
         dhi0 = None if dhi is None else max(0.0, float(dhi))
@@ -119,6 +128,9 @@ def estimate_tmrt_uncertainty(
                 projected_area_factor=float(projected[i]),
                 angular_factor=adv_cfg.angular_factor,
                 ground_albedo=float(albedo[i]),
+                # f_p muestreado (centrado en f_p(elevación) si el modo es
+                # "elevation"): se aplica como valor fijo en cada muestra.
+                projected_area_mode="fixed",
             )
             dni_i = None if dni0 is None else dni0 * rad_scale[i]
             dhi_i = None if dhi0 is None else dhi0 * rad_scale[i]

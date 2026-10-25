@@ -2590,7 +2590,7 @@ class SombraApp:
             variable=tmrt_model_var, value="standard", bg="white",
         ).grid(row=5, column=0, columnspan=2, sticky="w")
         tk.Radiobutton(
-            card, text="Avanzado (balance radiativo v1)",
+            card, text="Avanzado (balance radiativo v2)",
             variable=tmrt_model_var, value="advanced", bg="white",
         ).grid(row=6, column=0, columnspan=2, sticky="w")
         tk.Label(
