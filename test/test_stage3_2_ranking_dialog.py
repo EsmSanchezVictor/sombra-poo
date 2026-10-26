@@ -5,6 +5,7 @@ import json
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from test.test_stage3_2_tree_ranking import configured_app
 from ui import dialogs
+from ui import species_dialogs
 
 
 def test_choose_scene_export_and_invalidate_stale_result(tmp_path,monkeypatch):
@@ -29,8 +30,8 @@ def test_choose_scene_export_and_invalidate_stale_result(tmp_path,monkeypatch):
     for name in ('Toplevel','Frame','Label','Text','Button'):monkeypatch.setattr(dialogs.tk,name,Widget)
     monkeypatch.setattr(dialogs.ttk,'Combobox',Widget)
     monkeypatch.setattr(dialogs.tk,'StringVar',Variable)
-    monkeypatch.setattr(dialogs,'FigureCanvasTkAgg',Canvas)
-    monkeypatch.setattr(dialogs,'prepare_dialog',lambda *a,**k:None)
+    monkeypatch.setattr(species_dialogs,'FigureCanvasTkAgg',Canvas)
+    monkeypatch.setattr(species_dialogs,'prepare_dialog',lambda *a,**k:None)
     f=tmp_path/'ranking.json';monkeypatch.setattr(dialogs.filedialog,'asksaveasfilename',lambda **k:str(f))
     obj=configured_app('advanced');obj.root=object()
     dialogs.HerramientasDialogs(obj)._dialogo_ranking_arboles()

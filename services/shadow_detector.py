@@ -1,4 +1,4 @@
-"""Detección opcional de sombras para fotos reales."""
+"""Detección fotométrica opcional de candidatos oscuros, sin clasificación semántica."""
 
 from __future__ import annotations
 
@@ -49,18 +49,46 @@ class ShadowDetector:
         thresh = self._otsu_threshold(gray) if method != "global" else params.threshold
         return gray <= thresh
 
+    def compute_shadow_coverage(self, mask, roi_mask=None, *, exclusion_mask=None) -> dict:
+        """Fracción 0..1 de candidatos oscuros dentro de la ROI válida.
+
+        No estima precisión ni calidad térmica. Las exclusiones se anotan
+        manualmente; el umbral RGB no identifica materiales ni objetos.
+        """
+        mask_bool = self._binary_mask(mask, "mask")
+        roi = np.ones_like(mask_bool) if roi_mask is None else self._binary_mask(roi_mask, "roi_mask", mask_bool.shape)
+        excluded = np.zeros_like(mask_bool) if exclusion_mask is None else self._binary_mask(exclusion_mask, "exclusion_mask", mask_bool.shape)
+        excluded_count = int(np.count_nonzero(roi & excluded))
+        roi = roi & ~excluded
+        valid = int(roi.sum())
+        dark = int(np.count_nonzero(mask_bool & roi))
+        return {"coverage_fraction": float(dark / valid) if valid else None,
+                "candidate_pixels": dark, "total_pixels": valid, "excluded_pixels": excluded_count,
+                "status": "estimated" if valid else "no_valid_pixels",
+                "interpretation": "dark_candidate_coverage", "units": "fraction",
+                "semantic_discrimination": False,
+                "warnings": ["La copa, el asfalto, el agua y otros materiales oscuros pueden confundirse con sombra; revise la ROI y las exclusiones."]}
+
     def compute_shadow_quality(self, mask, roi_mask=None) -> dict:
-        mask_bool = np.asarray(mask).astype(bool)
-        if roi_mask is None:
-            roi = np.ones_like(mask_bool, dtype=bool)
-        else:
-            roi = np.asarray(roi_mask).astype(bool)
-        valid = roi.sum()
-        if valid == 0:
-            return {"shadow_quality": 0.0, "dark_pixels": 0, "total_pixels": 0}
-        dark = int(np.logical_and(mask_bool, roi).sum())
-        quality = float(dark / valid)
-        return {"shadow_quality": quality, "dark_pixels": dark, "total_pixels": int(valid)}
+        """API histórica: shadow_quality siempre fue una cobertura, no calidad."""
+        result = self.compute_shadow_coverage(mask, roi_mask)
+        return {"shadow_quality": result["coverage_fraction"],
+                "dark_pixels": result["candidate_pixels"], "total_pixels": result["total_pixels"]}
+
+    @staticmethod
+    def _binary_mask(mask, name, shape=None):
+        arr = np.asarray(mask)
+        if arr.ndim != 2 or (shape is not None and arr.shape != shape):
+            raise ValueError(f"{name} debe ser una máscara 2D del mismo tamaño que la imagen.")
+        if not np.issubdtype(arr.dtype, np.number) and arr.dtype != np.bool_:
+            raise ValueError(f"{name} debe contener valores numéricos o booleanos.")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError(f"{name} no puede contener NaN o infinito.")
+        return arr.astype(bool)
+
+    def detect_shadow_candidates(self, image_path_or_pil, method="adaptive", params=None):
+        """Candidatos por intensidad; requieren revisión antes de llamarlos sombra."""
+        return self.detect_shadow_mask(image_path_or_pil, method=method, params=params)
 
     def _to_gray_array(self, image_path_or_pil):
         if isinstance(image_path_or_pil, Image.Image):

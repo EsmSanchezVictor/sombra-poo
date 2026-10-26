@@ -29,3 +29,17 @@ data/settings.json
 data/species_db.json
 mascaras.json
 mascarascoco.json
+
+# Artefactos y entornos locales
+.venv*/
+.build-venv-win/
+build/
+dist/
+release/
+*.bundle
+/MANIFIESTO_ACTUALIZACION.json
+
+# Respaldos locales (bundle de git, copias): fuera del repositorio
+respaldos/
+# Datos crudos pesados de campañas (fotos originales, registros del datalogger): conservar fuera de git
+validacion/campo/campanias/**/crudos/

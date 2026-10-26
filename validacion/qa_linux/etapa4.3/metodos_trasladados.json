@@ -1,0 +1,247 @@
+[
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "_ancho_viewport_actual"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "_reservar_ancho_sidebar"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "_recalcular_ancho_sidebar_abierto"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "_crear_panel_desplazable"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "toggle_panel"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "open_panel"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "animate_panel_open"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "_panel_anim_step"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "close_panel"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "animate_panel_close"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "hide_all_frames"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "_toggle_frames"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "show_panel2_frames"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "show_diseno_frames"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "show_modelo_frames"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "highlight_button"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "reset_button"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "switch_buttons_to_horizontal"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/sidebar.py",
+    "method": "switch_buttons_to_vertical"
+  },
+  {
+    "from": "ui/app_ui.py",
+    "to": "ui/preferences.py",
+    "method": "open_preferences"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/calibration_dialogs.py",
+    "method": "_dialogo_calibrar_k_factor"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/calibration_dialogs.py",
+    "method": "_calibrador_agregar"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/calibration_dialogs.py",
+    "method": "_calibrador_quitar"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/calibration_dialogs.py",
+    "method": "_calibrador_calcular"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/calibration_dialogs.py",
+    "method": "_calibrador_aplicar"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/comfort_dialogs.py",
+    "method": "_dialogo_confort"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/comfort_dialogs.py",
+    "method": "_dialogo_escenario_ab"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/species_dialogs.py",
+    "method": "_dialogo_especies"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/species_dialogs.py",
+    "method": "_dialogo_editar_especies"
+  },
+  {
+    "from": "ui/dialogs.py",
+    "to": "ui/species_dialogs.py",
+    "method": "_dialogo_ranking_arboles"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_ensure_shadow_overlay"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "update_animation_frame"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_initial_render"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_show_runtime_error"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_set_camera_isometric"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "view_isometric"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "view_top"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "reset_camera"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_on_drag_start"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_on_drag_motion"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_on_drag_end"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_on_mousewheel"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_zoom"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_on_configure"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "_render_to_tk"
+  },
+  {
+    "from": "ui/scene3d.py",
+    "to": "ui/scene3d_interaction.py",
+    "method": "close"
+  },
+  {
+    "from": "modelo_con_excel.py",
+    "to": "ui/model_excel.py",
+    "method": "_aplicar_parametros_app_desde_excel"
+  },
+  {
+    "from": "modelo_con_excel.py",
+    "to": "ui/model_excel.py",
+    "method": "cargar_excel"
+  },
+  {
+    "from": "modelo_con_excel.py",
+    "to": "ui/model_excel.py",
+    "method": "guardar_excel"
+  }
+]

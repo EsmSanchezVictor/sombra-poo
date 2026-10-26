@@ -108,7 +108,7 @@ def test_logging_is_idempotent_rotates_and_closes_handles(tmp_path):
 
 
 def test_tk_callback_handler_reports_and_logs_actual_exception(monkeypatch,caplog):
-    from core.app_logging import install_tk_error_handler
+    from ui.error_handlers import install_tk_error_handler
     from tkinter import messagebox
     shown = []
     monkeypatch.setattr(messagebox,'showerror',lambda *args:shown.append(args))
@@ -152,7 +152,7 @@ def test_extracted_matplotlib_backend_renders_scene_with_agg(monkeypatch,vtk_err
 def test_code_and_science_release_labels_current():
     from core.app_version import APP_RELEASE
     from core.model_registry import SCIENTIFIC_RELEASE
-    assert APP_RELEASE == 'v35.6-etapa3.2' and SCIENTIFIC_RELEASE == 'v35.6-etapa3.2'
+    assert APP_RELEASE == 'v35.6-etapa4.3' and SCIENTIFIC_RELEASE == 'v35.6-etapa3.2'
 
 
 def test_snapshot_copy_failure_preserves_previous_artifact(tmp_path,monkeypatch):

@@ -1,0 +1,22 @@
+{
+  "status": "passed",
+  "parent_release": "v35.6-etapa4.1",
+  "parent_zip_sha256": "0804aca09563a114044c9ce396f1459d3f452cbdcddd6bfa4ab8db3776b4c922",
+  "surface_cases_equal": 9,
+  "radiative_cases_equal": 8,
+  "uncertainty_seeded_equal": true,
+  "default_photo_cases_equal": 8,
+  "untouched_files_sha256": {
+    "core/radiative_tmrt.py": "41116a5844877b37d66edaa5de6a3b4683092c85e936e4fcb034249b774c8837",
+    "core/uncertainty.py": "ebfaf9ebd180b6bbc16b646130f2518803986ab82dcc1696660ee323be0f36a1",
+    "core/model_registry.py": "7573d62eb97cfc1f28e8b7bbb90fcd31d483a34ce8dcef01235ecadba7a3db96",
+    "shadow_temp.py": "0551ffa86af6b32f680d92ec58f507b3e7f89718c32abbdc571f8b99a8e38e0b",
+    "core/surface_model.py": "c3ff962efe2aecfed6b088a1447979e7765e62f6d3087acfaeae07085ed8a160",
+    "services/meteorology_controller.py": "3cc95358ab37aec76eea3d3dd108e48578758497c959ce16c775eafee3ced1be",
+    "services/report_service.py": "ae08b31cba6a8879af3d000564b67a975f17139041ed984a351ec24c4f7a2aac",
+    "ui/panels.py": "1b27b4f05f2f727ba8ae5a0df7dbda5c3f733751ebed7881e97d7df438dccd33",
+    "ui/scene3d_vtk.py": "c63a02385667bdec988f1e90aeb152ca2f3a195d096c7e1c78616323f97cd019",
+    "ui/visualization_host.py": "251e77df42fa00bfea674ac676ef74d7018b23c3d021411c1232446402c7e66f"
+  },
+  "mutable_files_preserved": true
+}

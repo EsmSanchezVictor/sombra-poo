@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "foto-01-sin-exclusiones",
+      "origin": "real_photo",
+      "image": "foto_01.png",
+      "reference_mask": "sombra_anotada_01.png",
+      "roi_mask": "superficie_comparable_01.png",
+      "lit_reference_mask": "referencia_iluminada_01.png",
+      "profile": "photo_reference",
+      "annotation": {
+        "author": "",
+        "method": "",
+        "reviewed_by": "",
+        "capture_id": "",
+        "location": "",
+        "capture_datetime": ""
+      },
+      "confounder_masks": {
+        "canopy": "copa_01.png",
+        "asphalt": "asfalto_01.png",
+        "water": "agua_01.png"
+      }
+    }
+  ]
+}

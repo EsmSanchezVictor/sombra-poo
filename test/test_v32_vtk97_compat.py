@@ -1,8 +1,9 @@
+from test.source_helpers import scene_source
 from pathlib import Path
 
 
 def test_scene3d_no_legacy_addactor2d_call():
-    source = (Path(__file__).parents[1] / "ui" / "scene3d.py").read_text(encoding="utf-8")
+    source = scene_source()
     assert "renderer.AddActor2D(" not in source
     assert "renderer.AddViewProp(scalar_bar)" in source
 

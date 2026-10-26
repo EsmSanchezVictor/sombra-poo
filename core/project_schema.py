@@ -1,7 +1,7 @@
 """Migración explícita y compatible de estados de proyecto."""
 from copy import deepcopy
 
-STATE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 3
 ANALYSIS_SCHEMA_VERSION = 1
 
 class UnsupportedSchemaError(ValueError):

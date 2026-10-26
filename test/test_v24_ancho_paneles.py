@@ -1,3 +1,4 @@
+from test.source_helpers import app_source
 from pathlib import Path
 
 from ui.layout import (
@@ -9,7 +10,7 @@ from ui.layout import (
 
 
 def _source():
-    return (Path(__file__).resolve().parents[1] / "ui" / "app_ui.py").read_text(encoding="utf-8")
+    return app_source()
 
 
 def test_v24_reduccion_horizontal_real_cerca_30_por_ciento_en_1400():

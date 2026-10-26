@@ -205,6 +205,12 @@ class SnapshotService:
             "atenuacion_efectiva": self._to_float(photo.get("effective_attenuation_pct")),
             "umbral_sombra_ratio": self._to_float(photo.get("threshold_ratio")),
             "algoritmo_sombra": photo.get("algorithm"),
+            "photo_input_signature": photo.get("input_signature"),
+            "photo_excluded_pixels": photo.get("excluded_pixels",0),
+            "photo_contrast_policy": photo.get("contrast_policy","legacy_mad"),
+            "interpretacion_cobertura": photo.get("coverage_interpretation", "photometric_estimate_not_semantic_ground_truth"),
+            "advertencias_fotograficas": photo.get("warnings", []),
+            "deteccion_candidatos": getattr(self.app, "shadow_detection_meta", None),
             "indice_sombra_legacy": self._to_float(photo.get("legacy_shadow_index_pct")),
             "temp_ambient": None,
             "tmrt_sol": None,
@@ -291,7 +297,7 @@ class SnapshotService:
     def _save_photo_analysis(self, path) -> None:
         analysis = getattr(self.app, "shadow_photo_analysis", None) or {}
         arrays = {}
-        for key in ("shadow_mask", "local_transmittance_map", "local_attenuation_map", "ratio_map"):
+        for key in ("shadow_mask", "local_transmittance_map", "local_attenuation_map", "ratio_map", "exclusion_mask"):
             value = analysis.get(key)
             if value is not None:
                 arr = np.asarray(value)

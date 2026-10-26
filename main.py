@@ -1,5 +1,6 @@
 import tkinter as tk
-from core.app_logging import configure_logging, install_tk_error_handler
+from core.app_logging import configure_logging
+from ui.error_handlers import install_tk_error_handler
 from database_manager import DatabaseManager
 from main_app import MainApp
 from ui.auth_flow import setup_first_admin

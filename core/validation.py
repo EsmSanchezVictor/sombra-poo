@@ -75,6 +75,7 @@ COLUMNAS = {
         "ta_copa", "ta_sombra",
     ],
     "conjunto": ["conjunto", "subset", "grupo", "set", "particion"],
+    "campaign": ["campania", "campaña", "campaign", "campana"],
     "id": ["id", "muestra", "sample", "codigo", "identificador"],
     "especie": ["especie", "species", "arbol", "especie_arbol"],
     "surface_temp": ["surface_temp", "surface_temp_c", "ts", "temp_superficie", "temperatura_superficie"],
@@ -83,7 +84,7 @@ COLUMNAS = {
 }
 
 PLANTILLA_COLUMNAS = [
-    "id", "conjunto", "fecha", "hora", "lat", "lon", "timezone",
+    "id", "campania", "conjunto", "fecha", "hora", "lat", "lon", "timezone",
     "ta", "rh", "viento", "ghi", "dni", "dhi", "elevacion_solar",
     "sombra_pct", "tipo_sombra", "tau_sombra_total", "tmrt", "tg",
     "globe_diameter_m", "globe_emissivity", "ta_local", "especie",
@@ -282,6 +283,7 @@ def leer_csv_mediciones(path: str) -> list[dict]:
         fila = {
             "row_index": int(idx),
             "id": _string_or_none(row[col["id"]]) if col["id"] else str(idx + 1),
+            "campaign": _string_or_none(row[col["campaign"]]) if col["campaign"] else None,
             "tg": tg,
             "globe_diameter_m": float(diameter_used),
             "globe_emissivity": float(emissivity_used),
@@ -510,6 +512,7 @@ def predecir_avanzado(fila: dict, defaults: dict | None = None) -> tuple[float, 
     )
     comp = "observados" if dni is not None and dhi is not None else "estimados por cierre radiativo"
     return float(result["tmrt_c"]), {
+        "model_version": result.get("model"),
         "estado": "ok",
         "fuente_elevacion": fuente_elev,
         "componentes": comp,
@@ -793,6 +796,8 @@ def dataframe_resultados(reporte: dict) -> pd.DataFrame:
             "tau_efectiva": r.get("tau_efectiva"),
             "tmrt_estandar_actual_c": r.get("pred_estandar_actual"),
             "tmrt_estandar_calibrado_c": r.get("pred_estandar_calibrado"),
+            "tmrt_avanzado_c": r.get("pred_avanzado_v1"),
+            "modelo_avanzado": meta.get("model_version"),
             "tmrt_avanzado_v1_c": r.get("pred_avanzado_v1"),
             "elevacion_solar_usada_deg": meta.get("elevacion"),
             "fuente_elevacion": meta.get("fuente_elevacion"),
@@ -813,6 +818,8 @@ def exportar_reporte_validacion(path: str, reporte: dict) -> str:
     df_resultados = dataframe_resultados(reporte)
     metric_rows = []
     for model, met in reporte["metricas_modelos"].items():
+        from core.model_registry import TMRT_MODELS
+        model = TMRT_MODELS["advanced"]["label"] if model == "Avanzado v1" else model
         metric_rows.append({"modelo": model, **(met or {"n": 0, "rmse": np.nan, "mae": np.nan, "bias": np.nan, "r2": np.nan})})
     df_metricas = pd.DataFrame(metric_rows)
 

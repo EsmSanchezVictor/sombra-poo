@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "app_release": "v35.6-etapa4.3",
+  "timestamp_utc": "2026-10-25T23:32:11.097189+00:00",
+  "platform": "Windows-10-10.0.19045-SP0",
+  "windows_native_execution": true,
+  "human_visual_review": false,
+  "full_app_workflow_tested": false,
+  "field_validation": false,
+  "requested_vtk": true,
+  "checks": [
+    {
+      "name": "tk_window",
+      "status": "passed",
+      "detail": "8.6.15"
+    },
+    {
+      "name": "photo_editor",
+      "status": "passed",
+      "detail": "Widgets Tk reales: dibujo, selección, deshacer, aplicación y cierre.",
+      "seconds": 0.499
+    },
+    {
+      "name": "matplotlib_tk",
+      "status": "passed",
+      "detail": "Matplotlib 3D embebido en Tk y liberación del frame.",
+      "seconds": 6.298
+    },
+    {
+      "name": "vtk_tk",
+      "status": "passed",
+      "detail": "Render VTK real, cámaras, zoom, actualización y liberación.",
+      "seconds": 8.161
+    }
+  ],
+  "status": "passed"
+}

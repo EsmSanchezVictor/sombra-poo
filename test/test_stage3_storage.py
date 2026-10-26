@@ -329,7 +329,7 @@ def manager(tmp_path,monkeypatch):
     from core import project_manager as module
     messages=[]
     for method in ('showerror','showwarning','showinfo'):
-        monkeypatch.setattr(module.messagebox,method,lambda *args:messages.append(args))
+        monkeypatch.setattr(module.HeadlessInteraction,method,staticmethod(lambda *args:messages.append(args)))
     saved=[]
     app=SimpleNamespace(vars=variables(),vars_modelo=variables(),settings={},is_dirty=True,
         update_status_saved_time=lambda stamp:saved.append(stamp),project_integrity_events=[],
@@ -369,7 +369,7 @@ def test_backup_failure_reported_even_when_core_was_saved(tmp_path,monkeypatch):
 def test_save_as_aborts_when_consolidation_failed(tmp_path,monkeypatch):
     pm,messages,saved=manager(tmp_path,monkeypatch)
     import core.project_manager as module
-    monkeypatch.setattr(module.filedialog,'asksaveasfilename',lambda **kwargs:str(tmp_path/'dest.sombra'))
+    monkeypatch.setattr(module.HeadlessInteraction,'asksaveasfilename',staticmethod(lambda **kwargs:str(tmp_path/'dest.sombra')))
     monkeypatch.setattr(pm,'autosave_project',lambda:False)
     assert not pm.save_project_as() and not (tmp_path/'dest').exists()
 

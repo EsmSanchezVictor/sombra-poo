@@ -1,7 +1,8 @@
+from test.source_helpers import scene_source
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = (ROOT / "ui" / "scene3d.py").read_text(encoding="utf-8")
+SRC = scene_source()
 
 
 def test_windows_inicia_vtk_sin_msaa():

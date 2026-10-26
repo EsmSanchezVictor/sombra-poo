@@ -170,7 +170,7 @@ def test_solar_offset_helper_does_not_roll_invalid_day(day,year):
 
 def test_tk_error_handler_explains_time_error_and_keeps_log(monkeypatch):
     from types import SimpleNamespace
-    from core.app_logging import install_tk_error_handler
+    from ui.error_handlers import install_tk_error_handler
     recorded=[];messages=[]
     root=SimpleNamespace();logger=SimpleNamespace(error=lambda *a,**k:recorded.append((a,k)))
     monkeypatch.setattr('tkinter.messagebox.showerror',lambda title,text:messages.append((title,text)))

@@ -1,30 +1,8 @@
 import cv2
 import numpy as np
-
-# Resoluciones cuadradas permitidas para el análisis fotográfico/térmico.
-# v20: el valor de trabajo predeterminado baja a 128x128 para equilibrar
-# detalle espacial, RAM y latencia de Confort. El modo avanzado permite
-# seleccionar cualquier múltiplo de 32 entre 64 y 640.
-MATRIX_SIZE_MIN = 64
-MATRIX_SIZE_MAX = 640
-MATRIX_SIZE_STEP = 32
-DEFAULT_MATRIX_SIZE = 128
-MATRIX_SIZE_OPTIONS = tuple(range(MATRIX_SIZE_MIN, MATRIX_SIZE_MAX + 1, MATRIX_SIZE_STEP))
-
-
-def normalize_matrix_size(value, default=DEFAULT_MATRIX_SIZE):
-    """Normaliza una resolución de matriz al rango admitido.
-
-    Se usa al recuperar proyectos previos o valores editados externamente.
-    Si el valor no es un múltiplo exacto de 32, se aproxima al más cercano.
-    """
-    try:
-        n = int(round(float(value)))
-    except (TypeError, ValueError):
-        n = int(default)
-    n = max(MATRIX_SIZE_MIN, min(MATRIX_SIZE_MAX, n))
-    n = int(round(n / MATRIX_SIZE_STEP) * MATRIX_SIZE_STEP)
-    return max(MATRIX_SIZE_MIN, min(MATRIX_SIZE_MAX, n))
+from core.photo_exclusions import exclusion_mask as validate_exclusion_mask
+from core.image_config import (MATRIX_SIZE_MIN, MATRIX_SIZE_MAX, MATRIX_SIZE_STEP,
+    DEFAULT_MATRIX_SIZE, MATRIX_SIZE_OPTIONS, normalize_matrix_size)
 
 
 class ImageProcessor:
@@ -239,6 +217,7 @@ class ImageProcessor:
         mascara_area=None,
         mascara_referencia=None,
         threshold_ratio_bounds=(0.55, 0.92),
+        *, exclusion_mask=None,
     ):
         """Separa cobertura geométrica e intensidad óptica de sombra.
 
@@ -265,6 +244,12 @@ class ImageProcessor:
                 "Se necesita un área de referencia iluminada para separar cobertura e intensidad de sombra."
             )
         area, valid = self._validos(area_gris, mascara_area)
+        excluded=None
+        excluded_count=0
+        if exclusion_mask is not None:
+            excluded=validate_exclusion_mask(exclusion_mask,area.shape) & valid
+            excluded_count=int(excluded.sum())
+            valid &= ~excluded
         ref, valid_ref = self._validos(area_referencia, mascara_referencia)
         if not np.any(valid):
             raise ValueError("El área de cálculo no contiene píxeles válidos.")
@@ -291,6 +276,12 @@ class ImageProcessor:
 
         median_ratio = float(np.median(finite_ratios))
         robust_spread = float(1.4826 * np.median(np.abs(finite_ratios - median_ratio)))
+        # Opt-in correction: a majority of identical bright pixels can make
+        # MAD zero despite a substantial darker population. Preserve the
+        # historical default; use the retained percentile span for manual ROIs.
+        if excluded_count:
+            q05,q95=np.percentile(finite_ratios,[5,95])
+            robust_spread=max(robust_spread,float(q95-q05))
 
         # Otsu se aplica en una escala fija 0..1.20 para que el umbral sea
         # comparable entre fotografías. Se limita luego a [lo, hi].
@@ -342,8 +333,14 @@ class ImageProcessor:
         attenuation_map[valid] = 100.0 * (1.0 - tau_map[valid])
 
         return {
-            "algorithm": "photo-shadow-v2-coverage-attenuation",
+            "algorithm": "photo-shadow-v2-coverage-attenuation" + ("-manual-exclusions-v1" if excluded_count else ""),
+            "excluded_pixels": excluded_count,
+            "contrast_policy": "retained_percentile_span_v1" if excluded_count else "legacy_mad",
+            "exclusion_mask": excluded if excluded_count else None,
             "coverage_pct": float(np.clip(coverage, 0.0, 100.0)),
+            "coverage_interpretation": "photometric_estimate_not_semantic_ground_truth",
+            "semantic_discrimination": False,
+            "warnings": ["Los materiales oscuros pueden confundirse con sombra; use una referencia de la misma superficie y revise la máscara."],
             "attenuation_pct": float(np.clip(attenuation, 0.0, 100.0)),
             "shadow_transmittance": float(np.clip(tau_shadow, 0.0, 1.0)),
             "effective_transmittance": float(np.clip(effective_tau, 0.0, 1.0)),
@@ -360,7 +357,7 @@ class ImageProcessor:
             "ratio_map": ratio_map,
             # Compatibilidad/diagnóstico: índice continuo histórico.
             "legacy_shadow_index_pct": self.calcular_indice_sombra(
-                area_gris, area_referencia, mascara_area, mascara_referencia
+                area_gris, area_referencia, valid if excluded_count else mascara_area, mascara_referencia
             ),
         }
 

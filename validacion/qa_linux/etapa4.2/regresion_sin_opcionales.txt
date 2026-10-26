@@ -1,0 +1,15 @@
+........................................................................ [ 11%]
+............................sssss....................................... [ 23%]
+........................................................................ [ 35%]
+...........s............................................................ [ 47%]
+........s.s.s........................................................... [ 59%]
+........................................................................ [ 71%]
+........................................................................ [ 83%]
+........................................................................ [ 95%]
+.............................                                            [100%]
+=========================== short test summary info ============================
+SKIPPED [5] test/test_physics.py:236: could not import 'pvlib': Optional dependency disabled for fallback regression: pvlib
+SKIPPED [1] test/test_stage2_science.py:178: could not import 'pythermalcomfort': Optional dependency disabled for fallback regression: pythermalcomfort
+SKIPPED [2] test/test_stage3_2_local_time.py:65: pvlib no disponible
+SKIPPED [1] test/test_stage3_2_local_time.py:74: pvlib no disponible
+596 passed, 9 skipped in 15.95s

@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "app_release": "v35.6-etapa4.1",
+  "methodology": {
+    "scientific_release": "v35.6-etapa3.2",
+    "scientific_schema": "sombra-science/1.2",
+    "shadow_algorithm": "shadow_photo_v11",
+    "uncertainty_method": "operational_monte_carlo_v1",
+    "tmrt_models": {
+      "standard": {
+        "label": "Estándar · empírico calibrable",
+        "version": "tmrt_standard_v1",
+        "status": "predeterminado"
+      },
+      "advanced": {
+        "label": "Avanzado · balance radiativo v2",
+        "version": "advanced_radiative_v2",
+        "status": "requiere validación local"
+      }
+    },
+    "surface_models": {
+      "standard": {
+        "label": "Estándar · balance linealizado legacy",
+        "version": "surface_standard_v1"
+      },
+      "advanced": {
+        "label": "Avanzado seco · balance no lineal v1",
+        "version": "surface_energy_advanced_v1"
+      },
+      "advanced_vegetation": {
+        "label": "Avanzado vegetación + ET v2",
+        "version": "surface_energy_vegetation_v2"
+      }
+    },
+    "radiation_sources": {
+      "clear_sky": "Cielo despejado modelado",
+      "manual_measured": "Medición puntual",
+      "manual_scenario": "Escenario manual",
+      "observed_series": "Serie meteorológica observada"
+    },
+    "effective_scenario_schema": 2,
+    "wind_reference_height_m": 10.0,
+    "vegetation_wind_height_m": 2.0,
+    "vegetation_wind_conversion": "neutral logarithmic profile, z0=0.03 m; operational assumption",
+    "utci_domain": {
+      "tdb_c": [
+        -50,
+        50
+      ],
+      "tr_minus_tdb_c": [
+        -30,
+        70
+      ],
+      "wind_10m_m_s": [
+        0.5,
+        17
+      ],
+      "rh_pct": [
+        0,
+        100
+      ]
+    },
+    "local_time_policy": "strict_local_time_v1: reject ambiguous/nonexistent naive time; accept explicit offset or API fold",
+    "tree_ranking_method": "individual_tree_tmrt_v2: same effective Tmrt context, cell centers, no scene overlap attribution",
+    "date_policy": "visible day of year with stored calendar year; 24 h rolls to next date"
+  },
+  "platform": "Linux-6.18.55-x86_64-with-glibc2.39",
+  "python": "3.12.14",
+  "require_full": true,
+  "status": "passed",
+  "visual_tk_vtk_tested": false,
+  "field_validation": false,
+  "checks": [
+    {
+      "name": "dependency:numpy",
+      "status": "passed",
+      "detail": "2.2.6",
+      "seconds": 0.057
+    },
+    {
+      "name": "dependency:pandas",
+      "status": "passed",
+      "detail": "2.3.3",
+      "seconds": 0.172
+    },
+    {
+      "name": "dependency:cv2",
+      "status": "passed",
+      "detail": "4.14.0",
+      "seconds": 0.032
+    },
+    {
+      "name": "dependency:openpyxl",
+      "status": "passed",
+      "detail": "3.1.5",
+      "seconds": 0.096
+    },
+    {
+      "name": "dependency:matplotlib",
+      "status": "passed",
+      "detail": "3.11.2",
+      "seconds": 0.076
+    },
+    {
+      "name": "dependency:PIL",
+      "status": "passed",
+      "detail": "12.3.0",
+      "seconds": 0.0
+    },
+    {
+      "name": "dependency:fpdf",
+      "status": "passed",
+      "detail": "2.8.9",
+      "seconds": 0.165
+    },
+    {
+      "name": "dependency:tzdata",
+      "status": "passed",
+      "detail": "2026.5",
+      "seconds": 0.0
+    },
+    {
+      "name": "optional:pvlib",
+      "status": "passed"
+    },
+    {
+      "name": "optional:pythermalcomfort",
+      "status": "passed"
+    },
+    {
+      "name": "optional:vtkmodules.vtkCommonCore",
+      "status": "passed"
+    },
+    {
+      "name": "resources",
+      "status": "passed",
+      "detail": "Cuatro iconos y ubicaciones disponibles independientemente del directorio de inicio.",
+      "seconds": 0.001
+    },
+    {
+      "name": "science",
+      "status": "passed",
+      "detail": {
+        "tmrt_sol": 50.0,
+        "tmrt_shade": 41.5,
+        "utci": 32.0
+      },
+      "seconds": 1.324
+    },
+    {
+      "name": "persistence",
+      "status": "passed",
+      "detail": "JSON/Excel/SQLite, reapertura, exportación/importación .3es y copia en carpetas temporales.",
+      "seconds": 0.138
+    }
+  ]
+}

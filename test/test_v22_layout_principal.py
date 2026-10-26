@@ -1,10 +1,11 @@
+from test.source_helpers import app_source
 from pathlib import Path
 
 from ui.layout import calcular_ancho_sidebar_abierto
 
 
 def _source():
-    return (Path(__file__).resolve().parents[1] / "ui" / "app_ui.py").read_text(encoding="utf-8")
+    return app_source()
 
 
 def test_v22_sidebar_abierto_conserva_ancho_minimo_operativo_tras_v24():

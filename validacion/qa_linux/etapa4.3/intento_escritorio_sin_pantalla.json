@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "app_release": "v35.6-etapa4.3",
+  "timestamp_utc": "2026-10-25T22:17:12.777832+00:00",
+  "platform": "Linux-6.18.55-x86_64-with-glibc2.39",
+  "windows_native_execution": false,
+  "human_visual_review": false,
+  "full_app_workflow_tested": false,
+  "field_validation": false,
+  "requested_vtk": false,
+  "checks": [
+    {
+      "name": "desktop_setup",
+      "status": "failed",
+      "error": "TclError: no display name and no $DISPLAY environment variable"
+    }
+  ],
+  "status": "failed"
+}

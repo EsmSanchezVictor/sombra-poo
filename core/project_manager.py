@@ -18,11 +18,9 @@ from core.safe_paths import (safe_component, contained_path, safe_project_refere
                              sanitize_payload, sanitize_entry, validate_analysis_id)
 from core.project_archive import validate_archive, extract_validated_archive
 from datetime import datetime
-from tkinter import filedialog, messagebox
 
 from core.project import Project
-from ui import dialogs
-from ui.modal_style import ask_text
+from core.interaction import HeadlessInteraction
 
 
 log = logging.getLogger("sombra.projects")
@@ -30,7 +28,8 @@ log = logging.getLogger("sombra.projects")
 class ProjectManager:
     """Orquesta operaciones sobre proyectos y su estado."""
 
-    def __init__(self, app, app_state=None, settings_manager=None):
+    def __init__(self, app, app_state=None, settings_manager=None, *, interaction=None):
+        self.interaction = interaction if interaction is not None else HeadlessInteraction()
         self.app = app
         self.app_state = app_state
         self.settings_manager = settings_manager or getattr(app, "settings_manager", None)
@@ -44,20 +43,20 @@ class ProjectManager:
         """Crea un proyecto con nombre y ubicación."""
         if not self.app._confirm_discard_changes("Nuevo proyecto"):
             return
-        name = dialogs.ask_project_name(self.app.root)
+        name = self.interaction.ask_project_name(self.app.root)
         if not name:
             return
-        location = dialogs.ask_project_location(self.app.root, self.app.locations_data)
+        location = self.interaction.ask_project_location(self.app.root, self.app.locations_data)
         if not location:
-            messagebox.showwarning("Nuevo proyecto", "Debe seleccionar una ubicación válida.")
+            self.interaction.showwarning("Nuevo proyecto", "Debe seleccionar una ubicación válida.")
             return
         try:
             project_dir = contained_path(self.projects_root, safe_component(name), allow_absolute=False)
         except ValueError as exc:
-            messagebox.showerror("Nuevo proyecto", str(exc))
+            self.interaction.showerror("Nuevo proyecto", str(exc))
             return
         if os.path.exists(project_dir):
-            messagebox.showwarning("Nuevo proyecto", "Ya existe un proyecto con ese nombre.")
+            self.interaction.showwarning("Nuevo proyecto", "Ya existe un proyecto con ese nombre.")
             return
         project = Project(project_dir)
         project.ensure_structure()
@@ -95,13 +94,13 @@ class ProjectManager:
             payload = self._prepare_payload_for_layout(project,payload)
         except (ValueError,TypeError,OSError,KeyError) as exc:
             log.exception('No se pudo abrir/verificar el proyecto')
-            messagebox.showerror('Abrir proyecto',str(exc))
+            self.interaction.showerror('Abrir proyecto',str(exc))
             return False
         if recovered:
-            messagebox.showwarning('Proyecto recuperado','Se recuperó un conjunto válido de estado, escenas y análisis.\nLos archivos divergentes se preservaron cuando existían.' + (f"\nCopias preservadas en: {os.path.join(project.root_path,recovered['preserved_at'])}" if recovered.get('preserved_at') else ''))
+            self.interaction.showwarning('Proyecto recuperado','Se recuperó un conjunto válido de estado, escenas y análisis.\nLos archivos divergentes se preservaron cuando existían.' + (f"\nCopias preservadas en: {os.path.join(project.root_path,recovered['preserved_at'])}" if recovered.get('preserved_at') else ''))
         if issues:
             names = ', '.join(item['path'] for item in issues[:5])
-            messagebox.showwarning('Integridad del proyecto',f'{len(issues)} archivos modificados o ausentes desde el último guardado: {names}.\nEl incidente queda registrado; revisá los resultados asociados.')
+            self.interaction.showwarning('Integridad del proyecto',f'{len(issues)} archivos modificados o ausentes desde el último guardado: {names}.\nEl incidente queda registrado; revisá los resultados asociados.')
         self.app.project_integrity_events = payload.get('integrity_events',[])
         project.next_n = int(payload.get("next_n", 1))
         self.current_project = project
@@ -157,7 +156,7 @@ class ProjectManager:
             return False
         backup = self._create_backup()
         if not backup:
-            messagebox.showerror("Respaldo", "El estado quedó guardado, pero no se pudo crear el respaldo solicitado.")
+            self.interaction.showerror("Respaldo", "El estado quedó guardado, pero no se pudo crear el respaldo solicitado.")
             return False
         if backup and hasattr(self.app, "status_saved_var"):
             self.app.status_saved_var.set(
@@ -171,9 +170,9 @@ class ProjectManager:
         Esta es la única acción de guardado que solicita ubicación.
         """
         if not self.current_project:
-            messagebox.showwarning("Guardar como", "Primero cree o abra un proyecto.")
+            self.interaction.showwarning("Guardar como", "Primero cree o abra un proyecto.")
             return False
-        selected = filedialog.asksaveasfilename(
+        selected = self.interaction.asksaveasfilename(
             title="Guardar proyecto como",
             defaultextension=".sombra",
             filetypes=[("Proyecto sombra", "*.sombra")],
@@ -187,33 +186,33 @@ class ProjectManager:
         try:
             safe_component(base_name)
         except ValueError as exc:
-            messagebox.showerror("Guardar como", str(exc))
+            self.interaction.showerror("Guardar como", str(exc))
             return False
         parent = os.path.dirname(os.path.abspath(selected))
         target_root = os.path.join(parent, base_name)
         if os.path.exists(target_root):
-            messagebox.showerror("Guardar como", f"Ya existe la carpeta:\n{target_root}")
+            self.interaction.showerror("Guardar como", f"Ya existe la carpeta:\n{target_root}")
             return False
         try:
             from services.project_copy import copy_project
             state_path = copy_project(self.current_project,target_root)
         except Exception as exc:
             log.exception('No se pudo preparar Guardar como')
-            messagebox.showerror('Guardar como',f'No se pudo crear la copia: {exc}')
+            self.interaction.showerror('Guardar como',f'No se pudo crear la copia: {exc}')
             return False
         return self.open_project_from_path(state_path,project_action='save_as')
 
     def duplicate_project(self) -> bool:
         """Duplica el proyecto actual bajo /proyectos."""
         if not self.current_project:
-            messagebox.showerror("Duplicar proyecto", "No hay un proyecto abierto para duplicar.")
+            self.interaction.showerror("Duplicar proyecto", "No hay un proyecto abierto para duplicar.")
             return False
-        new_name = ask_text(self.app.root, "Duplicar proyecto", "Ingresá el nombre de la copia:", accept_text="Duplicar")
+        new_name = self.interaction.ask_text(self.app.root, "Duplicar proyecto", "Ingresá el nombre de la copia:", accept_text="Duplicar")
         if not new_name:
             return False
         new_name = new_name.strip()
         if not new_name:
-            messagebox.showerror("Duplicar proyecto", "El nombre del proyecto no puede estar vacío.")
+            self.interaction.showerror("Duplicar proyecto", "El nombre del proyecto no puede estar vacío.")
             return False
 
         if not self.autosave_project():
@@ -224,20 +223,20 @@ class ProjectManager:
             state_path = copy_project(self.current_project,target_dir)
         except Exception as exc:
             log.exception('No se pudo preparar la copia')
-            messagebox.showerror('Duplicar proyecto',f'No se pudo duplicar: {exc}')
+            self.interaction.showerror('Duplicar proyecto',f'No se pudo duplicar: {exc}')
             return False
-        if messagebox.askyesno('Duplicar proyecto','Proyecto duplicado correctamente. ¿Desea abrirlo ahora?'):
+        if self.interaction.askyesno('Duplicar proyecto','Proyecto duplicado correctamente. ¿Desea abrirlo ahora?'):
             return self.open_project_from_path(state_path,project_action='duplicated')
         return True
 
     def export_project(self) -> bool:
         """Exporta el proyecto a un archivo .3es."""
         if not self.current_project:
-            messagebox.showerror("Exportar .3es", "No hay un proyecto abierto para exportar.")
+            self.interaction.showerror("Exportar .3es", "No hay un proyecto abierto para exportar.")
             return False
         if not self.autosave_project():
             return False
-        file_path = filedialog.asksaveasfilename(
+        file_path = self.interaction.asksaveasfilename(
             title="Exportar proyecto",
             defaultextension=".3es",
             filetypes=[("Proyecto 3Esfera", "*.3es")],
@@ -248,22 +247,22 @@ class ProjectManager:
             self.current_project.storage.export(file_path)
             return True
         except Exception as exc:
-            messagebox.showerror("Exportar .3es", f"No se pudo exportar el proyecto: {exc}")
+            self.interaction.showerror("Exportar .3es", f"No se pudo exportar el proyecto: {exc}")
             return False
 
     def import_project(self) -> bool:
         """Importa un paquete validado y ofrece abrirlo al finalizar."""
-        file_path = filedialog.askopenfilename(title="Importar proyecto",
+        file_path = self.interaction.askopenfilename(title="Importar proyecto",
             filetypes=[("Proyecto 3Esfera", "*.3es")])
         if not file_path:
             return False
         try:
             source_path = self.import_archive(file_path)
-            if messagebox.askyesno("Importar .3es", "Importación completa. ¿Desea abrir el proyecto ahora?"):
+            if self.interaction.askyesno("Importar .3es", "Importación completa. ¿Desea abrir el proyecto ahora?"):
                 return self.open_project_from_path(source_path, project_action="imported")
             return True
         except Exception as exc:
-            messagebox.showerror("Importar .3es", f"No se pudo importar el proyecto: {exc}")
+            self.interaction.showerror("Importar .3es", f"No se pudo importar el proyecto: {exc}")
             return False
 
     def import_archive(self, file_path):
@@ -358,11 +357,11 @@ class ProjectManager:
             if committed:
                 self.app.is_dirty = False
                 log.exception('Proyecto guardado; falló una actualización auxiliar')
-                messagebox.showwarning('Proyecto guardado','El proyecto quedó guardado, pero no se pudieron actualizar todas las preferencias o indicadores.')
+                self.interaction.showwarning('Proyecto guardado','El proyecto quedó guardado, pero no se pudieron actualizar todas las preferencias o indicadores.')
                 return True
             self.app.is_dirty = True
             log.exception('No se pudo consolidar el proyecto')
-            messagebox.showerror('Guardar proyecto',f'No se pudo completar el guardado: {exc}\nEl estado anterior y la recuperación se conservan.')
+            self.interaction.showerror('Guardar proyecto',f'No se pudo completar el guardado: {exc}\nEl estado anterior y la recuperación se conservan.')
             return False
 
     def _prepare_payload_for_layout(self, project: Project, payload: dict) -> dict:
@@ -429,7 +428,7 @@ class ProjectManager:
             return migrate_payload(read_json(path))
         except (OSError,ValueError) as exc:
             log.exception('Lectura de estado inválida')
-            messagebox.showerror('Error',f'No se pudo abrir el proyecto: {exc}')
+            self.interaction.showerror('Error',f'No se pudo abrir el proyecto: {exc}')
             return None
 
     def _update_last_project_path(self, path: str) -> None:
@@ -446,7 +445,7 @@ class ProjectManager:
         return Project.from_config_path(file_path)
 
     def _select_project_path(self) -> str | None:
-        file_path = filedialog.askopenfilename(
+        file_path = self.interaction.askopenfilename(
             title="Abrir proyecto",
             filetypes=[
                 ("Proyecto sombra-poo", "*.sombra"),
@@ -456,7 +455,7 @@ class ProjectManager:
         )
         if file_path:
             return file_path
-        folder = filedialog.askdirectory(title="Abrir carpeta de proyecto")
+        folder = self.interaction.askdirectory(title="Abrir carpeta de proyecto")
         if not folder:
             return None
         return self._find_state_path_in_dir(folder)

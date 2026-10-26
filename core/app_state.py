@@ -7,16 +7,15 @@ from datetime import datetime
 import json
 import os
 from core.safe_paths import safe_project_reference
-import tkinter as tk
-from tkinter import messagebox
 import numpy as np
 
 
-import diseno as design
+from core import surface_model as design
 from core.crown_shapes import DEFAULT_CANOPY_SHAPE, normalize_canopy_shape
 from core.scene_objects import ArbolEscena, EstructuraEscena
 from core.model_registry import methodology_manifest
 from core.app_version import APP_RELEASE
+from core.photo_exclusions import state_from_analysis,decode_state
 
 @dataclass
 class ProjectMeta:
@@ -30,6 +29,10 @@ class AppState:
 
     def __init__(self, app):
         self.app = app
+
+    def _value(self, name, default):
+        value = getattr(self.app, name, default)
+        return value.get() if callable(getattr(value, "get", None)) else value
 
     @staticmethod
     def _build_resumen_estadistico(snapshots: list) -> dict:
@@ -69,9 +72,15 @@ class AppState:
         meta = ProjectMeta(name=project.name, saved_at=saved_at)
         scene_objects = self._extract_scene_objects()
         vars_data = self._serialize_vars(self.app.vars)
+        exclusion_state=state_from_analysis(getattr(self.app,'shadow_photo_analysis',None),
+            pending=getattr(self.app,'photo_exclusions_pending',False))
+        corrected_record=any(type(row.get('photo_excluded_pixels')) is int and row['photo_excluded_pixels']>0
+            for row in getattr(self.app,'snapshots',[]))
+        state_schema=max(2,getattr(project,'_minimum_state_schema',2),3 if exclusion_state is not None or corrected_record else 2)
+        project._minimum_state_schema=state_schema
         return {
             "version": 1,
-            "state_schema_version": 2,
+            "state_schema_version": state_schema,
             "layout_version": 2,
             "meta": meta.__dict__,
             "name": project.name,
@@ -81,19 +90,20 @@ class AppState:
             "vars_modelo": self._serialize_vars(self.app.vars_modelo),
             "ui": {
                 "active_panel": self.app.active_panel,
+                "active_analysis_id": getattr(self.app,'current_analysis_id',None),
                 "model_mode": self.app.modo_modelo.get(),
-                "edit_mode": getattr(self.app, "modo_edicion", tk.StringVar(value="advanced")).get(),
-                "temperature_mode": getattr(self.app, "modo_temperatura", tk.StringVar(value="simple")).get(),
-                "tmrt_model_mode": getattr(self.app, "tmrt_model_mode", tk.StringVar(value="standard")).get(),
-                "surface_model_mode": getattr(self.app, "surface_model_mode", tk.StringVar(value="standard")).get(),
-                "panel2_advanced": getattr(self.app, "panel2_advanced_mode", tk.BooleanVar(value=False)).get(),
-                "matrix_size": int(getattr(self.app, "matriz_size", tk.IntVar(value=128)).get()),
-                "shadow_detector_enabled": getattr(self.app, "shadow_detector_enabled", tk.BooleanVar(value=False)).get(),
-                "radiation_source_mode": getattr(self.app, "radiation_source_mode", tk.StringVar(value="clear_sky")).get(),
-                "clear_sky_use_pvlib": getattr(self.app, "use_pvlib_engine", tk.BooleanVar(value=False)).get(),
-                "manual_ghi": getattr(self.app, "manual_ghi", tk.StringVar(value="")).get(),
-                "manual_dni": getattr(self.app, "manual_dni", tk.StringVar(value="")).get(),
-                "manual_dhi": getattr(self.app, "manual_dhi", tk.StringVar(value="")).get(),
+                "edit_mode": self._value("modo_edicion", "advanced"),
+                "temperature_mode": self._value("modo_temperatura", "simple"),
+                "tmrt_model_mode": self._value("tmrt_model_mode", "standard"),
+                "surface_model_mode": self._value("surface_model_mode", "standard"),
+                "panel2_advanced": self._value("panel2_advanced_mode", False),
+                "matrix_size": int(self._value("matriz_size", 128)),
+                "shadow_detector_enabled": self._value("shadow_detector_enabled", False),
+                "radiation_source_mode": self._value("radiation_source_mode", "clear_sky"),
+                "clear_sky_use_pvlib": self._value("use_pvlib_engine", False),
+                "manual_ghi": self._value("manual_ghi", ""),
+                "manual_dni": self._value("manual_dni", ""),
+                "manual_dhi": self._value("manual_dhi", ""),
                 "selected_city": self.app.simple_city.get(),
                 "selected_country": self.app.simple_country.get(),
                 "simple_cloudiness": self.app.simple_cloudiness.get(),
@@ -123,7 +133,9 @@ class AppState:
                 "tmrt_sun": self._to_float(getattr(self.app, "tmrt_result", {}).get("Tmrt_sol") if self.app.tmrt_result else None),
                 "tmrt_shade": self._to_float(getattr(self.app, "tmrt_result", {}).get("Tmrt_sombra") if self.app.tmrt_result else None),
                 "delta_tmrt": self._to_float(getattr(self.app, "tmrt_result", {}).get("Delta_Tmrt") if self.app.tmrt_result else None),
-                "shadow_quality": self._to_float(getattr(self.app, "shadow_quality", None)),
+                "shadow_coverage_fraction": self._to_float(getattr(self.app, "shadow_coverage_fraction", getattr(self.app, "shadow_quality", None))),
+                "shadow_detection": self.make_json_safe(getattr(self.app, "shadow_detection_meta", None)),
+                "photo_exclusions": exclusion_state,
                 "temp_graph_image": self._rel(project.root_path, getattr(self.app, "last_temp_graph_path", None)),
             },
             "scene": {
@@ -139,9 +151,15 @@ class AppState:
     def apply_payload(self, payload: dict) -> None:
         from core.project_schema import migrate_payload
         payload = migrate_payload(payload)
+        results_meta=payload.get('last_results_meta',{})
+        if not isinstance(results_meta,dict):raise ValueError('Metadatos de resultados inválidos.')
+        exclusion_state=results_meta.get('photo_exclusions')
+        if exclusion_state is not None:
+            decode_state(exclusion_state)
+            active=payload.get('ui',{}).get('active_analysis_id')
+            if not isinstance(active,str) or not active.strip():raise ValueError('Falta el análisis asociado a las exclusiones.')
         if payload.get("version") != 1:
-            messagebox.showerror("Error", "Versión de proyecto no soportada.")
-            return
+            raise ValueError("Versión de proyecto no soportada.")
 
         defaults = self.app._build_vars()
         payload_vars = payload.get("vars", {})
@@ -201,7 +219,7 @@ class AppState:
             self.app.panel2_advanced_mode.set(ui.get("panel2_advanced", self.app.panel2_advanced_mode.get()))
         if hasattr(self.app, "matriz_size"):
             try:
-                from image_processor import normalize_matrix_size
+                from core.image_config import normalize_matrix_size
                 self.app.matriz_size.set(normalize_matrix_size(ui.get("matrix_size", 128)))
             except Exception:
                 self.app.matriz_size.set(128)
@@ -270,7 +288,8 @@ class AppState:
                 print(f"[proyecto] No se pudo restaurar la serie meteorológica: {exc}")
 
         last_meta = payload.get("last_results_meta", {})
-        self.app.shadow_quality = last_meta.get("shadow_quality")
+        self.app.shadow_coverage_fraction = last_meta.get("shadow_coverage_fraction", last_meta.get("shadow_quality"))
+        self.app.shadow_detection_meta = last_meta.get("shadow_detection")
         self.app.last_temp_graph_path = self._abs(root, last_meta.get("temp_graph_image"))
 
         # NUEVO: historial de elementos analizados (ver snapshot_service.py).
@@ -288,7 +307,16 @@ class AppState:
 
         saved_at = payload.get("meta", {}).get("saved_at")
         self.app.update_status_saved_time(saved_at)
+        if project is not None:project._minimum_state_schema=payload.get('state_schema_version',2)
+        self.app.photo_exclusions_pending=False
+        self.app._restore_analysis_id=ui.get('active_analysis_id')
         self.app.restore_project_artifacts()
+        if exclusion_state is not None:
+            if getattr(self.app,'current_analysis_id',None)!=ui.get('active_analysis_id'):
+                raise ValueError('No se pudo restaurar el análisis asociado a las exclusiones.')
+            restore=getattr(self.app,'restore_pending_photo_exclusions',None)
+            if not callable(restore):raise ValueError('La interfaz no admite exclusiones de esta versión.')
+            restore(exclusion_state)
 
     def _serialize_vars(self, vars_dict: dict) -> dict:
         data = {}
@@ -312,7 +340,7 @@ class AppState:
         return data
     
     def make_json_safe(self, value):
-        if isinstance(value, tk.Variable):
+        if callable(getattr(value, "get", None)) and callable(getattr(value, "set", None)):
             return self.make_json_safe(value.get())
         if isinstance(value, np.ndarray):
             return value.tolist()

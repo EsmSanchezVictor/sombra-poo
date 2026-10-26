@@ -89,11 +89,11 @@ def test_project_save_reopen_export_and_copy_with_windows_sync_rule(tmp_path, wi
     manager=ProjectManager(app,state);manager.current_project=project
     # Se conserva la función UI: un fallo de guardado no debe disparar un diálogo Tk.
     errors=[]
-    original=manager_module.messagebox.showerror
-    manager_module.messagebox.showerror=lambda *args:errors.append(args)
+    original=manager_module.HeadlessInteraction.__dict__["showerror"]
+    manager_module.HeadlessInteraction.showerror=staticmethod(lambda *args:errors.append(args))
     try:
         assert manager.save_project(), errors
-    finally:manager_module.messagebox.showerror=original
+    finally:manager_module.HeadlessInteraction.showerror=original
     assert not app.is_dirty
     saved,recovered,issues=project.storage.load(project.state_path)
     assert saved['tag']=='new' and recovered is None and not issues

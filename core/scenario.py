@@ -24,7 +24,7 @@ from core.thermal_comfort import (
     utci,
     utci_array,
 )
-from modelo_con_excel import calcular_sombra_arboles
+from core.surface_model import calcular_sombra_arboles
 
 UMBRAL_HI = 32.2
 

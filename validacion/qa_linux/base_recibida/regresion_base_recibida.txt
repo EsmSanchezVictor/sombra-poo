@@ -1,0 +1,66 @@
+........................................................................ [ 13%]
+........................................................................ [ 26%]
+........................................................................ [ 39%]
+........................................................................ [ 52%]
+........................................................................ [ 66%]
+........................................................................ [ 79%]
+.........................................FF............................. [ 92%]
+....................FF..................                                 [100%]
+=================================== FAILURES ===================================
+_________________ test_v25_panel2_tiene_fila_vertical_flexible _________________
+
+    def test_v25_panel2_tiene_fila_vertical_flexible():
+        src = _source()
+        start = src.index("    def setup_panel_2(self):")
+        end = src.index("    def setup_panel_3(self):", start)
+        bloque = src[start:end]
+>       assert "panel.grid_rowconfigure(2, weight=1)" in bloque
+E       assert 'panel.grid_rowconfigure(2, weight=1)' in '    def setup_panel_2(self):\n        """Configura el contenido del Panel 2"""\n        panel = self.panel_frames[1]\...        self.save_dataset_button.pack(fill="x", padx=20, pady=4)\n\n        self._toggle_panel2_advanced()\n        \n'
+
+test/test_v25_panel2_vertical.py:13: AssertionError
+_________________ test_v25_panel2_deja_de_apilar_todo_con_pack _________________
+
+    def test_v25_panel2_deja_de_apilar_todo_con_pack():
+        src = _source()
+        start = src.index("    def setup_panel_2(self):")
+        end = src.index("    def setup_panel_3(self):", start)
+        bloque = src[start:end]
+>       assert ".pack(" not in bloque
+E       assert '.pack(' not in '    def set...\n        \n'
+E         
+E         '.pack(' is contained here:
+E           gen_button.pack(fill="x", padx=20, pady=4)
+E         ?           ++++++
+E                   self.panel2_advanced_check = tk.Checkbutton(
+E                       panel,
+E                       text="Modo avanzado\n(resolución 64–640)",...
+E         
+E         ...Full output truncated (63 lines hidden), use '-vv' to show
+
+test/test_v25_panel2_vertical.py:23: AssertionError
+______________ test_2d_edicion_y_modelo_muestran_indicador_solar _______________
+
+    def test_2d_edicion_y_modelo_muestran_indicador_solar():
+        diseno = Path('diseño.py').read_text(encoding='utf-8')
+        modelo = Path('modelo_con_excel.py').read_text(encoding='utf-8')
+>       assert 'from ui.solar_indicator import add_solar_indicator_2d' in diseno
+E       assert 'from ui.solar_indicator import add_solar_indicator_2d' in '# -*- coding: utf-8 -*-\n"""Compatibilidad histórica. Use ``diseno`` en código nuevo."""\nfrom diseno import *  # noqa: F401,F403\n'
+
+test/test_v35_solar_indicator.py:7: AssertionError
+________________ test_scene3d_representa_sol_en_vtk_y_fallback _________________
+
+    def test_scene3d_representa_sol_en_vtk_y_fallback():
+        scene = Path('ui/scene3d.py').read_text(encoding='utf-8')
+        assert 'vtkLineSource' in scene
+        assert 'vtkTubeFilter' in scene
+        assert 'solar_summary = ""' in scene
+>       assert 'sun_distance = span * 2.15' in scene
+E       assert 'sun_distance = span * 2.15' in '"""Render 3D embebido para Proyecto Sombra.\n\nv29: la vista 3D deja de abrir una ventana independiente y se renderiz... ui.scene3d_fallback import render_matplotlib_fallback\n    return render_matplotlib_fallback(parent,data,vtk_error)\n'
+
+test/test_v35_solar_indicator.py:20: AssertionError
+=========================== short test summary info ============================
+FAILED test/test_v25_panel2_vertical.py::test_v25_panel2_tiene_fila_vertical_flexible
+FAILED test/test_v25_panel2_vertical.py::test_v25_panel2_deja_de_apilar_todo_con_pack
+FAILED test/test_v35_solar_indicator.py::test_2d_edicion_y_modelo_muestran_indicador_solar
+FAILED test/test_v35_solar_indicator.py::test_scene3d_representa_sol_en_vtk_y_fallback
+4 failed, 540 passed in 22.35s

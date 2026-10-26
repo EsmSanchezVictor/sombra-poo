@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "manifest_sha256": "4f24e3cdc0197f109e7fbc5c06bf94a3e6070d1bcc631241794abf716a24d498",
+  "cases": [
+    {
+      "id": "global-material-ambiguity",
+      "origin": "synthetic_negative_control",
+      "algorithm": {
+        "profile": "detector",
+        "method": "global",
+        "params": {
+          "block_size": 31,
+          "c": 8,
+          "blur_kernel": 3,
+          "threshold": 110
+        }
+      },
+      "annotation": {},
+      "metrics": {
+        "tp": 1024,
+        "fp": 3072,
+        "fn": 0,
+        "tn": 4096,
+        "pixels": 8192,
+        "precision": 0.25,
+        "recall": 1.0,
+        "f1": 0.4,
+        "iou": 0.25,
+        "predicted_coverage_fraction": 0.5,
+        "reference_coverage_fraction": 0.125,
+        "coverage_error_pp": 37.5
+      },
+      "confounders": {
+        "canopy": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        },
+        "asphalt": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        },
+        "water": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        }
+      },
+      "files_sha256": {
+        "ambiguity.png": "049df78e04981de28297a89239af531e1233b87eb53d12ce7be7fdc2b7d3e59b",
+        "shadow.png": "a5b46c395b7425fdb8f44c94484650f4d40cd590dcf962e12c562ca112f4412f",
+        "canopy.png": "97bbb4b8c88fe62b2d5f4a27660b6d4288ac6ded5365fb8a013bbf8dc9c44654",
+        "asphalt.png": "d4035ba3eee27aaa1ff051685373575b14e322e209ffc81d778a27d49b28a18e",
+        "water.png": "670af38c357e0865d2756d6c83cfc8c08a736fdb6eaf05cb0780cf07e4634252"
+      },
+      "domain": {
+        "image_pixels": 8192,
+        "roi_pixels": 8192,
+        "excluded_roi_pixels": 0,
+        "evaluated_pixels": 8192
+      }
+    },
+    {
+      "id": "reference-material-ambiguity",
+      "origin": "synthetic_negative_control",
+      "algorithm": {
+        "profile": "photo_reference",
+        "method": "photo-shadow-v2-coverage-attenuation",
+        "threshold_ratio": 0.55
+      },
+      "annotation": {},
+      "metrics": {
+        "tp": 1024,
+        "fp": 3072,
+        "fn": 0,
+        "tn": 4096,
+        "pixels": 8192,
+        "precision": 0.25,
+        "recall": 1.0,
+        "f1": 0.4,
+        "iou": 0.25,
+        "predicted_coverage_fraction": 0.5,
+        "reference_coverage_fraction": 0.125,
+        "coverage_error_pp": 37.5
+      },
+      "confounders": {
+        "canopy": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        },
+        "asphalt": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        },
+        "water": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        }
+      },
+      "files_sha256": {
+        "ambiguity.png": "049df78e04981de28297a89239af531e1233b87eb53d12ce7be7fdc2b7d3e59b",
+        "shadow.png": "a5b46c395b7425fdb8f44c94484650f4d40cd590dcf962e12c562ca112f4412f",
+        "lit_reference.png": "e1bedc556f9e6898afc9827b64b68ebb5e14cedf169c5910e840bf82b74c8351",
+        "canopy.png": "97bbb4b8c88fe62b2d5f4a27660b6d4288ac6ded5365fb8a013bbf8dc9c44654",
+        "asphalt.png": "d4035ba3eee27aaa1ff051685373575b14e322e209ffc81d778a27d49b28a18e",
+        "water.png": "670af38c357e0865d2756d6c83cfc8c08a736fdb6eaf05cb0780cf07e4634252"
+      },
+      "domain": {
+        "image_pixels": 8192,
+        "roi_pixels": 8192,
+        "excluded_roi_pixels": 0,
+        "evaluated_pixels": 8192
+      }
+    }
+  ],
+  "real_photo_cases": 0,
+  "real_photo_files": 0,
+  "unique_real_photo_sha256": 0,
+  "summaries": [
+    {
+      "origin": "synthetic_negative_control",
+      "algorithm": {
+        "profile": "detector",
+        "method": "global",
+        "params": {
+          "block_size": 31,
+          "c": 8,
+          "blur_kernel": 3,
+          "threshold": 110
+        }
+      },
+      "cases": 1,
+      "tp": 1024,
+      "fp": 3072,
+      "fn": 0,
+      "tn": 4096,
+      "pixels": 8192,
+      "materials": {
+        "canopy": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        },
+        "asphalt": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        },
+        "water": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        }
+      },
+      "precision": 0.25,
+      "recall": 1.0,
+      "f1": 0.4,
+      "iou": 0.25,
+      "coverage_error_pp": 37.5
+    },
+    {
+      "origin": "synthetic_negative_control",
+      "algorithm": {
+        "profile": "photo_reference",
+        "method": "photo-shadow-v2-coverage-attenuation",
+        "threshold_ratio": 0.55
+      },
+      "cases": 1,
+      "tp": 1024,
+      "fp": 3072,
+      "fn": 0,
+      "tn": 4096,
+      "pixels": 8192,
+      "materials": {
+        "canopy": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        },
+        "asphalt": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        },
+        "water": {
+          "negative_pixels": 1024,
+          "false_positives": 1024,
+          "false_positive_fraction": 1.0
+        }
+      },
+      "precision": 0.25,
+      "recall": 1.0,
+      "f1": 0.4,
+      "iou": 0.25,
+      "coverage_error_pp": 37.5
+    }
+  ],
+  "real_photos_required": false,
+  "ground_truth_authenticity_verified": false,
+  "warning": "Las etiquetas provienen del manifiesto. Los casos sintéticos e iconos no validan precisión en fotografías reales."
+}

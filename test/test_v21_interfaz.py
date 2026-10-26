@@ -1,8 +1,9 @@
+from test.source_helpers import app_source
 from pathlib import Path
 
 
 def _source():
-    return (Path(__file__).resolve().parents[1] / "ui" / "app_ui.py").read_text(encoding="utf-8")
+    return app_source()
 
 
 def test_carrusel_v21_no_renderiza_nombre_bajo_miniatura():

@@ -10,6 +10,8 @@ from core.species import color_copa
 from core.crown_shapes import canopy_profile, normalize_canopy_shape
 from ui.canopy_rendering import draw_canopy_3d_mpl
 from plot_style import CMAP_TEMPERATURA
+from core.scene3d_data import Scene3DData, _finite_range, _scene_extent
+from ui.scene3d_backend import vtk_installation_info
 
 def render_matplotlib_fallback(
     parent: tk.Misc,
@@ -17,7 +19,6 @@ def render_matplotlib_fallback(
     vtk_error: Exception | None,
 ) -> None:
     """Fallback compatible; también queda dentro del mismo frame."""
-    from ui.scene3d import _finite_range, _scene_extent, vtk_installation_info
     top = tk.Frame(parent)
     top.pack(side=tk.TOP, fill=tk.X)
     text = "Motor 3D: Matplotlib (fallback)"

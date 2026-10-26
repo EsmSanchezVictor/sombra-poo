@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pytest
 
-from modelo_con_excel import (
+from core.surface_model import (
     Arbol, Estructura, MATERIALES_LOWER, asignar_materiales_grilla,
     angulo_solar, azimut_solar, calcular_coeficiente_conveccion,
     calcular_sombra_arboles, ecuacion_del_tiempo, materiales,
