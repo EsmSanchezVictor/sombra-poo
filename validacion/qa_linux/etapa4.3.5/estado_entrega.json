@@ -1,0 +1,101 @@
+{
+  "app_release": "v35.6-etapa4.3.5",
+  "closed_on": "2026-11-08",
+  "base_release": "v35.6-etapa4.3.4",
+  "base_zip_sha256": "219a3a68541a7397dfd5db2bfb0450a8b9231558b8fc250ef8b7cc50797ba244",
+  "disposition": "visual_sidebar_revision",
+  "software_checks": {
+    "base_tests_passed": 626,
+    "final_tests_passed": 627,
+    "python": "3.12.14",
+    "platform": "Linux",
+    "source_self_check": "passed",
+    "staged_source_self_check": "passed",
+    "pip_check": "passed",
+    "source_checks_passed": 14,
+    "staged_checks_passed": 14
+  },
+  "numeric_parity": {
+    "surface_cases": 9,
+    "advanced_tmrt_cases": 8,
+    "seeded_uncertainty_equal": true,
+    "model": "advanced_radiative_v2"
+  },
+  "base_python_files": 192,
+  "unchanged_python_files": 177,
+  "modified_python_files": [
+    "core/app_version.py",
+    "shape_selection.py",
+    "test/test_stage3_integration.py",
+    "test/test_v25_panel2_vertical.py",
+    "test/test_v26_panel2_altura_contenedor.py",
+    "test/test_v34_advanced_modes.py",
+    "tools/build_windows.py",
+    "ui/app_ui.py",
+    "ui/editing_ui.py",
+    "ui/panels.py",
+    "ui/photo_analysis.py",
+    "ui/sidebar.py",
+    "ui/snapshot_restoration.py",
+    "ui/theme.py",
+    "windows_build/build_support.py"
+  ],
+  "windows_previous": {
+    "app_release": "v35.6-etapa4.3",
+    "source_automatic_checks_passed": 14,
+    "desktop_automatic_checks_passed": 4,
+    "manual_walkthrough_completed": false
+  },
+  "windows_current": {
+    "native_execution_tested": false,
+    "manual_walkthrough_completed": false,
+    "build_profile_included": true,
+    "exe_built": false,
+    "installer_built": false
+  },
+  "scientific_validation": {
+    "annotated_real_photo_cases": 0,
+    "field_measurements_supplied": 0,
+    "field_validation": false
+  },
+  "private_data_omitted": true,
+  "startup": {
+    "fullscreen_login": true,
+    "splash_minimum_ms": 1600,
+    "original_assets_sha256": {
+      "proyecto.png": "865f19df8162e55a7d0797c0ac1b969c01adaabc091e90774cbd151dd7211404",
+      "marca.png": "9adba4585851f69a85469a493cf3f264a5b58f4f2035fea584c5ed82d0aa9f5c",
+      "protada.png": "4955c3f1d485688f29117cded5a3b56874098aeab4c7de9cd927ebd5a7de95ba"
+    },
+    "native_windows_visual_verified": false
+  },
+  "new_python_files": [
+    "ui/panel_chrome.py",
+    "ui/photo_workflow.py"
+  ],
+  "workspace": {
+    "hidden_until_project_loaded": true,
+    "restore_saved_panel": true,
+    "welcome_actions": [
+      "create",
+      "open",
+      "import"
+    ],
+    "native_windows_visual_verified": false
+  },
+  "editing": {
+    "themed_sidebar_and_tabs": true,
+    "keep_notebook_on_scene_redraw": true,
+    "native_windows_visual_verified": false
+  },
+  "sidebar": {
+    "shared_panel_style": [
+      "temperatura",
+      "sombra",
+      "edicion",
+      "modelo"
+    ],
+    "photo_primary_action_follows_workflow": true,
+    "native_windows_visual_verified": false
+  }
+}

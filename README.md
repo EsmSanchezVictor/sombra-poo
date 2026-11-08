@@ -1,6 +1,6 @@
-# Proyecto Sombra — v35.6-etapa4.3.5
+# Proyecto Sombra — v35.6-etapa4.3.6
 
-Revisión visual de los cuatro paneles laterales sobre v35.6-etapa4.3.4. Sirve para ejecutar el software y preparar pruebas piloto. La validación científica de campo, la evaluación con fotografías reales anotadas y la aceptación manual final en Windows siguen pendientes.
+Revisión de documentación y créditos sobre v35.6-etapa4.3.5. Sirve para ejecutar el software y preparar pruebas piloto. La validación científica de campo, la evaluación con fotografías reales anotadas y la aceptación manual final en Windows siguen pendientes.
 
 ## Abrir en Windows
 
@@ -14,7 +14,8 @@ El archivo de arranque usa el mismo intérprete que instaló NumPy, pandas y el 
 
 Después de iniciar sesión, la bienvenida permite crear, abrir o importar un proyecto. El escritorio aparece cuando esa operación termina. Los proyectos abiertos recuperan el panel guardado; los nuevos empiezan en la vista de sombra, con el lateral plegado.
 
-- [Manual y guía rápida](docs/MANUAL_SOMBRA.html), también disponibles en Ayuda.
+- [Guía rápida](docs/GUIA_RAPIDA_SOMBRA.html) y [manual completo](docs/MANUAL_SOMBRA.html), disponibles sin conexión en el menú Ayuda.
+- **Ayuda → Acerca de…** muestra la autoría de Víctor Daniel Sánchez, Técnico Universitario, la versión y el alcance de esta edición piloto. Incluye como referencia la [licencia piloto 1.0](docs/LICENCIA_PROYECTO_SOMBRA.txt) entregada por el autor, sin modificar el texto ni añadir un paso de aceptación al instalador.
 - [Portada y acceso](docs/ARRANQUE_VISUAL.md), [cierre técnico anterior](docs/CIERRE_VERSION.md) y [estado de evidencia](validacion/README.md).
 - [Compilación e instalador de Windows](COMPILAR_WINDOWS.md). El perfil ya está incorporado a esta entrega. Los binarios se generan en Windows.
 - [Recorrido manual en Windows](validacion/windows/recorrido_cierre.md).

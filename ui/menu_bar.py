@@ -151,13 +151,14 @@ class MenuBar:
 
         ayuda_menu = tk.Menu(menu_bar, tearoff=0)
         ayuda_menu.add_command(
-            label="Manual de usuario",
-            command=self.app.open_user_help,
-        )
-        ayuda_menu.add_command(
             label="Guía rápida",
             command=lambda: self.app.open_user_help(quick=True),
         )
+        ayuda_menu.add_command(
+            label="Manual completo",
+            command=self.app.open_user_help,
+        )
+        ayuda_menu.add_separator()
         ayuda_menu.add_command(label="Acerca de…", command=self.app.show_about)
         menu_bar.add_cascade(label="Ayuda", menu=ayuda_menu)
 

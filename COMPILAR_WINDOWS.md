@@ -1,4 +1,4 @@
-# Compilar Proyecto Sombra v35.6-etapa4.3.5
+# Compilar Proyecto Sombra v35.6-etapa4.3.6
 
 El perfil de compilación ya está dentro de esta entrega. Usá Windows de 64 bits y el entorno local `.venv` con Python 3.12 de 64 bits. Si todavía falta, ejecutá `PREPARAR_SOMBRA.cmd` desde CMD en la raíz de la aplicación.
 
@@ -20,7 +20,7 @@ Para generar ambos archivos en una sola ejecución, instalá primero Inno Setup 
 COMPILAR_WINDOWS.cmd --installer --verify-desktop
 ```
 
-El resultado es `dist\ProyectoSombra\ProyectoSombra.exe` y, con `--installer`, `release\ProyectoSombra_Setup_35.6_etapa4.3.5_x64.exe`. Si usás la versión portable, mantené unida toda la carpeta `dist\ProyectoSombra`, incluido `_internal`. Si no se detecta Inno Setup, usá `--iscc "ruta\ISCC.exe"`.
+El resultado es `dist\ProyectoSombra\ProyectoSombra.exe` y, con `--installer`, `release\ProyectoSombra_Setup_35.6_etapa4.3.6_x64.exe`. Si usás la versión portable, mantené unida toda la carpeta `dist\ProyectoSombra`, incluido `_internal`. Si no se detecta Inno Setup, usá `--iscc "ruta\ISCC.exe"`.
 
 El perfil selecciona los archivos necesarios, genera una copia temporal y prueba el código y el ejecutable. Con `--verify-desktop` prueba también Tk/Matplotlib/VTK del ejecutable. Revisá `release\build_windows.json`, `release\autocomprobacion_exe.json` y `release\escritorio_exe.json`. Si falla, conservá el primer error y ese informe. Para diagnóstico se puede usar `--console`.
 

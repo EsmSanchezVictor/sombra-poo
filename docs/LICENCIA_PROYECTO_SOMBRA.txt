@@ -1,0 +1,124 @@
+PROYECTO SOMBRA
+LICENCIA PROPIETARIA DE USO PILOTO NO COMERCIAL
+Versión de la licencia: 1.0 · 8 de noviembre de 2026
+Versión del software: v35.6-etapa4.3.5
+
+© 2026 Víctor Daniel Sánchez. Todos los derechos reservados
+sobre los componentes propios de Proyecto Sombra.
+
+1. AUTOR Y ALCANCE
+
+Víctor Daniel Sánchez, Técnico Universitario, es el autor y titular
+exclusivo de los componentes originales de su autoría de Proyecto
+Sombra (en adelante, el «Titular»). Esta licencia comprende esos
+componentes tal como se entregan en la versión indicada: el programa
+en formato ejecutable y los recursos y la documentación propios
+incluidos en la entrega. Una actualización queda cubierta únicamente
+si su entrega remite expresamente a esta licencia.
+
+Se autoriza el uso en los términos siguientes. No se ceden derechos de
+propiedad intelectual, no se concede acceso al código fuente propio y
+no se otorga una licencia sobre nombres, logotipos o marcas, salvo su
+visualización en el programa y la mención identificativa prevista en
+la cláusula 5.
+
+2. USO AUTORIZADO
+
+El Titular otorga al destinatario identificado en la entrega que
+acepte esta licencia un permiso gratuito, no exclusivo, intransferible
+y sin derecho a sublicenciar. El permiso permite instalar y ejecutar la
+copia autorizada para evaluación, docencia e investigación no
+comerciales. Si el destinatario es una institución, podrá usarla a
+través del personal o alumnado habilitado en la entrega, dentro de ese
+mismo alcance y sin redistribuir copias por su cuenta.
+
+El destinatario puede hacer una única copia de salvaguardia del
+programa, identificada con su nombre y la fecha de la copia. Esa copia
+solo se utiliza para reemplazar el ejemplar original autorizado si se
+pierde o queda inutilizable, conforme al artículo 9 de la Ley 11.723.
+Esta limitación no se aplica a las copias de sus propios proyectos,
+datos y resultados.
+
+3. USOS RESERVADOS AL TITULAR
+
+Se requiere autorización previa y por escrito del Titular para vender,
+alquilar, ceder, sublicenciar, publicar o redistribuir el programa o sus
+componentes propios, ofrecer acceso al programa como servicio para
+terceros, o usarlo en consultorías, informes o servicios remunerados.
+También se requiere para copiar esos componentes fuera del alcance
+autorizado, modificarlos, adaptarlos, extraer su código mediante
+descompilación o ingeniería inversa, o incorporarlos a otro producto.
+
+El destinatario conservará los avisos de autoría y licencia de las
+copias autorizadas. Estas restricciones se aplican solo en la medida
+permitida por la ley. No limitan las excepciones legales ni los
+permisos sobre componentes de terceros descritos en la cláusula 4.
+
+4. COMPONENTES DE TERCEROS
+
+Las bibliotecas, dependencias, fuentes, datos y otros recursos de
+terceros conservan sus titulares y sus respectivas licencias. Cuando
+se incluyen en una entrega, deben acompañarse de los avisos, textos
+y demás materiales exigidos por las licencias aplicables.
+
+Esta licencia propietaria no modifica esas condiciones. Si existe una
+incompatibilidad, prevalece la licencia del tercero respecto de su
+componente, incluidos los permisos de modificación, sustitución o
+ingeniería inversa que dicha licencia otorgue.
+
+5. PROYECTOS, DATOS Y RESULTADOS
+
+El Titular no adquiere derechos sobre los datos, fotografías o
+proyectos que el destinatario incorpora al programa, ni reclama
+derechos sobre sus resultados por el solo hecho de generarlos con
+Proyecto Sombra. El destinatario puede conservar, exportar y compartir
+resultados de los usos autorizados, incluidas publicaciones
+académicas, siempre que tenga los derechos necesarios sobre los
+materiales utilizados y respete los derechos de terceros.
+
+En trabajos académicos que publiquen resultados, se identificará la
+herramienta y su versión. Cita sugerida: «Proyecto Sombra,
+v35.6-etapa4.3.5 — Víctor Daniel Sánchez». Esta mención no implica
+aval del Titular ni permite distribuir el programa.
+
+6. ALCANCE DE LA VERSIÓN PILOTO
+
+Proyecto Sombra produce estimaciones a partir de los datos y supuestos
+del modelo. Esta versión está destinada a pruebas y evaluación; su
+validación científica de campo está pendiente. Los resultados deben
+contrastarse con mediciones y criterio profesional antes de emplearlos
+como base para decisiones técnicas. No se promete soporte, actualización
+ni adecuación a un uso específico, salvo compromiso escrito del Titular.
+Esta cláusula no excluye la responsabilidad que corresponda por ley ni
+reduce los derechos irrenunciables del destinatario.
+
+7. ACEPTACIÓN, VIGENCIA Y TERMINACIÓN
+
+El texto completo se pone a disposición del destinatario antes de su
+aceptación. La aceptación debe ser expresa y registrarse en el
+instalador, en un documento firmado o por otro medio escrito que
+identifique al destinatario y la versión de la licencia. Si el
+destinatario no acepta, no queda autorizado a instalar o usar la copia.
+
+La licencia rige desde la aceptación y mientras se respeten sus
+condiciones, salvo que la entrega establezca por escrito un plazo
+aceptado por el destinatario. Ante un incumplimiento esencial, el
+Titular podrá resolverla mediante notificación fehaciente. Si el
+incumplimiento puede subsanarse, se otorgarán al menos quince días
+corridos desde la notificación, o el plazo mayor que exija la ley.
+
+Al terminar la licencia, se debe cesar el uso y eliminar las copias
+propias del programa y su respaldo, salvo conservación legalmente
+exigida. Los proyectos, datos y resultados obtenidos lícitamente se
+pueden conservar conforme a la cláusula 5. La terminación no altera
+los permisos independientes sobre componentes de terceros.
+
+8. LEY APLICABLE Y AUTORIZACIONES
+
+La licencia se interpreta conforme a la legislación de la República
+Argentina, sin desplazar normas imperativas, derechos del consumidor
+ni reglas de jurisdicción aplicables. Las solicitudes de permiso
+comercial, distribución u otros usos adicionales deben dirigirse a
+Víctor Daniel Sánchez por el canal de contacto informado con la
+entrega. Solo obligan al Titular las autorizaciones que emita por
+escrito.

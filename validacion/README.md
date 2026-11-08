@@ -1,6 +1,6 @@
 # Estado de validación
 
-La revisión vigente es **v35.6-etapa4.3.5**: 627 pruebas y autocomprobaciones de fuente y copia de compilación aprobadas en Linux. La bienvenida, el tema del escritorio, los paneles laterales y el empaquetado todavía deben comprobarse visualmente en Windows. La tabla de abajo conserva el estado de cierre de la etapa4.3.1 y su antecedente.
+La revisión vigente es **v35.6-etapa4.3.6**: 628 pruebas y autocomprobaciones de fuente y copia de compilación aprobadas en Linux. La bienvenida, el tema del escritorio, los paneles laterales, Acerca de y el empaquetado todavía deben comprobarse visualmente en Windows. La tabla de abajo conserva el estado de cierre de la etapa4.3.1 y su antecedente.
 
 | Aspecto | Estado | Evidencia |
 |---|---|---|

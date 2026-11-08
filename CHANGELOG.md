@@ -1,5 +1,11 @@
 # Historial central
 
+## v35.6-etapa4.3.6 — 2026-11-08
+
+- Acerca de renovado con la marca, la versión, la autoría y el estado de validación de campo.
+- Ayuda incluye una guía rápida y un manual completo separados, consultables sin conexión y presentes en el perfil de compilación.
+- El manual describe qué estima cada flujo, cómo documentar la meteorología y qué mediciones hacen falta para contrastar el modelo. Se incluye el texto original de la licencia piloto como referencia.
+
 ## v35.6-etapa4.3.5 — 2026-11-08
 
 - Temperatura, Sombra y Modelo usan los mismos encabezados, secciones y botones que Edición.

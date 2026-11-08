@@ -3,45 +3,167 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Manual de Proyecto Sombra</title>
+<title>Manual completo de Proyecto Sombra</title>
 <style>
-:root{color-scheme:light;--text:#241533;--muted:#5f4c6f;--accent:#68258b;--panel:#f5f1fa}
-body{margin:0;background:#f8faf8;color:var(--text);font:1rem/1.6 system-ui,sans-serif}
-main{max-width:52rem;margin:auto;padding:2rem 1.2rem 3rem}
-h1,h2{color:var(--accent);line-height:1.2}a{color:#135438}a:focus-visible{outline:3px solid #bd6d23}
-.eyebrow{color:var(--muted);font-size:.92rem}nav,.note{background:var(--panel);padding:.8rem 1.1rem;border-radius:.35rem}
-li{margin:.45rem 0}code{overflow-wrap:anywhere}
+:root{color-scheme:light;--paper:#fff;--bg:#f5f1fa;--ink:#241533;--muted:#5f4c6f;--violet:#68258b;--line:#d6c5e1;--tint:#efe6f5}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);background:var(--bg);font:1rem/1.62 "Segoe UI",system-ui,sans-serif}
+main{max-width:60rem;margin:auto;padding:2rem 1.2rem 3rem}
+.hero{padding:1.7rem 1.9rem;background:var(--paper);border:1px solid var(--line);border-top:5px solid var(--violet);border-radius:.7rem}
+.kicker{margin:0;color:var(--violet);font-weight:750;letter-spacing:.05em;font-size:.8rem}
+h1,h2,h3{color:var(--violet);line-height:1.2}
+h1{margin:.3rem 0;font-size:clamp(2rem,5vw,3rem);letter-spacing:-.025em}
+h2{margin:0 0 .7rem;font-size:1.45rem}h3{font-size:1.08rem;margin:1.1rem 0 .35rem}
+p{margin:.5rem 0 .8rem}.hero p:last-child,section p:last-child{margin-bottom:0}
+small,.quiet{color:var(--muted)}
+a{color:var(--violet);text-underline-offset:.16em}a:focus-visible{outline:3px solid #8942ad;outline-offset:3px}
+nav,section,footer{margin-top:1rem}
+nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;padding:.7rem 1rem;background:var(--tint);border-radius:.5rem}
+section{padding:1.3rem 1.6rem;background:var(--paper);border:1px solid var(--line);border-radius:.6rem;scroll-margin-top:.5rem}
+aside{margin:.85rem 0;padding:.8rem 1rem;border-left:4px solid var(--violet);background:var(--tint)}
+aside p{margin:.25rem 0}
+ol,ul{padding-left:1.35rem;margin:.5rem 0}li{margin:.32rem 0;padding-left:.1rem}
+table{border-collapse:collapse;width:100%;font-size:.95rem;margin:.7rem 0}
+th,td{text-align:left;vertical-align:top;padding:.55rem .65rem;border-bottom:1px solid var(--line)}
+th{background:var(--tint)}td:first-child{min-width:7rem;font-weight:600}
+footer{font-size:.87rem;color:var(--muted);padding:0 .2rem}
+code,kbd{overflow-wrap:anywhere;font-size:.9em;color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));gap:1rem}
+.grid section{margin-top:1rem}
+@media(max-width:38rem){main{padding:1rem .75rem 2rem}.hero,section{padding:1rem}.grid{gap:0}th,td{padding:.4rem}}
+@media print{body{background:white;color:black;font-size:10pt}main{max-width:none;margin:0;padding:0}
+.hero,section,nav{border-radius:0}.hero,section{padding:.45rem 0;border:none}.hero{border-bottom:2px solid var(--violet)}
+h1{font-size:24pt}h2{font-size:15pt}h2,h3,th{break-after:avoid}tr,li,aside{break-inside:avoid}nav{display:none}
+.grid{display:block}footer{margin-top:.3rem}}
 </style>
 </head>
 <body>
 <main>
-<p class="eyebrow">Proyecto Sombra · v35.6-etapa4.3.5</p>
-<h1>Manual de usuario</h1>
-<p>Usá Sombra para explorar condiciones de sombra y microclima mediante fotografías, geometría de escenas y meteorología.</p>
-<nav aria-label="Contenido"><a href="#guia-rapida">Guía rápida</a> · <a href="#fotos">Fotografías</a> · <a href="#escenas">Escenas 2D y 3D</a> · <a href="#guardado">Guardado</a> · <a href="#interpretar">Resultados</a></nav>
-<h2 id="guia-rapida">Guía rápida</h2>
-<ol>
-<li>Si usás las fuentes en Windows, ejecutá <code>PREPARAR_SOMBRA.cmd</code> la primera vez y luego <code>ABRIR_SOMBRA.cmd</code>. Si instalaste la aplicación, abrila desde su acceso directo.</li>
-<li>La portada muestra el estado de la carga y da paso al acceso a pantalla completa. Podés alternar ese modo con F11 o salir de él con Esc. Creá el administrador en el primer inicio de una instalación limpia. Iniciá sesión para ver la bienvenida.</li>
-<li>Elegí <strong>Crear proyecto</strong>, <strong>Abrir proyecto</strong> o <strong>Importar archivo .3es</strong>. El escritorio aparece al terminar. Para un proyecto nuevo, elegí primero las unidades y la ubicación.</li>
-<li>Elegí el flujo de fotografía o el de diseño/modelo. Revisá la configuración, ejecutá y guardá los resultados.</li>
-</ol>
-<h2 id="fotos">Análisis por fotografía</h2>
-<ol>
-<li>Abrí el panel Sombra y elegí Cargar imagen. El botón violeta indica el paso disponible: delimitar el área de cálculo, marcar la referencia iluminada de la misma superficie o confirmar.</li>
-<li>Generá la primera curva y revisá la máscara. Una superficie oscura puede parecer sombra en el análisis de intensidad.</li>
-<li>Si corresponde, marcá las exclusiones manuales. Volvé a generar el análisis para actualizar la cobertura, la transmitancia y los resultados térmicos.</li>
-<li>Guardá y verificá el elemento del carrusel al reabrir. Una exclusión pendiente queda vinculada al elemento; regenerá su resultado antes de interpretarlo.</li>
-</ol>
-<h2 id="escenas">Escenas 2D y 3D</h2>
-<p>En Edición, usá <strong>Generar plano 2D</strong> o <strong>Abrir Excel</strong> para empezar. Al modificar la escena se actualiza el plano; usá <strong>Generar vista 3D</strong> para ver los cambios en 3D.</p>
-<p>En Diseño o Modelo, agregá árboles y estructuras, revisá dimensiones, copa, materiales, meteorología y hora. En Modelo, usá Ejecutar modelo para generar el mapa 2D y Generar vista 3D para explorarlo. El programa intenta usar VTK y dispone de una vista alternativa con Matplotlib. La animación diurna muestra cambios horarios del sol, la sombra y el campo calculado.</p>
-<h2 id="guardado">Guardar, respaldar y recuperar</h2>
-<p>Usá <strong>Guardar respaldo</strong> para conservar el estado y <strong>Exportar proyecto (.3es)</strong> para mover una copia. Comprobá la importación y reapertura de la copia antes de retirar el original. Los proyectos con exclusiones requieren un lector compatible con el esquema de estado 3.</p>
-<p>La aplicación puede exportar resultados a Excel y PDF. Las cuentas de Windows se conservan en <code>%APPDATA%\ProyectoSombra</code>. En la versión instalada, las preferencias y los proyectos nuevos también tienen una ubicación escribible en ese perfil.</p>
-<h2 id="interpretar">Interpretar resultados</h2>
-<p class="note"><strong>Validación de campo pendiente.</strong> Los resultados son estimaciones para comparar escenarios bajo los supuestos del modelo. Las comprobaciones de software verifican que las funciones operen; las mediciones reales son necesarias para estimar el error de Tmrt, temperatura del aire y superficie.</p>
-<p>Al comparar alternativas, mantené constantes ubicación, fecha, hora, meteorología y modelo, salvo la variable que querés estudiar. Registrá la procedencia de los datos y revisá las advertencias de cobertura y confort.</p>
+<header class="hero">
+  <p class="kicker">PROYECTO SOMBRA · v35.6-etapa4.3.6</p>
+  <h1>Manual completo</h1>
+  <p>Simulación de sombra y microclima urbano. Flujos de trabajo, interpretación de resultados y límites de esta edición piloto.</p>
+</header>
+<nav aria-label="Contenido">
+  <a href="GUIA_RAPIDA_SOMBRA.html">Guía rápida</a><a href="#alcance">Alcance</a><a href="#inicio">Inicio</a>
+  <a href="#temperatura">Temperatura</a><a href="#foto">Fotografía</a><a href="#escenas">Edición y Modelo</a>
+  <a href="#meteo">Meteorología</a><a href="#guardado">Proyectos e informes</a>
+  <a href="#validacion">Validación</a><a href="#problemas">Solución de problemas</a><a href="#autoria">Autoría</a>
+</nav>
+<section aria-labelledby="alcance">
+  <h2 id="alcance">1. Alcance del software</h2>
+  <p>Proyecto Sombra ayuda a explorar cómo el arbolado, las estructuras y las superficies modifican la sombra y las condiciones térmicas de un espacio abierto. Está destinado a evaluación, docencia e investigación, como apoyo a la comparación de alternativas de diseño.</p>
+  <table>
+    <thead><tr><th scope="col">Flujo</th><th scope="col">Qué obtenés</th><th scope="col">Qué condiciona el resultado</th></tr></thead>
+    <tbody>
+      <tr><td>Temperatura</td><td>Estimaciones puntuales, entre ellas Tmrt al sol y en sombra.</td><td>Fecha, hora, ubicación, aire, radiación, viento y sombra ingresada o analizada.</td></tr>
+      <tr><td>Fotografía</td><td>Cobertura estimada, atenuación y transmitancia; curvas de nivel de Tmrt si hay entradas suficientes.</td><td>Exposición, material, referencia iluminada, delimitación y exclusiones de la imagen.</td></tr>
+      <tr><td>Edición y Modelo</td><td>Escenas 2D y 3D, sombra simulada y mapas de temperatura superficial. Animación diurna cuando el escenario está preparado.</td><td>Geometría, copa, materiales, meteorología, fecha, hora y modelo seleccionado.</td></tr>
+      <tr><td>Confort y análisis</td><td>Indicadores como índice de calor o temperatura aparente, según la herramienta, y comparaciones entre escenarios.</td><td>Entradas, supuestos e intervalo de aplicación de cada indicador. Un valor fuera de dominio no debe interpretarse como válido.</td></tr>
+    </tbody>
+  </table>
+  <aside><strong>Validación de campo pendiente.</strong> Las comprobaciones del programa verifican su funcionamiento. Esta edición no aporta precisión comprobada en campo para Tmrt, temperatura local del aire, temperatura superficial ni detección fotográfica de sombra. No uses un resultado aislado como certificación o base única de una decisión de obra, salud o seguridad.</aside>
+  <p>La aplicación trabaja con los datos que ingresás. La vista 3D es una representación del escenario y del cálculo; no es una reconstrucción automática a partir de una fotografía.</p>
+</section>
+<section aria-labelledby="inicio">
+  <h2 id="inicio">2. Instalación, acceso y primer proyecto</h2>
+  <ol>
+    <li><strong>Windows instalado:</strong> abrí Proyecto Sombra desde su acceso directo. <strong>Desde el ZIP fuente:</strong> extraé todo en una carpeta, prepará Python 3.12 de 64 bits, ejecutá <code>PREPARAR_SOMBRA.cmd</code> y luego <code>ABRIR_SOMBRA.cmd</code>. El segundo comando usa el entorno <code>.venv</code> preparado por el primero.</li>
+    <li>La portada muestra el progreso y da paso al acceso. En un perfil limpio se crea el primer administrador. Si ingresás como administrador, elegí <strong>Abrir Proyecto Sombra</strong> para llegar al escritorio.</li>
+    <li>En la bienvenida, elegí <strong>Crear proyecto</strong> y completá unidades, nombre y ubicación. Para continuar un trabajo, elegí <strong>Abrir proyecto</strong> y seleccioná el archivo <code>.sombra</code> dentro de su carpeta. Para un archivo portátil, elegí <strong>Importar archivo .3es</strong> y confirmá su apertura.</li>
+    <li>Con el proyecto abierto, usá la barra o <strong>Escena → Paneles</strong> para entrar a Temperatura, Sombra, Edición o Modelo. La ayuda se puede abrir también desde la bienvenida.</li>
+  </ol>
+</section>
+<section aria-labelledby="temperatura">
+  <h2 id="temperatura">3. Cálculo puntual en Temperatura</h2>
+  <ol>
+    <li>Ingresá temperatura del aire en °C, fecha en formato <code>AAAA-MM-DD</code> y hora local. Confirmá las coordenadas de la ubicación. Fecha y hora corresponden al sitio de la escena, no al reloj de la computadora.</li>
+    <li>Usá la cobertura de una foto ya analizada o ingresá <strong>Sombra manual (%)</strong>. Si completás ese campo, el valor manual reemplaza la cobertura de la foto para el cálculo puntual. Si no hay foto analizada, necesitás el valor manual.</li>
+    <li>Para empezar usá <strong>Entrada simple</strong>. <strong>Entrada avanzada</strong> permite elegir la fuente de radiación y el modelo de Tmrt. Revisá la procedencia de las entradas antes de mezclar valores medidos y supuestos.</li>
+    <li>Elegí <strong>Calcular en sombra</strong>. Leé las unidades y la diferencia entre sol y sombra en los resultados.</li>
+  </ol>
+  <p><strong>Tmrt</strong> es la temperatura radiante media: representa el efecto conjunto de la radiación sobre una persona. <strong>Ta</strong> es la temperatura del aire. La <strong>temperatura superficial</strong> describe el suelo u otra superficie. Un cambio en una de estas magnitudes no equivale al mismo cambio en las otras.</p>
+</section>
+<section aria-labelledby="foto">
+  <h2 id="foto">4. Analizar sombra con una fotografía</h2>
+  <ol>
+    <li>En <strong>Sombra → Cargar imagen</strong>, seleccioná una foto nítida. Conservá lugar, fecha y hora de captura si los conocés. Si faltan, indicá qué valores asumiste.</li>
+    <li>Elegí <strong>Marcar área de cálculo</strong> y delimitá la zona de interés. Luego, con <strong>Marcar referencia iluminada</strong>, señalá un sector al sol del mismo material, sin reflejos ni sombras cruzadas. Elegí <strong>Confirmar y calcular</strong>.</li>
+    <li>Abrí <strong>Ver máscara sombra / sol</strong> y revisá bordes, copa, agua, asfalto y otros materiales oscuros. El análisis usa intensidad y una referencia: no clasifica semánticamente los objetos.</li>
+    <li>Completá las entradas de Temperatura y elegí <strong>Generar curva de nivel</strong>. El resultado térmico es un mapa calculado, no una captura de cámara térmica. Pasá el puntero por el mapa para consultar valores si la vista está activa.</li>
+    <li>Una vez disponible el análisis, usá <strong>Excluir materiales</strong> para sacar del cálculo las zonas que no querés evaluar. Revisá la cobertura y generá la curva otra vez. Una exclusión pendiente conserva su vínculo con el análisis; el mapa previo deja de representar esa selección.</li>
+    <li>Usá el carrusel para recuperar análisis guardados. En modo avanzado podés cambiar la resolución de la matriz; más celdas no corrigen una mala referencia o una foto poco representativa.</li>
+  </ol>
+  <p><strong>Cobertura</strong> indica qué proporción del área evaluada se estimó en sombra. <strong>Atenuación</strong> describe la reducción de intensidad respecto a la referencia. La <strong>transmitancia efectiva</strong> se usa en la estimación radiativa. No son valores intercambiables.</p>
+</section>
+<section aria-labelledby="escenas">
+  <h2 id="escenas">5. Diseñar y simular escenas</h2>
+  <h3>Edición: construir la geometría</h3>
+  <ol>
+    <li>Elegí <strong>Generar plano 2D</strong> o <strong>Abrir Excel</strong> en Edición. Para intercambiar geometría usá el formato que genera <strong>Respaldar Excel</strong> de ese panel.</li>
+    <li>Para un árbol, elegí <strong>Añadir árbol</strong> y hacé clic en el plano. Revisá especie, altura, copa y densidad. Para una estructura, elegí <strong>Añadir estructura</strong>, marcá sus dos extremos y revisá tipo, altura, opacidad y material.</li>
+    <li>Usá <strong>Seleccionar</strong> para editar o eliminar un elemento. El plano se actualiza al guardar cambios. Generá nuevamente la vista 3D después de editar.</li>
+  </ol>
+  <h3>Modelo: ejecutar una simulación</h3>
+  <ol>
+    <li>Seleccioná <strong>Entrada simple</strong> o <strong>Entrada avanzada</strong> y revisá las condiciones del escenario. Si cargás un Excel, verificá que se abrió en el panel que vas a ejecutar: Edición y Modelo tienen sus propios datos de escena.</li>
+    <li>Elegí <strong>Ejecutar modelo</strong> para ver el mapa 2D. En modo avanzado podés configurar fecha, hora, meteorología y modelo de superficie. Registrá si usaste Estándar, Avanzado seco o Vegetación + ET.</li>
+    <li>Elegí <strong>Generar vista 3D</strong>. Arrastrá para rotar y usá la rueda para acercarte. Si VTK no está disponible o no se inicia, la aplicación dispone de una vista alternativa con Matplotlib.</li>
+  </ol>
+  <h3>Animación y comparaciones</h3>
+  <p>En Edición o Modelo, la barra <strong>Ejecutar</strong> abre las opciones de cálculo o animación diurna. Configurá el intervalo y el paso para recorrer la evolución de sombra y temperatura. Para comparar dos diseños, mantené iguales la ubicación, fecha, hora, meteorología, modelo y escala. Cambiá únicamente la intervención analizada.</p>
+  <aside><strong>Lectura de mapas.</strong> Consultá siempre la barra de colores y la unidad. Dos mapas con un color similar pueden corresponder a valores distintos si sus escalas cambiaron.</aside>
+</section>
+<section aria-labelledby="meteo">
+  <h2 id="meteo">6. Meteorología y trazabilidad</h2>
+  <p>En el cálculo avanzado, distinguí <strong>cielo despejado modelado</strong>, <strong>medición puntual</strong>, <strong>escenario manual</strong> y <strong>serie meteorológica CSV</strong>. Una serie importada solo aporta observaciones donde tiene datos utilizables; revisá las indicaciones de procedencia, calidad y las advertencias de la ejecución.</p>
+  <ul>
+    <li><strong>GHI</strong> es radiación global horizontal; <strong>DNI</strong>, directa normal; <strong>DHI</strong>, difusa horizontal. Se expresan en W/m² en los controles que las solicitan.</li>
+    <li>En modo simple se emplean las entradas y simplificaciones de ese modo. Para usar una fuente avanzada, seleccioná el modo correspondiente y verificá qué fuente aparece como efectiva.</li>
+    <li>En <strong>Archivo → Importar… → Importar serie meteorológica CSV…</strong> podés cargar observaciones. Usá la plantilla incluida en <code>validacion/campo/plantillas/</code> y verificá fecha, zona horaria, unidades y cobertura temporal.</li>
+    <li>Conservá junto a cada resultado la versión de Sombra, los datos de entrada, la fuente meteorológica, los parámetros, la fecha, la hora y las advertencias. Si comparás condiciones medidas con modeladas, identificá cada caso.</li>
+  </ul>
+</section>
+<section aria-labelledby="guardado">
+  <h2 id="guardado">7. Guardar, mover y documentar el proyecto</h2>
+  <table>
+    <thead><tr><th scope="col">Acción</th><th scope="col">Para qué usarla</th></tr></thead>
+    <tbody>
+      <tr><td>Autoguardado</td><td>Actualiza el estado del proyecto abierto. Revisá el indicador inferior y atendé los avisos si falla.</td></tr>
+      <tr><td>Guardar respaldo</td><td>Guarda el estado y crea un respaldo <code>.3es</code> en la carpeta de respaldos del proyecto. Atajo: <kbd>Ctrl+S</kbd>.</td></tr>
+      <tr><td>Guardar como… / Duplicar</td><td>Crea una copia de trabajo separada, útil para comparar variantes sin modificar el original.</td></tr>
+      <tr><td>Exportar .3es…</td><td>Transporta el proyecto. Verificá que la copia se pueda importar y abrir antes de eliminar el original. No sustituye el respaldo de las cuentas.</td></tr>
+      <tr><td>Excel y PDF</td><td>Exportan matrices, datos de escena o informes según el comando. Para recuperar una escena completa, conservá su carpeta o el paquete <code>.3es</code>.</td></tr>
+    </tbody>
+  </table>
+  <p>Los proyectos guardan archivos asociados. Si movés el trabajo sin usar <code>.3es</code>, copiá la carpeta completa y no solo el archivo <code>.sombra</code>. Antes de enviar fotos, datos o informes a otra persona, revisá su contenido y permisos de uso.</p>
+</section>
+<section aria-labelledby="validacion">
+  <h2 id="validacion">8. Cómo comprobar el modelo en campo</h2>
+  <ol>
+    <li>Definí qué variable vas a contrastar: Tmrt, temperatura del aire, temperatura superficial o cobertura de sombra. No sustituyas una medida por otra.</li>
+    <li>Registrá lugar, fecha, hora local y zona, altura, instrumentos, viento y si el punto está al sol o a la sombra. Para estimar Tmrt con globo negro, registrá temperatura de globo, aire, viento, diámetro y emisividad del globo.</li>
+    <li>Compará cada medición con una simulación en el mismo punto e instante. Separá campañas de ajuste y de validación; no uses las mismas observaciones para ambos fines.</li>
+    <li>Documentá sesgo, RMSE, cantidad de observaciones y condiciones evaluadas. Para sombra fotográfica, compará contra máscaras anotadas sobre fotos reales e incluí materiales oscuros. La concordancia en un sitio o una fecha no demuestra precisión en otros contextos.</li>
+  </ol>
+  <p>En el paquete del proyecto están las plantillas en <code>validacion/campo/plantillas/</code> y el protocolo en <code>docs/VALIDACION_CAMPO.md</code>. La herramienta <strong>Análisis → Calibración y validación científica (CSV)…</strong> ayuda a analizar datos; no sustituye el registro de campo ni la interpretación de los errores.</p>
+</section>
+<section aria-labelledby="problemas">
+  <h2 id="problemas">9. Solución de problemas frecuentes</h2>
+  <ul>
+    <li><strong>No veo los paneles:</strong> confirmá que se creó o se abrió un proyecto. En la bienvenida solo se muestran las acciones de inicio.</li>
+    <li><strong>Falta NumPy, pandas u otra dependencia:</strong> si ejecutás desde fuentes, usá <code>PREPARAR_SOMBRA.cmd</code> y <code>ABRIR_SOMBRA.cmd</code> desde la carpeta del proyecto. En VS Code seleccioná <code>.venv\Scripts\python.exe</code>.</li>
+    <li><strong>No puedo confirmar el análisis fotográfico:</strong> terminá la selección del área de cálculo y la referencia iluminada. Para la curva revisá también los datos de Temperatura.</li>
+    <li><strong>El mapa no refleja un cambio:</strong> volvé a generar el cálculo o la curva. Si cambió la geometría, generá de nuevo la vista 3D.</li>
+    <li><strong>No abre un proyecto trasladado:</strong> importá el <code>.3es</code> desde la bienvenida o restaurá toda la carpeta del proyecto. Conservá una copia antes de intentar recuperarlo.</li>
+  </ul>
+</section>
+<section aria-labelledby="autoria">
+  <h2 id="autoria">10. Autoría y documentación de licencia</h2>
+  <p><strong>Víctor Daniel Sánchez, Técnico Universitario</strong>, es el autor y titular de los componentes originales de su autoría. © 2026. Los componentes de terceros conservan sus propias licencias.</p>
+  <p>En <strong>Ayuda → Acerca de…</strong> podés consultar la versión, el estado de validación y el <a href="LICENCIA_PROYECTO_SOMBRA.txt">texto de la licencia piloto 1.0</a>. El texto se incluye sin modificar y distingue las condiciones de entrega del ejecutable.</p>
+</section>
+<footer>Proyecto Sombra · Manual de usuario · v35.6-etapa4.3.6 · Edición piloto</footer>
 </main>
 </body>
 </html>

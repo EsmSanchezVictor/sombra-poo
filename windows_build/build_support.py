@@ -11,7 +11,7 @@ RESOURCE_FILES = (
     'validacion/campo/plantillas/plantilla_instrumentos_v16.csv',
     'validacion/campo/plantillas/plantilla_meteorologia_observada.csv',
     'validacion/fotos/manifest.plantilla.json',
-    'docs/MANUAL_SOMBRA.html',
+    'docs/MANUAL_SOMBRA.html', 'docs/GUIA_RAPIDA_SOMBRA.html', 'docs/LICENCIA_PROYECTO_SOMBRA.txt',
     'test/imagen/fiebre (3).png', 'test/imagen/sombra (3).png',
     'test/imagen/config (3).png', 'test/imagen/vista-3d (3).png',
 )
@@ -29,8 +29,8 @@ def prepare_stage(project_root, destination):
     assignments = ast.parse((root/'core/app_version.py').read_text(encoding='utf-8')).body
     release = next(ast.literal_eval(n.value) for n in assignments
                    if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'APP_RELEASE' for t in n.targets))
-    if release != 'v35.6-etapa4.3.5':
-        raise ValueError(f'Este perfil corresponde a v35.6-etapa4.3.5; se encontró {release}.')
+    if release != 'v35.6-etapa4.3.6':
+        raise ValueError(f'Este perfil corresponde a v35.6-etapa4.3.6; se encontró {release}.')
     if target.exists():
         raise ValueError('La carpeta temporal de compilación debe ser nueva.')
     if target == root or root.is_relative_to(target):

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guía rápida de Proyecto Sombra</title>
+<style>
+:root{color-scheme:light;--paper:#fff;--bg:#f5f1fa;--ink:#241533;--muted:#5f4c6f;--violet:#68258b;--line:#d6c5e1;--tint:#efe6f5}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);background:var(--bg);font:1rem/1.62 "Segoe UI",system-ui,sans-serif}
+main{max-width:60rem;margin:auto;padding:2rem 1.2rem 3rem}
+.hero{padding:1.7rem 1.9rem;background:var(--paper);border:1px solid var(--line);border-top:5px solid var(--violet);border-radius:.7rem}
+.kicker{margin:0;color:var(--violet);font-weight:750;letter-spacing:.05em;font-size:.8rem}
+h1,h2,h3{color:var(--violet);line-height:1.2}
+h1{margin:.3rem 0;font-size:clamp(2rem,5vw,3rem);letter-spacing:-.025em}
+h2{margin:0 0 .7rem;font-size:1.45rem}h3{font-size:1.08rem;margin:1.1rem 0 .35rem}
+p{margin:.5rem 0 .8rem}.hero p:last-child,section p:last-child{margin-bottom:0}
+small,.quiet{color:var(--muted)}
+a{color:var(--violet);text-underline-offset:.16em}a:focus-visible{outline:3px solid #8942ad;outline-offset:3px}
+nav,section,footer{margin-top:1rem}
+nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;padding:.7rem 1rem;background:var(--tint);border-radius:.5rem}
+section{padding:1.3rem 1.6rem;background:var(--paper);border:1px solid var(--line);border-radius:.6rem;scroll-margin-top:.5rem}
+aside{margin:.85rem 0;padding:.8rem 1rem;border-left:4px solid var(--violet);background:var(--tint)}
+aside p{margin:.25rem 0}
+ol,ul{padding-left:1.35rem;margin:.5rem 0}li{margin:.32rem 0;padding-left:.1rem}
+table{border-collapse:collapse;width:100%;font-size:.95rem;margin:.7rem 0}
+th,td{text-align:left;vertical-align:top;padding:.55rem .65rem;border-bottom:1px solid var(--line)}
+th{background:var(--tint)}td:first-child{min-width:7rem;font-weight:600}
+footer{font-size:.87rem;color:var(--muted);padding:0 .2rem}
+code,kbd{overflow-wrap:anywhere;font-size:.9em;color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));gap:1rem}
+.grid section{margin-top:1rem}
+@media(max-width:38rem){main{padding:1rem .75rem 2rem}.hero,section{padding:1rem}.grid{gap:0}th,td{padding:.4rem}}
+@media print{body{background:white;color:black;font-size:10pt}main{max-width:none;margin:0;padding:0}
+.hero,section,nav{border-radius:0}.hero,section{padding:.45rem 0;border:none}.hero{border-bottom:2px solid var(--violet)}
+h1{font-size:24pt}h2{font-size:15pt}h2,h3,th{break-after:avoid}tr,li,aside{break-inside:avoid}nav{display:none}
+.grid{display:block}footer{margin-top:.3rem}}
+</style>
+</head>
+<body>
+<main>
+<header class="hero">
+  <p class="kicker">PROYECTO SOMBRA · v35.6-etapa4.3.6</p>
+  <h1>Guía rápida</h1>
+  <p>Empezá un proyecto y obtené tu primer resultado por fotografía o por simulación de una escena.</p>
+</header>
+<nav aria-label="Documentos de ayuda"><a href="MANUAL_SOMBRA.html">Manual completo</a><a href="#alcance">Alcance y límites</a></nav>
+<section aria-labelledby="inicio">
+  <h2 id="inicio">1. Abrí un proyecto</h2>
+  <p>En Windows, abrí el acceso directo si ya tenés el programa instalado. Si usás el ZIP de código fuente, ejecutá <code>PREPARAR_SOMBRA.cmd</code> la primera vez y luego <code>ABRIR_SOMBRA.cmd</code>.</p>
+  <p>En una instalación limpia, creá el administrador. Iniciá sesión y elegí <strong>Crear proyecto</strong>, <strong>Abrir proyecto</strong> o <strong>Importar archivo .3es</strong>. Para un proyecto nuevo, seleccioná unidades, nombre y ubicación. La barra y los paneles aparecen cuando el proyecto se abre.</p>
+</section>
+<div class="grid">
+<section aria-labelledby="foto">
+  <h2 id="foto">2A. Analizá una foto</h2>
+  <ol>
+    <li>En <strong>Temperatura</strong>, completá fecha, hora local y temperatura del aire. Verificá la ubicación del proyecto.</li>
+    <li>En <strong>Sombra</strong>, elegí <strong>Cargar imagen</strong>. Marcá el área de cálculo y una referencia iluminada de la misma superficie. Seguí el botón violeta para confirmar.</li>
+    <li>Revisá <strong>Ver máscara sombra / sol</strong>. Usá <strong>Generar curva de nivel</strong> para obtener el mapa estimado de Tmrt. Si aplicás exclusiones de materiales, volvé a generar la curva.</li>
+  </ol>
+</section>
+<section aria-labelledby="escena">
+  <h2 id="escena">2B. Simulá una escena</h2>
+  <ol>
+    <li>En <strong>Edición</strong>, elegí <strong>Generar plano 2D</strong> o <strong>Abrir Excel</strong>. Usá <strong>Añadir árbol</strong> o <strong>Añadir estructura</strong> y marcá la posición en el plano.</li>
+    <li>Revisá fecha, hora, ubicación y meteorología antes de comparar alternativas. Si vas a usar <strong>Modelo</strong>, cargá los datos en ese panel y elegí <strong>Ejecutar modelo</strong>.</li>
+    <li>Usá <strong>Generar vista 3D</strong> para explorar el resultado. Para una comparación válida, mantené las mismas condiciones y cambiá solo la intervención que querés estudiar.</li>
+  </ol>
+</section>
+</div>
+<section aria-labelledby="guardar">
+  <h2 id="guardar">3. Conservá el trabajo</h2>
+  <p>Usá <strong>Archivo → Guardar respaldo</strong> (<kbd>Ctrl+S</kbd>). Para trasladar el proyecto completo, elegí <strong>Exportar .3es…</strong>. Excel y PDF sirven para compartir datos o informes; para recuperar la escena, conservá el proyecto o su paquete <code>.3es</code>.</p>
+</section>
+<section aria-labelledby="alcance">
+  <h2 id="alcance">Alcance y límites</h2>
+  <p>Sombra estima cobertura de sombra, temperatura superficial y temperatura radiante media (Tmrt), según el flujo y sus entradas. La Tmrt describe la carga radiante; no es temperatura del aire. La máscara fotográfica puede confundir materiales oscuros con sombra.</p>
+  <aside><strong>Validación de campo pendiente.</strong> Esta es una versión piloto. Usá los resultados para explorar y comparar escenarios. Antes de basar una decisión técnica en ellos, contrastalos con mediciones.</aside>
+</section>
+<footer>Autor y titular de los componentes propios: Víctor Daniel Sánchez, Técnico Universitario. © 2026. Todos los derechos reservados sobre los componentes propios.</footer>
+</main>
+</body>
+</html>

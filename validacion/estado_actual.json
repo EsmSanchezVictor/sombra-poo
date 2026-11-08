@@ -1,12 +1,12 @@
 {
-  "app_release": "v35.6-etapa4.3.5",
+  "app_release": "v35.6-etapa4.3.6",
   "closed_on": "2026-11-08",
-  "base_release": "v35.6-etapa4.3.4",
-  "base_zip_sha256": "219a3a68541a7397dfd5db2bfb0450a8b9231558b8fc250ef8b7cc50797ba244",
-  "disposition": "visual_sidebar_revision",
+  "base_release": "v35.6-etapa4.3.5",
+  "base_zip_sha256": "a33ef3ded0b6315845eae37b194f4a3d90707aad5e1c17c36cd965dae40ce247",
+  "disposition": "documentation_and_about",
   "software_checks": {
-    "base_tests_passed": 626,
-    "final_tests_passed": 627,
+    "base_tests_passed": 627,
+    "final_tests_passed": 628,
     "python": "3.12.14",
     "platform": "Linux",
     "source_self_check": "passed",
@@ -21,23 +21,16 @@
     "seeded_uncertainty_equal": true,
     "model": "advanced_radiative_v2"
   },
-  "base_python_files": 192,
-  "unchanged_python_files": 177,
+  "base_python_files": 194,
+  "unchanged_python_files": 186,
   "modified_python_files": [
     "core/app_version.py",
-    "shape_selection.py",
+    "services/installation_check.py",
+    "test/test_release_cierre.py",
     "test/test_stage3_integration.py",
-    "test/test_v25_panel2_vertical.py",
-    "test/test_v26_panel2_altura_contenedor.py",
-    "test/test_v34_advanced_modes.py",
     "tools/build_windows.py",
     "ui/app_ui.py",
-    "ui/editing_ui.py",
-    "ui/panels.py",
-    "ui/photo_analysis.py",
-    "ui/sidebar.py",
-    "ui/snapshot_restoration.py",
-    "ui/theme.py",
+    "ui/menu_bar.py",
     "windows_build/build_support.py"
   ],
   "windows_previous": {
@@ -70,8 +63,7 @@
     "native_windows_visual_verified": false
   },
   "new_python_files": [
-    "ui/panel_chrome.py",
-    "ui/photo_workflow.py"
+    "ui/help_center.py"
   ],
   "workspace": {
     "hidden_until_project_loaded": true,
@@ -96,6 +88,15 @@
       "modelo"
     ],
     "photo_primary_action_follows_workflow": true,
+    "native_windows_visual_verified": false
+  },
+  "help": {
+    "offline_documents": [
+      "docs/GUIA_RAPIDA_SOMBRA.html",
+      "docs/MANUAL_SOMBRA.html"
+    ],
+    "license_reference_sha256": "4f5eb4688c2bfa14c9fcce49f7031da659ca8bc5e1669806ae3b9c2fc1815e85",
+    "installer_acceptance_added": false,
     "native_windows_visual_verified": false
   }
 }

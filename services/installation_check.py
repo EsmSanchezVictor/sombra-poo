@@ -52,7 +52,10 @@ def run_installation_check(*, require_full=False):
                 image.verify()
         if not resource_path("data/locations_latam.csv").is_file():
             raise ValueError("Falta el catálogo de ubicaciones.")
-        return "Iconos, ubicaciones y tres PNG de arranque disponibles desde cualquier directorio."
+        for name in ("MANUAL_SOMBRA.html", "GUIA_RAPIDA_SOMBRA.html", "LICENCIA_PROYECTO_SOMBRA.txt"):
+            if not resource_path(f"docs/{name}").is_file():
+                raise ValueError(f"Falta el documento de ayuda: {name}")
+        return "Iconos, ubicaciones, marca y documentos de ayuda disponibles."
     check("resources", resources)
 
     def science():

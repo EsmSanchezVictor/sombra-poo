@@ -1,4 +1,4 @@
-"""Empaquetar etapa4.3.5 en Windows x64 usando el entorno Python comprobado."""
+"""Empaquetar etapa4.3.6 en Windows x64 usando el entorno Python comprobado."""
 from pathlib import Path
 import argparse
 import importlib.util
@@ -101,7 +101,7 @@ def main():
                 report['windows_desktop_components_tested'] = True
         if args.installer:
             command([compiler, '/DProjectRoot='+str(ROOT), ROOT/'windows_build'/'ProyectoSombra.iss'])
-            setup = release_dir/'ProyectoSombra_Setup_35.6_etapa4.3.5_x64.exe'
+            setup = release_dir/'ProyectoSombra_Setup_35.6_etapa4.3.6_x64.exe'
             if not setup.is_file():
                 raise ValueError('Inno Setup no generó el archivo esperado.')
             report['installer_generated'] = True

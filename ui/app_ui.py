@@ -1,6 +1,5 @@
 from ui.theme import FONT, PALETA
 from core.runtime_paths import resource_root, resource_path, writable_path
-from core.app_version import APP_RELEASE
 from core.effective_scenario import EffectiveScenarioConfig, scenario_date, effective_model
 from datetime import datetime, timedelta
 import zoneinfo
@@ -48,6 +47,7 @@ from services import analysis_service
 from services import report_service
 from ui import icon_factory
 from ui import panels as ui_panels
+from ui import help_center
 from ui.photo_workflow import refresh_photo_workflow, setup_photo_panel
 from ui.editing_ui import setup_editing_panel, show_empty_editing_view, show_empty_3d_view
 from ui.scene3d import _clear_frame as clear_scene_3d
@@ -1820,22 +1820,11 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         messagebox.showinfo("Estadísticas rápidas", "\n".join(lines))
 
     def show_about(self):
-        messagebox.showinfo(
-            "Acerca de Proyecto Sombra",
-            f"Versión: {APP_RELEASE}\nAnálisis de sombra y microclima.\n"
-            "Validación de campo pendiente.",
-            parent=self.root,
-        )
-    def open_user_help(self, *, quick=False):
-        import webbrowser
+        help_center.show_about(self)
 
-        path = resource_path("docs", "MANUAL_SOMBRA.html")
-        try:
-            if path.is_file() and webbrowser.open(path.as_uri() + ("#guia-rapida" if quick else "")):
-                return
-        except (OSError, webbrowser.Error):
-            pass
-        messagebox.showinfo("Ayuda de Proyecto Sombra", f"Abrí el manual en:\n{path}", parent=self.root)
+    def open_user_help(self, *, quick=False):
+        filename = help_center.QUICK_MANUAL if quick else help_center.COMPLETE_MANUAL
+        help_center.open_document(self.root, filename)
 
     def setup_ribbon(self):
         """Barra agrupada con botones completos y accesibles por teclado."""
