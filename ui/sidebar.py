@@ -309,8 +309,16 @@ class SidebarMixin:
         columna 0 antes de animar. close_panel devuelve esa reserva al
         ancho de la barra de íconos al terminar.
         """
-        if not self.require_project("acceder a los paneles"):
+        if self._suspend_autosave_tracking:
+            # Se aplica después de validar y restaurar el proyecto completo.
+            self._pending_project_panel = index
             return
+        if not self._workspace_ready or not self.require_project("acceder a los paneles"):
+            return
+        self._panel_anim_token += 1
+        self._open_after_close.clear()
+        self._close_callbacks.clear()
+        self.hide_all_frames()
         token = self._panel_anim_token
         self.active_panel = index
         self.is_animating = True
@@ -326,7 +334,7 @@ class SidebarMixin:
         self._recalcular_ancho_sidebar_abierto()
         self._reservar_ancho_sidebar(self.panel_width)
         self.animate_panel_open(index, 0, token)
-        if index == 1:
+        if index in (0, 1):
             self.show_panel2_frames()
         elif index == 2:
             self.show_diseno_frames()
@@ -472,6 +480,8 @@ class SidebarMixin:
             frame.place_forget()
 
     def _toggle_frames(self, frames_to_show, frames_to_hide):
+        if not self._workspace_ready:
+            return
         for frame in frames_to_hide:
             frame.grid_remove()
         for frame in frames_to_show:
@@ -484,6 +494,8 @@ class SidebarMixin:
         )
 
     def show_diseno_frames(self):
+        if not self._workspace_ready:
+            return
         # v30: un único host ocupa las cuatro celdas centrales. Esto evita
         # tres cuartos vacíos alrededor del gráfico 2D/3D y permite que el
         # Notebook de Edición use todo el viewport disponible.
@@ -493,8 +505,11 @@ class SidebarMixin:
              self.frame8, self.frame9, self.frame10,
              self.frame11, self.frame12, self.frame13, self.frame14, self.frame15],
         )
+        self._get_scene_view_frames("diseno")
 
     def show_modelo_frames(self):
+        if not self._workspace_ready:
+            return
         # v30: mismo criterio para Modelo. frame11 tiene rowspan=2 y
         # columnspan=2, por lo que ocupa el bloque frame2..frame5 completo.
         self._toggle_frames(
@@ -503,10 +518,11 @@ class SidebarMixin:
              self.frame7, self.frame8, self.frame9, self.frame10,
              self.frame12, self.frame13, self.frame14, self.frame15],
         )
+        self._get_scene_view_frames("modelo")
 
     def highlight_button(self, index):
         for i, button in enumerate(self.buttons):
-            button.config(bg="gray80" if i == index else self.frame1.cget("bg"))
+            button.config(bg=self.palette["selected"] if i == index else self.frame1.cget("bg"))
 
     def reset_button(self, index):
         self.buttons[index].config(bg=self.frame1.cget("bg"))

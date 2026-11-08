@@ -12,11 +12,7 @@ def test_v26_frame1_abarca_fila_del_carrusel_panel2():
 
 
 def test_v26_panel2_no_usa_relleno_vertical_artificial_v25():
-    src = _source()
-    start = src.index("    def setup_panel_2(self):")
-    end = src.index("    def setup_panel_3(self):", start)
-    bloque = src[start:end]
-    assert "panel.grid_rowconfigure(2, weight=1)" not in bloque
-    assert "selection_frame.grid_rowconfigure(2, weight=1)" not in bloque
-    assert 'process_frame.grid(row=3, column=0, sticky="sew"' not in bloque
-    assert '.pack(' in bloque
+    root = Path(__file__).resolve().parents[1]
+    panel = (root / "ui" / "photo_workflow.py").read_text(encoding="utf-8")
+    assert "grid_rowconfigure" not in panel
+    assert "panel_body(" in panel

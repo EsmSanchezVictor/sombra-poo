@@ -34,7 +34,8 @@ class ProjectManager:
         self.app_state = app_state
         self.settings_manager = settings_manager or getattr(app, "settings_manager", None)
         self.current_project: Project | None = None
-        self.projects_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "proyectos"))
+        from core.runtime_paths import writable_path
+        self.projects_root = str(writable_path("proyectos"))
         self._autosave_after_id = None
         self._autosave_in_progress = False
         self._max_backups = 10

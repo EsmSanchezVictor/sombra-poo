@@ -1,5 +1,6 @@
 """Componentes de interfaz de Proyecto Sombra."""
 from __future__ import annotations
+from ui.theme import FONT, PALETA
 from core.effective_scenario import effective_model
 import queue
 import threading
@@ -102,7 +103,7 @@ class ComfortDialogsMixin:
             fill="both", expand=True, padx=14, pady=(12, 4)
         )
         status_var = tk.StringVar(value="")
-        status_label = tk.Label(dlg, textvariable=status_var, justify="left", anchor="w", fg="#555555")
+        status_label = tk.Label(dlg, textvariable=status_var, justify="left", anchor="w", fg=PALETA["texto_suave"])
         status_label.pack(fill="x", padx=14, pady=(2, 6))
         tk.Button(dlg, text="Cerrar", command=dlg.destroy).pack(pady=(0, 8))
         dlg.update_idletasks()
@@ -326,7 +327,7 @@ class ComfortDialogsMixin:
 
         botones = tk.Frame(dlg)
         botones.pack(fill="x", padx=12, pady=8)
-        tk.Button(botones, text="Calcular", command=calcular, bg="#4CAF50", fg="white",
-                  font=("Arial", 9, "bold")).pack(side="left")
+        tk.Button(botones, text="Calcular", command=calcular, bg=PALETA["primario"], fg="white",
+                  font=(FONT, 9, "bold")).pack(side="left")
         tk.Button(botones, text="Cerrar", command=dlg.destroy).pack(side="right")
         calcular()

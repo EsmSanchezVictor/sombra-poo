@@ -1,5 +1,36 @@
 # Historial central
 
+## v35.6-etapa4.3.5 — 2026-11-08
+
+- Temperatura, Sombra y Modelo usan los mismos encabezados, secciones y botones que Edición.
+- Sombra destaca la próxima acción disponible durante el análisis fotográfico. Modelo comparte las pestañas 2D y 3D con Edición.
+- Se conservan los modos de entrada y las opciones avanzadas, las fórmulas y las escalas de los mapas.
+
+## v35.6-etapa4.3.4 — 2026-11-08
+
+- El modo Edición comparte la paleta violeta del acceso. El lateral separa las herramientas de escena, las vistas y los archivos.
+- Las vistas 2D y 3D explican cómo empezar cuando todavía no hay una escena dibujada. El contenedor de pestañas permanece al editar o abrir un Excel.
+- Los mapas conservan las escalas de temperatura y los símbolos de la escena.
+
+## v35.6-etapa4.3.3 — 2026-11-08
+
+- Bienvenida con las marcas de Proyecto Sombra y 3Esfera y acciones para crear, abrir e importar un proyecto.
+- El escritorio, sus vistas y los atajos de trabajo se activan después de que el proyecto se carga. Al abrir un proyecto se restaura la vista guardada.
+- Paleta violeta y lavanda compartida entre el acceso, la barra de herramientas, las pestañas, los formularios, las tablas y las ventanas de administración. Sin cambios en los modelos o las escalas científicas.
+
+## v35.6-etapa4.3.2 — 2026-11-08
+
+- Portada centrada antes de las importaciones pesadas, con estado de carga por etapas.
+- Acceso a pantalla completa con los PNG originales de Proyecto Sombra y 3Esfera; atajos Esc/F11 y envío con Enter.
+- El perfil del instalador incluye `assest/`. Se preservan los cálculos, los esquemas y el flujo de autenticación.
+
+## v35.6-etapa4.3.1 — 2026-11-08
+
+- Cierre técnico sobre la etapa4.3 reorganizada. Arranque de Windows con el entorno local y único flujo de inicio con autenticación.
+- Ayuda local accesible desde el menú, versión visible y resolución de recursos independiente de la carpeta de inicio.
+- Perfil de compilación incorporado y adaptado a las rutas reorganizadas. Distribución limpia de datos de trabajo.
+- Se conserva el modelo científico y los formatos de proyecto. Validación de campo y aceptación manual final pendientes.
+
 ## Reorganización de archivos (sin cambio de versión)
 
 - Solo se reubican archivos que ningún módulo ni prueba lee: evidencia de validación (`validacion/`), notas y manifiestos de etapas anteriores (`docs/historico/`), instrucciones por entrega (`docs/releases/`) e imágenes (`docs/imagenes/`). Código, `data/` de ejecución, cuentas y `requirements*.txt` no se tocan.

@@ -121,7 +121,7 @@ def test_v34_ui_wiring_uses_correct_model_vars_and_hides_advanced_sections():
     assert 'app.model_tools_frame = herramientas' in panels
     assert 'tools.grid_remove()' in panels
     assert 'def _toggle_temperatura_mode(app):' in panels
-    assert 'frame.pack_forget()' in panels
+    assert 'frame.grid_remove()' in panels
     assert 'text="Entrada avanzada"' in panels
     assert 'variable=app.tmrt_model_mode' in panels
     assert 'variable=app.surface_model_mode' in panels

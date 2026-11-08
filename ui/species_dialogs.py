@@ -1,5 +1,6 @@
 """Componentes de interfaz de Proyecto Sombra."""
 from __future__ import annotations
+from ui.theme import PALETA
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import matplotlib.pyplot as plt
@@ -128,7 +129,7 @@ class SpeciesDialogsMixin:
             fila += 1
         der.grid_columnconfigure(1, weight=1)
 
-        error_lbl = tk.Label(der, text="", fg="red", anchor="w", wraplength=320)
+        error_lbl = tk.Label(der, text="", fg=PALETA["peligro"], anchor="w", wraplength=320)
         error_lbl.grid(row=fila, column=0, columnspan=2, sticky="ew")
         fila += 1
 
@@ -206,7 +207,7 @@ class SpeciesDialogsMixin:
 
         pie = tk.Frame(dlg)
         pie.pack(fill="x", padx=12, pady=8)
-        tk.Button(pie, text="Guardar", bg="#4CAF50", fg="white",
+        tk.Button(pie, text="Guardar", bg=PALETA["primario"], fg="white",
                   command=guardar).pack(side="right")
         tk.Button(pie, text="Cerrar", command=dlg.destroy).pack(side="right", padx=6)
 

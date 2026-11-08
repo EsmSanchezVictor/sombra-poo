@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual de Proyecto Sombra</title>
+<style>
+:root{color-scheme:light;--text:#241533;--muted:#5f4c6f;--accent:#68258b;--panel:#f5f1fa}
+body{margin:0;background:#f8faf8;color:var(--text);font:1rem/1.6 system-ui,sans-serif}
+main{max-width:52rem;margin:auto;padding:2rem 1.2rem 3rem}
+h1,h2{color:var(--accent);line-height:1.2}a{color:#135438}a:focus-visible{outline:3px solid #bd6d23}
+.eyebrow{color:var(--muted);font-size:.92rem}nav,.note{background:var(--panel);padding:.8rem 1.1rem;border-radius:.35rem}
+li{margin:.45rem 0}code{overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">Proyecto Sombra · v35.6-etapa4.3.5</p>
+<h1>Manual de usuario</h1>
+<p>Usá Sombra para explorar condiciones de sombra y microclima mediante fotografías, geometría de escenas y meteorología.</p>
+<nav aria-label="Contenido"><a href="#guia-rapida">Guía rápida</a> · <a href="#fotos">Fotografías</a> · <a href="#escenas">Escenas 2D y 3D</a> · <a href="#guardado">Guardado</a> · <a href="#interpretar">Resultados</a></nav>
+<h2 id="guia-rapida">Guía rápida</h2>
+<ol>
+<li>Si usás las fuentes en Windows, ejecutá <code>PREPARAR_SOMBRA.cmd</code> la primera vez y luego <code>ABRIR_SOMBRA.cmd</code>. Si instalaste la aplicación, abrila desde su acceso directo.</li>
+<li>La portada muestra el estado de la carga y da paso al acceso a pantalla completa. Podés alternar ese modo con F11 o salir de él con Esc. Creá el administrador en el primer inicio de una instalación limpia. Iniciá sesión para ver la bienvenida.</li>
+<li>Elegí <strong>Crear proyecto</strong>, <strong>Abrir proyecto</strong> o <strong>Importar archivo .3es</strong>. El escritorio aparece al terminar. Para un proyecto nuevo, elegí primero las unidades y la ubicación.</li>
+<li>Elegí el flujo de fotografía o el de diseño/modelo. Revisá la configuración, ejecutá y guardá los resultados.</li>
+</ol>
+<h2 id="fotos">Análisis por fotografía</h2>
+<ol>
+<li>Abrí el panel Sombra y elegí Cargar imagen. El botón violeta indica el paso disponible: delimitar el área de cálculo, marcar la referencia iluminada de la misma superficie o confirmar.</li>
+<li>Generá la primera curva y revisá la máscara. Una superficie oscura puede parecer sombra en el análisis de intensidad.</li>
+<li>Si corresponde, marcá las exclusiones manuales. Volvé a generar el análisis para actualizar la cobertura, la transmitancia y los resultados térmicos.</li>
+<li>Guardá y verificá el elemento del carrusel al reabrir. Una exclusión pendiente queda vinculada al elemento; regenerá su resultado antes de interpretarlo.</li>
+</ol>
+<h2 id="escenas">Escenas 2D y 3D</h2>
+<p>En Edición, usá <strong>Generar plano 2D</strong> o <strong>Abrir Excel</strong> para empezar. Al modificar la escena se actualiza el plano; usá <strong>Generar vista 3D</strong> para ver los cambios en 3D.</p>
+<p>En Diseño o Modelo, agregá árboles y estructuras, revisá dimensiones, copa, materiales, meteorología y hora. En Modelo, usá Ejecutar modelo para generar el mapa 2D y Generar vista 3D para explorarlo. El programa intenta usar VTK y dispone de una vista alternativa con Matplotlib. La animación diurna muestra cambios horarios del sol, la sombra y el campo calculado.</p>
+<h2 id="guardado">Guardar, respaldar y recuperar</h2>
+<p>Usá <strong>Guardar respaldo</strong> para conservar el estado y <strong>Exportar proyecto (.3es)</strong> para mover una copia. Comprobá la importación y reapertura de la copia antes de retirar el original. Los proyectos con exclusiones requieren un lector compatible con el esquema de estado 3.</p>
+<p>La aplicación puede exportar resultados a Excel y PDF. Las cuentas de Windows se conservan en <code>%APPDATA%\ProyectoSombra</code>. En la versión instalada, las preferencias y los proyectos nuevos también tienen una ubicación escribible en ese perfil.</p>
+<h2 id="interpretar">Interpretar resultados</h2>
+<p class="note"><strong>Validación de campo pendiente.</strong> Los resultados son estimaciones para comparar escenarios bajo los supuestos del modelo. Las comprobaciones de software verifican que las funciones operen; las mediciones reales son necesarias para estimar el error de Tmrt, temperatura del aire y superficie.</p>
+<p>Al comparar alternativas, mantené constantes ubicación, fecha, hora, meteorología y modelo, salvo la variable que querés estudiar. Registrá la procedencia de los datos y revisá las advertencias de cobertura y confort.</p>
+</main>
+</body>
+</html>

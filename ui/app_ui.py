@@ -1,3 +1,6 @@
+from ui.theme import FONT, PALETA
+from core.runtime_paths import resource_root, resource_path, writable_path
+from core.app_version import APP_RELEASE
 from core.effective_scenario import EffectiveScenarioConfig, scenario_date, effective_model
 from datetime import datetime, timedelta
 import zoneinfo
@@ -28,7 +31,7 @@ from core.validation import k_factor_desde_mediciones, leer_csv_mediciones, metr
 from core.uncertainty import estimate_tmrt_uncertainty
 from core.memory_utils import collect_and_log
 from image_processor import (
-    ImageProcessor, DEFAULT_MATRIX_SIZE, MATRIX_SIZE_OPTIONS, normalize_matrix_size,
+    ImageProcessor, DEFAULT_MATRIX_SIZE, normalize_matrix_size,
 )
 #from mouse_pixel_value import MouseHoverPixelValueWithTooltip
 from save_pdf import PDFReportGenerator
@@ -45,6 +48,9 @@ from services import analysis_service
 from services import report_service
 from ui import icon_factory
 from ui import panels as ui_panels
+from ui.photo_workflow import refresh_photo_workflow, setup_photo_panel
+from ui.editing_ui import setup_editing_panel, show_empty_editing_view, show_empty_3d_view
+from ui.scene3d import _clear_frame as clear_scene_3d
 from ui import theme
 from ui.layout import (
     PANEL_CONTENT_RATIO,
@@ -56,6 +62,7 @@ from ui.layout import (
 )
 from ui.dialogs import HerramientasDialogs
 from ui.menu_bar import MenuBar
+from ui.welcome import build_welcome
 from ui.diurnal_animation import DiurnalAnimationPlayer, Diurnal3DAnimationPlayer
 from ui.solar_indicator import add_solar_indicator_2d
 from ui.modal_style import prepare_dialog
@@ -77,7 +84,7 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.connection_start = connection_start or datetime.now()
         self.on_session_exit = on_session_exit
         self._session_exit_notified = False
-        self.root.title("Distribución Grid")
+        self.root.title("Proyecto Sombra")
         # NUEVO: la ventana arranca siempre maximizada. Antes se creaba
         # con el tamaño por defecto de Tk (chico, sin geometría propia)
         # — con layouts complejos como el de esta app, eso generaba
@@ -92,26 +99,13 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.modo = None  # 'arbol', 'estructura'
         self.elemento_temporal = None
 
-        """ # Crear frames
-        self.frame0 = tk.Frame(root, bg="magenta", width=100, height=3)
-        self.frame1 = tk.Frame(self.root, bg="aqua", width=100, height=100)
-        self.frame2 = tk.Frame(root, bg="green", width=100, height=100)
-        self.frame3 = tk.Frame(root, bg="blue", width=100, height=100)
-        self.frame4 = tk.Frame(root, bg="yellow", width=100, height=100)
-        self.frame5 = tk.Frame(root, bg="purple", width=100, height=100)
-        self.frame6 = tk.Frame(root, bg="orange", width=100, height=1) """
-        # Paleta de colores para toda la interfaz — centralizada en
-        # ui/theme.py (antes vivía duplicada acá con solo 4 colores;
-        # ahora además hay vocabulario con intención: primario, éxito,
-        # texto — en vez de códigos hex sueltos repetidos en cada
-        # pantalla).
         self.palette = dict(theme.PALETA)
         self.style = theme.aplicar_tema(self.root, self.palette)
 
         self.root.configure(bg=self.palette["background"])
-        base_dir = os.path.dirname(os.path.dirname(__file__))
+        base_dir = str(resource_root())
         self.base_dir = base_dir
-        self.settings_path = os.path.join(base_dir, "data", "settings.json")
+        self.settings_path = str(writable_path("data", "settings.json"))
         self.settings_manager = SettingsManager(self.settings_path)
         self.settings = self.settings_manager.load()
         self.k_factor = float(self.settings.get("k_factor", 0.04))
@@ -129,6 +123,8 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.current_location = None        
         self.is_dirty = False
         self._suspend_autosave_tracking = False
+        self._workspace_ready = False
+        self._pending_project_panel = None
         self.last_T = None
         self.last_shadow = None
         self.last_meta = None
@@ -308,22 +304,11 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.frame13.grid(row=2, column=1, sticky="nsew")
         self.frame14.grid(row=2, column=2, sticky="nsew")
         self.frame15.grid(row=4, column=1, columnspan=2, sticky="ew")
-        self.frame7.grid_remove()
-        self.frame8.grid_remove()
-        self.frame9.grid_remove()
-        self.frame10.grid_remove()
-        self.frame11.grid_remove()
-        self.frame12.grid_remove()
-        self.frame13.grid_remove()
-        self.frame14.grid_remove()
-        self.frame15.grid_remove()
+        self._workspace_frames = tuple(getattr(self, f"frame{i}") for i in range(16))
+        for frame in self._workspace_frames:
+            frame.grid_remove()
 
-        self.startup_frame = tk.Frame(
-            root,
-            bg=self.palette["panel"],
-            highlightbackground=self.palette["border"],
-            highlightthickness=1,
-        )        
+        self.startup_frame = tk.Frame(root, bg=self.palette["background"])
         # Configurar pesos de las filas y columnas
         root.grid_rowconfigure(0, weight=0)
         root.grid_rowconfigure(1, weight=1)
@@ -407,10 +392,10 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
 
         # Cargar las imágenes para los botones (deben ser archivos PNG)
         self.images = [
-            tk.PhotoImage(file="test/imagen/fiebre (3).png"),
-            tk.PhotoImage(file="test/imagen/sombra (3).png"),
-            tk.PhotoImage(file="test/imagen/config (3).png"),
-            tk.PhotoImage(file="test/imagen/vista-3d (3).png")
+            tk.PhotoImage(file=str(resource_path("test", "imagen", "fiebre (3).png"))),
+            tk.PhotoImage(file=str(resource_path("test", "imagen", "sombra (3).png"))),
+            tk.PhotoImage(file=str(resource_path("test", "imagen", "config (3).png"))),
+            tk.PhotoImage(file=str(resource_path("test", "imagen", "vista-3d (3).png")))
         ]
 
         # Lista de botones que representan los iconos
@@ -428,7 +413,9 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         # Crear 4 botones que actuarán como iconos y 4 paneles
         for i in range(4):
             btn = tk.Button(self.icon_frame, image=self.images[i], command=lambda i=i: self.toggle_panel(i), relief=tk.FLAT,
-                            bg=self.frame1.cget('bg'))
+                            bg=self.frame1.cget("bg"), activebackground=self.palette["accent"],
+                            highlightthickness=1, highlightcolor=self.palette["focus"],
+                            highlightbackground=self.frame1.cget("bg"), cursor="hand2")
             btn.grid(row=i, column=0, pady=0, padx=0, sticky="ew")
             self.buttons.append(btn)
 
@@ -438,7 +425,6 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         # panel medía 260 px), recortando su borde derecho junto a frame2/4.
         self.sidebar_closed_width = max(40, max(img.width() for img in self.images) + 8)
         self.frame1.grid_propagate(False)
-        self._reservar_ancho_sidebar(self.sidebar_closed_width)
 
         # --- Paneles desplegables (inicialmente ocultos) -------------
         # Cada panel = 1 frame outer (animado/posicionado) que contiene
@@ -544,52 +530,11 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.canvas1.mpl_connect('button_release_event', self.shape_selector.on_mouse_release)
     
     def setup_startup_screen(self):
-        """Pantalla de inicio — REDISEÑADA.
-
-        Antes: título + subtítulo + 2 botones + unidades, todo gridado
-        pegado arriba-izquierda de startup_frame, sin nada que centre
-        el contenido — con la ventana grande (ahora maximizada por
-        defecto) eso dejaba mucho espacio en blanco alrededor, y con
-        una ventana chica el contenido se veía apretado (la captura que
-        compartiste). Ahora es una tarjeta centrada, con logo y
-        jerarquía tipográfica clara (Heading/Muted de ui/theme.py) —
-        se ve igual de bien maximizada o no.
-        """
-        for widget in self.startup_frame.winfo_children():
-            widget.destroy()
-        self.startup_frame.configure(bg=self.palette["background"])
-        self.startup_frame.grid_rowconfigure(0, weight=1)
-        self.startup_frame.grid_columnconfigure(0, weight=1)
-
-        card = tk.Frame(
-            self.startup_frame, bg=self.palette["panel"],
-            highlightbackground=self.palette["border"], highlightthickness=1,
+        self._welcome_primary = build_welcome(
+            self.startup_frame, self.palette,
+            create=self.new_project, open_project=self.open_project,
+            import_project=self.import_project_3es,
         )
-        card.grid(row=0, column=0)
-        card.grid_columnconfigure(0, weight=1)
-
-        logo = icon_factory.obtener_icono("logo", size=56, color=self.palette["primario"])
-        logo_lbl = tk.Label(card, image=logo, bg=self.palette["panel"])
-        logo_lbl.image = logo
-        logo_lbl.grid(row=0, column=0, pady=(30, 10))
-
-        ttk.Label(
-            card, text="Análisis de sombra y confort térmico",
-            style="Heading.TLabel",
-        ).grid(row=1, column=0, padx=40, pady=(0, 2))
-        ttk.Label(
-            card, text="Creá o abrí un proyecto para empezar.",
-            style="Muted.TLabel",
-        ).grid(row=2, column=0, padx=40, pady=(0, 22))
-
-        ttk.Button(
-            card, text="Crear proyecto nuevo", style="Success.TButton",
-            command=self.new_project, width=26,
-        ).grid(row=3, column=0, padx=40, pady=(0, 8))
-        ttk.Button(
-            card, text="Abrir proyecto existente", style="Primary.TButton",
-            command=self.open_project, width=26,
-        ).grid(row=4, column=0, padx=40, pady=(0, 30))
 
     def _mostrar_dialogo_primeras_configuraciones(self, on_continuar):
         """NUEVO. Antes "Primeras configuraciones" (unidades de
@@ -639,31 +584,54 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         botones.grid(row=6, column=0, padx=24, pady=(0, 18), sticky="e")
         ttk.Button(botones, text="Cancelar", command=dialogo.destroy).pack(side="left", padx=6)
         ttk.Button(
-            botones, text="Continuar", command=_continuar, style="Success.TButton",
+            botones, text="Continuar", command=_continuar, style="DialogPrimary.TButton",
         ).pack(side="left")
 
         dialogo.protocol("WM_DELETE_WINDOW", dialogo.destroy)
 
-    def show_startup_screen(self):
+    def _reset_workspace_panel(self):
+        self._panel_anim_token += 1
+        self._open_after_close.clear()
+        self._close_callbacks.clear()
         self.hide_all_frames()
+        self.active_panel = None
+        self.is_animating = False
+        self.switch_buttons_to_vertical()
+        self.highlight_button(None)
+
+    def show_startup_screen(self):
+        self._workspace_ready = False
+        self._pending_project_panel = None
+        self._reset_workspace_panel()
+        for frame in self._workspace_frames:
+            frame.grid_remove()
+        self.root.grid_columnconfigure(0, minsize=0)
         self.set_project_ui_enabled(False)
-        self.startup_frame.grid(row=1, column=1, columnspan=2, rowspan=3, sticky="nsew", padx=30, pady=30)
-        if hasattr(self, "entry_lat") and self.entry_lat:
-            self.entry_lat.config(state="disabled")
-        if hasattr(self, "entry_lon") and self.entry_lon:
-            self.entry_lon.config(state="disabled")
+        self.startup_frame.grid(row=0, column=0, columnspan=3, rowspan=6, sticky="nsew")
+        self._welcome_primary.focus_set()
 
     def hide_startup_screen(self):
         self.startup_frame.grid_remove()
 
     def on_project_loaded(self, project_action="opened"):
-        self.hide_startup_screen()
-        self.set_project_ui_enabled(True)
         self._get_analysis_store()
         self.update_status_saved_time()
         self._register_project_session(project_action)
         if self.current_location:
             self._update_location_labels()
+
+        target_panel = self._pending_project_panel if project_action != "created" else None
+        self._pending_project_panel = None
+        self._reset_workspace_panel()
+        self._workspace_ready = True
+        self.hide_startup_screen()
+        self._reservar_ancho_sidebar(self.sidebar_closed_width)
+        for frame in (self.frame0, self.frame1, self.frame6):
+            frame.grid()
+        self.show_panel2_frames()
+        if target_panel is not None:
+            self.open_panel(target_panel)
+        self.set_project_ui_enabled(True)
 
     def _register_project_session(self, action="opened"):
         """Asocia el proyecto actual a la sesión autenticada."""
@@ -694,6 +662,7 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
 
 
     def set_project_ui_enabled(self, enabled: bool):
+        self.menu_bar.set_project_enabled(enabled)
         state = tk.NORMAL if enabled else tk.DISABLED
         for button in getattr(self, "buttons", []):
             button.config(state=state)
@@ -701,6 +670,7 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
             self.calculate_temp_button.config(state=state)
         if hasattr(self, "cargar_imagen_button"):
             self.cargar_imagen_button.config(state=state)
+        refresh_photo_workflow(self)
 
     def require_project(self, action_label: str) -> bool:
         if self.project_manager.current_project is None:
@@ -1071,303 +1041,11 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         # Controles de parámetros
         
     def setup_panel_2(self):
-        """Configura el contenido del Panel 2"""
-        panel = self.panel_frames[1]
+        setup_photo_panel(self)
 
-        # Botone para cargar la imagen a analizar 
-        self.cargar_imagen_button = tk.Button(
-            panel,
-            text="Cargar imagen",
-            command=self.cargar_imagen,
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 10, "bold"),
-        )
-        self.cargar_imagen_button.pack(fill="x", padx=20, pady=4)
-        self.panel2_advanced_check = tk.Checkbutton(
-            panel,
-            text="Modo avanzado\n(resolución 64–640)",
-            justify="left",
-            variable=self.panel2_advanced_mode,
-            bg=panel.cget("bg"),
-            command=self._toggle_panel2_advanced,
-        )
-        self.panel2_advanced_check.pack(fill="x", padx=20, pady=2)
-        self.shadow_detector_check = tk.Checkbutton(
-            panel,
-            text="Detector fotométrico (experimental)",
-            variable=self.shadow_detector_enabled,
-            bg=panel.cget("bg"),
-        )
-        self.shadow_detector_check.pack(fill="x", padx=20, pady=2)
-
-        # Selección del tamaño de la matriz
-        matrix_label = tk.Label(panel, text="Resolución de matriz (N × N):", bg=panel.cget("bg"), fg="black")
-        matrix_label.pack(fill="x", padx=20, pady=(4, 0))
-
-        self.matrix_size_combo = ttk.Combobox(
-            panel,
-            textvariable=self.matriz_size,
-            values=MATRIX_SIZE_OPTIONS,
-            state="readonly",
-        )
-        self.matrix_size_combo.pack(fill="x", padx=20, pady=(0, 1))
-        tk.Label(
-            panel,
-            text="Paso 32 · predeterminado: 128 × 128",
-            bg=panel.cget("bg"),
-            fg="#555555",
-            font=("Arial", 8),
-        ).pack(fill="x", padx=20, pady=(0, 3))
-
-        # Botones de selección de área
-        self.area_calc_button = tk.Button(panel, text="Seleccione área de cálculo",bg='blue',fg='white', command=self.shape_selector.select_area_calculo, state=tk.DISABLED)
-        self.area_calc_button.pack(fill="x",padx=20, pady=4)
-
-        self.area_ref_button = tk.Button(panel, text="Seleccione área de referencia",bg='red',fg='white', command=self.shape_selector.select_area_referencia, state=tk.DISABLED)
-        self.area_ref_button.pack(fill="x",padx=20, pady=4)
-
-        # Botones de confirmación y cálculo
-        process_label = tk.Label(panel, text="Calcular y procesar:", bg=panel.cget("bg"), fg="black")
-        process_label.pack(fill="x", padx=20, pady=(4, 0))
-
-        self.confirm_button = tk.Button(panel, text="Confirmar selección y calcular", command=self.confirmar_seleccion, state=tk.DISABLED)
-        self.confirm_button.pack(fill="x",padx=20, pady=4)
-
-        self.shadow_mask_button = tk.Button(
-            panel,
-            text="Ver máscara sombra / sol",
-            command=self.mostrar_mascara_sombra,
-            state=tk.DISABLED,
-        )
-        self.shadow_mask_button.pack(fill="x", padx=20, pady=4)
-        self.photo_exclusion_button = tk.Button(panel,text="Excluir materiales de la foto",
-            command=self.editar_exclusiones_fotograficas,state=tk.DISABLED)
-        self.photo_exclusion_button.pack(fill="x",padx=20,pady=4)
-
-        self.curve_button = tk.Button(panel, text="Generar curva de nivel", command=self.mostrar_curvas_nivel, state=tk.DISABLED)
-        self.curve_button.pack(fill="x",padx=20, pady=4)
-        
-        self.save_dataset_button = tk.Button(panel, text="Respaldar Dataset", command=self.save_dataset, state=tk.DISABLED)
-        self.save_dataset_button.pack(fill="x", padx=20, pady=4)
-
-        self._toggle_panel2_advanced()
-        
     def setup_panel_3(self):
-        """Configura el contenido del Panel 3"""
-        panel = self.panel_frames[2]
+        setup_editing_panel(self)
 
-        for widget in panel.winfo_children():
-            widget.destroy()        
-
-        # MISMO BUG QUE EL PANEL 4 (ver docstring de setup_panel_4 en
-        # ui/panels.py): acá se creaba un SEGUNDO canvas scrolleable
-        # anidado vía _build_scrollable_content dentro del frame de
-        # contenido que YA vive en un canvas con scrollbar + rueda del
-        # mouse. El canvas anidado quedaba con altura propia chica y
-        # sin rueda propia — los controles de abajo (radios de modo,
-        # ubicación del proyecto, viento, fecha/hora) quedaban cortados
-        # e inalcanzables ("ocultos"). Ahora los widgets van directo
-        # sobre `panel`, igual que en los paneles 1/2/4.
-        panel.grid_columnconfigure(0, weight=1)
-        contenido = panel
-        contenido.grid_columnconfigure(0, weight=1)
-        # Mismo fix aplicado a setup_panel_4 (ui/panels.py): sin esto,
-        # simple_edit_frame/advanced_edit_frame (fila 3, sticky="nsew")
-        # nunca reciben el alto sobrante del panel aunque el Canvas
-        # contenedor ya lo tenga disponible.
-        contenido.grid_rowconfigure(3, weight=1)
-
-        diseno_label = tk.Label(contenido, text="Modo de Edición:", bg=panel.cget("bg"), fg="black")
-        diseno_label.grid(row=0, column=0, sticky="w", pady=(0, 4))
-
-        acciones = tk.Frame(contenido, bg=panel.cget("bg"))
-        acciones.grid(row=1, column=0, sticky="ew", pady=2)
-        acciones.grid_columnconfigure(0, weight=1)
-        
-
-        # Botones principales
-        add_arbol = tk.Button(
-            acciones,
-            text="Añadir Árbol",
-            command=lambda: self._run_with_project("editar la escena", lambda: design.establecer_modo('arbol', self)),
-            bg='#4CAF50',
-            fg='white',
-            font=("Arial", 8, "bold"),
-        )
-        add_arbol.grid(row=0, column=0, sticky="ew", padx=(0, 12), pady=3)
-
-        add_estructura = tk.Button(
-            acciones,
-            text="Añadir Estructura",
-            command=lambda: self._run_with_project("editar la escena", lambda: design.establecer_modo('estructura', self)),
-            bg='#4CAF50',
-            fg='white',
-            font=("Arial", 8, "bold"),
-        )
-        add_estructura.grid(row=1, column=0, sticky="ew", padx=(0, 12), pady=3)
-
-        seleccionar = tk.Button(
-            acciones,
-            text="Seleccionar",
-            command=lambda: self._run_with_project("editar la escena", lambda: design.establecer_modo(None, self)),
-            bg='#4CAF50',
-            fg='white',
-            font=("Arial", 8, "bold"),
-        )
-        seleccionar.grid(row=2, column=0, sticky="ew", padx=(0, 12), pady=3)
-
-        guardar = tk.Button(
-            acciones,
-            text="Respaldar Excel",
-            command=lambda: self._run_with_project(
-                "respaldar el archivo de edición",
-                lambda: design.guardar(self.vars, self, filepath=self.project_manager.current_project.layout.edit_excel),
-            ),
-            bg='#4CAF50',
-            fg='white',
-            font=("Arial", 8, "bold"),
-        )
-        guardar.grid(row=3, column=0, sticky="ew", padx=(0, 12), pady=3)
-
-        abrir = tk.Button(
-            acciones,
-            text="Abrir",
-            command=lambda: self.abrir_excel_edicion(),
-            bg='#4CAF50',
-            fg='white',
-            font=("Arial", 8, "bold"),
-        )
-        abrir.grid(row=4, column=0, sticky="ew", padx=(0, 12), pady=3)
-
-        grafico = tk.Button(
-            acciones,
-            text="Generar gráfico",
-            command=lambda: self._run_with_project("generar el gráfico de edición", lambda: self.actualizar_grafico_diseno(self.frame7)),
-            bg='#4CAF50',
-            fg='white',
-            font=("Arial", 8, "bold"),
-        )
-        grafico.grid(row=5, column=0, sticky="ew", padx=(0, 12), pady=4)
-
-        vista_3d = tk.Button(
-            acciones,
-            text="Vista 3D",
-            command=self.mostrar_vista_3d_diseno,
-            bg='#4CAF50',
-            fg='white',
-            font=("Arial", 8, "bold"),
-        )
-        vista_3d.grid(row=6, column=0, sticky="ew", padx=(0, 12), pady=4)
-
-        modo_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        modo_frame.grid(row=2, column=0, sticky="w", pady=2)
-        tk.Radiobutton(
-            modo_frame,
-            text="Modo Simple",
-            variable=self.modo_edicion,
-            value="simple",
-            bg=panel.cget("bg"),
-            command=self._toggle_edicion_mode,
-        ).grid(row=0, column=0, sticky="w")
-        tk.Radiobutton(
-            modo_frame,
-            text="Modo Avanzado",
-            variable=self.modo_edicion,
-            value="advanced",
-            bg=panel.cget("bg"),
-            command=self._toggle_edicion_mode,
-        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
-
-        self.simple_edit_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        self.simple_edit_frame.grid(row=3, column=0, sticky="nsew", pady=3)
-        self.simple_edit_frame.grid_columnconfigure(1, weight=1)
-        tk.Label(self.simple_edit_frame, text="Ubicación fija del proyecto", bg=panel.cget("bg")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 3)
-        )
-        self.edit_location_label = tk.Label(self.simple_edit_frame, text="Sin proyecto", bg=panel.cget("bg"))
-        self.edit_location_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=1)
-        self.edit_latlon_label = tk.Label(self.simple_edit_frame, text="", bg=panel.cget("bg"))
-        self.edit_latlon_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=1)
-
-        self.advanced_edit_frame = tk.Frame(contenido, bg=panel.cget("bg"))
-        self.advanced_edit_frame.grid(row=3, column=0, sticky="nsew", pady=3)
-        self.advanced_edit_frame.grid_columnconfigure(1, weight=1)
-
-        tk.Label(self.advanced_edit_frame, text="Viento", bg=panel.cget("bg")).grid(
-            row=0, column=0, sticky="w", pady=(3, 2))
-        ttk.Combobox(
-            self.advanced_edit_frame,
-            textvariable=self.vars["viento"],
-            values=["nulo", "moderado", "fuerte"],
-            state="normal",
-        ).grid(row=0, column=1, sticky="ew", padx=(8, 12), pady=2)
-        tk.Label(
-            self.advanced_edit_frame,
-            text="Categoría o m/s: nulo≈0.5 · moderado≈4 · fuerte≈10",
-            bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
-        ).grid(row=1, column=0, columnspan=2, sticky="w")
-
-        tk.Label(self.advanced_edit_frame, text="Nubosidad", bg=panel.cget("bg")).grid(
-            row=2, column=0, sticky="w", pady=2)
-        ttk.Combobox(
-            self.advanced_edit_frame,
-            textvariable=self.vars["nubosidad"],
-            values=["Despejado", "Parcial", "Nublado"],
-            state="readonly",
-        ).grid(row=2, column=1, sticky="ew", padx=(8, 12), pady=2)
-
-        tk.Label(
-            self.advanced_edit_frame, text="Modelo de superficie",
-            bg=panel.cget("bg"), font=("Arial", 8, "bold"),
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(5, 1))
-        surface_frame = tk.Frame(self.advanced_edit_frame, bg=panel.cget("bg"))
-        surface_frame.grid(row=4, column=0, columnspan=2, sticky="w")
-        for label, value in (
-            ("Estándar", "standard"),
-            ("Avanzado seco", "advanced"),
-            ("Vegetación + ET", "advanced_vegetation"),
-        ):
-            tk.Radiobutton(
-                surface_frame, text=label, variable=self.surface_model_mode, value=value,
-                bg=panel.cget("bg"), anchor="w",
-            ).pack(anchor="w")
-        tk.Label(
-            self.advanced_edit_frame,
-            text="Humedad y nubosidad intervienen plenamente en los balances avanzados; el modo Estándar conserva el modelo histórico.",
-            bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
-            justify="left", wraplength=210,
-        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(1, 3))
-
-        tk.Label(
-            self.advanced_edit_frame, text="Configuraciones rápidas",
-            bg=panel.cget("bg"), font=("Arial", 8, "bold"),
-        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(5, 2))
-        preset_frame = tk.Frame(self.advanced_edit_frame, bg=panel.cget("bg"))
-        preset_frame.grid(row=7, column=0, columnspan=2, sticky="ew", padx=(0, 12), pady=(0, 3))
-        preset_frame.grid_columnconfigure(0, weight=1)
-        preset_frame.grid_columnconfigure(1, weight=1)
-        for idx, (label, preset) in enumerate((
-            ("Verano", "verano"), ("Invierno", "invierno"),
-            ("Soleado", "soleado"), ("Nublado", "nublado"),
-        )):
-            tk.Button(
-                preset_frame, text=label,
-                command=lambda p=preset: modelo.cargar_preset(p, self.vars),
-                bg="#4CAF50", fg="white", font=("Arial", 7, "bold"),
-            ).grid(row=idx // 2, column=idx % 2, sticky="ew", padx=2, pady=2)
-        tk.Label(
-            self.advanced_edit_frame,
-            text="Verano/Invierno adaptan la fecha al hemisferio. Soleado/Nublado ajustan radiación y nubosidad.",
-            bg=panel.cget("bg"), fg="#666666", font=("Arial", 7),
-            justify="left", wraplength=210,
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(0, 3))
-
-        panelin = tk.Frame(self.advanced_edit_frame, bg=panel.cget("bg"))
-        panelin.grid(row=9, column=0, columnspan=2, sticky="nsew", padx=(0, 12), pady=3)
-        for texto, var, fila, rango, es_fecha in self.controles:
-            self.crear_control(panelin, texto, var, fila, rango, es_fecha)
-        self._toggle_edicion_mode()    
     def _save_unit_settings(self):
         self.settings["units"] = self.temp_unit.get()
         self.settings["temp_unit"] = self.temp_unit.get()
@@ -2006,7 +1684,7 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
                 f"máx {d['max']:.2f}°C · σ {d['desvio']:.2f}°C"
             )
         tk.Label(ventana, text="\n".join(lineas), justify="left", anchor="w",
-                 font=("Arial", 10)).pack(fill="x", padx=12, pady=10)
+                 font=(FONT, 10)).pack(fill="x", padx=12, pady=10)
 
         img = Image.open(resultado)
         img.thumbnail((680, 400))
@@ -2034,7 +1712,7 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
                 ventana,
                 text="(Se necesitan al menos 2 elementos con cobertura de sombra y ΔTmrt "
                      "para la dispersión)",
-                fg="#888888",
+                fg=PALETA["texto_suave"],
             ).pack(pady=5)
 
         tk.Button(
@@ -2142,66 +1820,53 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         messagebox.showinfo("Estadísticas rápidas", "\n".join(lines))
 
     def show_about(self):
-        app_name = self.root.title()
-        version = getattr(self, "version", "N/D")
         messagebox.showinfo(
-            "Acerca de",
-            f"{app_name}\nVersión: {version}\nAplicación para análisis de sombra urbana.",
+            "Acerca de Proyecto Sombra",
+            f"Versión: {APP_RELEASE}\nAnálisis de sombra y microclima.\n"
+            "Validación de campo pendiente.",
+            parent=self.root,
         )
-    def _open_link(self, label, url):
-        """Muestra un mensaje informativo para enlaces externos."""
-        messagebox.showinfo("Enlace", f"Abrir {label}: {url}")
-    def setup_ribbon(self):
-        """NUEVO: barra de herramientas con íconos agrupados por
-        categoría (Archivo / Escena / Modelo / Análisis), con etiqueta
-        debajo de cada ícono — mismo lenguaje visual que las barras de
-        herramientas de software técnico (CAD, edición de imagen, etc.)
-        en vez de depender solo del menú de texto.
+    def open_user_help(self, *, quick=False):
+        import webbrowser
 
-        Es ADITIVA: no reemplaza el menú ni el selector de paneles
-        lateral (self.icon_frame/self.buttons) — llama exactamente a
-        los mismos métodos, así que cualquiera de los dos caminos
-        funciona igual y no hay lógica duplicada que pueda desincronizarse.
-        """
-        ribbon = tk.Frame(self.frame0, bg=self.palette["panel"])
-        ribbon.pack(fill="x", padx=4, pady=(2, 0))
+        path = resource_path("docs", "MANUAL_SOMBRA.html")
+        try:
+            if path.is_file() and webbrowser.open(path.as_uri() + ("#guia-rapida" if quick else "")):
+                return
+        except (OSError, webbrowser.Error):
+            pass
+        messagebox.showinfo("Ayuda de Proyecto Sombra", f"Abrí el manual en:\n{path}", parent=self.root)
+
+    def setup_ribbon(self):
+        """Barra agrupada con botones completos y accesibles por teclado."""
+        ribbon = ttk.Frame(self.frame0, padding=(5, 4, 5, 2))
+        ribbon.pack(fill="x")
 
         def _grupo(nombre):
-            contenedor = tk.Frame(ribbon, bg=self.palette["panel"])
+            contenedor = ttk.Frame(ribbon)
             contenedor.pack(side="left", padx=(6, 2), pady=2)
-            botones = tk.Frame(contenedor, bg=self.palette["panel"])
+            botones = ttk.Frame(contenedor)
             botones.pack(side="top")
-            tk.Label(
-                contenedor, text=nombre, bg=self.palette["panel"],
-                fg="#8a8f9c", font=("Arial", 7),
-            ).pack(side="top", pady=(1, 0))
+            ttk.Label(contenedor, text=nombre, style="RibbonGroup.TLabel").pack(side="top", pady=(3, 0))
             return botones
 
-        def _boton(padre, icono, texto, comando):
-            marco = tk.Frame(padre, bg=self.palette["panel"])
-            marco.pack(side="left", padx=3)
-            btn = tk.Button(
-                marco, image=icono, command=comando, relief=tk.FLAT,
-                bg=self.palette["panel"], activebackground=self.palette["accent"],
-                cursor="hand2",
-            )
-            btn.image = icono  # evita que el ícono se libere (bug clásico de Tkinter)
-            theme.dar_hover(btn, self.palette["panel"], self.palette["accent"])
-            btn.pack()
-            tk.Label(
-                marco, text=texto, bg=self.palette["panel"], fg="#4a4f63",
-                font=("Arial", 7),
-            ).pack()
+        def _boton(padre, icono, texto, comando, style="Ribbon.TButton"):
+            btn = ttk.Button(padre, image=icono, text=texto, compound="top", command=comando, style=style)
+            btn.image = icono
+            btn.pack(side="left", padx=2, fill="y")
             return btn
+
+        def _icono(nombre):
+            return icon_factory.obtener_icono(nombre, color=self.palette["primario"])
 
         def _separador():
             tk.Frame(ribbon, bg=self.palette["border"], width=1).pack(
                 side="left", fill="y", padx=4, pady=4)
 
         grupo_archivo = _grupo("Archivo")
-        _boton(grupo_archivo, icon_factory.obtener_icono("nuevo"), "Nuevo", self.new_project)
-        _boton(grupo_archivo, icon_factory.obtener_icono("abrir"), "Abrir", self.open_project)
-        _boton(grupo_archivo, icon_factory.obtener_icono("guardar"), "Guardar", self.save_project)
+        _boton(grupo_archivo, _icono("nuevo"), "Nuevo", self.new_project)
+        _boton(grupo_archivo, _icono("abrir"), "Abrir", self.open_project)
+        _boton(grupo_archivo, _icono("guardar"), "Guardar", self.save_project)
         _separador()
 
         grupo_escena = _grupo("Escena")
@@ -2217,16 +1882,16 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         _separador()
 
         grupo_modelo = _grupo("Modelo")
-        _boton(grupo_modelo, icon_factory.obtener_icono("play"), "Ejecutar", self.open_execution_dialog)
+        _boton(grupo_modelo, _icono("play"), "Ejecutar", self.open_execution_dialog, style="RibbonPrimary.TButton")
         _separador()
 
         grupo_analisis = _grupo("Análisis")
-        _boton(grupo_analisis, icon_factory.obtener_icono("barras"), "Comparar", self.mostrar_analisis_comparativo)
-        _boton(grupo_analisis, icon_factory.obtener_icono("curva"), "Sensib.", self.mostrar_curva_sensibilidad)
-        _boton(grupo_analisis, icon_factory.obtener_icono("calibrar"), "Calibrar", self._dialogo_calibrar_k_factor)
-        _boton(grupo_analisis, icon_factory.obtener_icono("confort"), "Confort", self._dialogo_confort)
-        _boton(grupo_analisis, icon_factory.obtener_icono("arbol"), "Ranking", self._dialogo_ranking_arboles)
-        _boton(grupo_analisis, icon_factory.obtener_icono("pdf"), "Informe", self.generar_informe_completo)
+        _boton(grupo_analisis, _icono("barras"), "Comparar", self.mostrar_analisis_comparativo)
+        _boton(grupo_analisis, _icono("curva"), "Sensib.", self.mostrar_curva_sensibilidad)
+        _boton(grupo_analisis, _icono("calibrar"), "Calibrar", self._dialogo_calibrar_k_factor)
+        _boton(grupo_analisis, _icono("confort"), "Confort", self._dialogo_confort)
+        _boton(grupo_analisis, _icono("arbol"), "Ranking", self._dialogo_ranking_arboles)
+        _boton(grupo_analisis, _icono("pdf"), "Informe", self.generar_informe_completo)
 
     def setup_status_bar(self):
         self.frame6.configure(bg=self.palette["accent"])
@@ -2236,19 +1901,19 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
 
         self.project_status_label = tk.Label(
             self.frame6,
-            textvariable=self.status_project_var, #text=f"Conexión: {connection_start.strftime('%Y-%m-%d %H:%M:%S')}",
+            textvariable=self.status_project_var,
             bg=self.palette["accent"],
-            fg="#2c3e50",
-            font=("Arial", 9, "bold"),
+            fg=PALETA["texto"],
+            font=(FONT, 9, "bold"),
         )
         self.project_status_label.pack(side="left", padx=10)
 
         self.saved_status_label = tk.Label(
             self.frame6,
-            textvariable=self.status_saved_var,            #text=f"Usuario: {username}",
+            textvariable=self.status_saved_var,
             bg=self.palette["accent"],
-            fg="#2c3e50",
-            font=("Arial", 9),
+            fg=PALETA["texto"],
+            font=(FONT, 9),
         )
         self.saved_status_label.pack(side="left", padx=10)
 
@@ -2260,25 +1925,25 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
             self.frame6,
             textvariable=self.status_elements_var,
             bg=self.palette["accent"],
-            fg="#2c3e50",
-            font=("Arial", 9),
+            fg=PALETA["texto"],
+            font=(FONT, 9),
         )
         self.elements_status_label.pack(side="left", padx=10)
 
         tk.Label(
             self.frame6,
-            text=f"Usuario: {username}", #text="3Esfera",
+            text=f"Usuario: {username}",
             bg=self.palette["accent"],
-            fg="#4a4f63",
-            font=("Arial", 9),
- ).pack(side="right", padx=10)
+            fg=PALETA["texto_suave"],
+            font=(FONT, 9),
+        ).pack(side="right", padx=10, pady=3)
         tk.Label(
             self.frame6,
-            text="3esfera",
+            text="3Esfera",
             bg=self.palette["accent"],
-            fg="#4a4f63",
-            font=("Arial", 9),
-        ).pack(side="right", padx=10)
+            fg=PALETA["texto_suave"],
+            font=(FONT, 9),
+               ).pack(side="right", padx=10, pady=3)
 
     def update_status_saved_time(self, iso_time: str | None = None):
         project = self.project_manager.current_project
@@ -2320,9 +1985,9 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.lbl_dimensiones_calculo = tk.Label(
             sombra_frame,
             text="Área de Cálculo: N/A",
-            font=("Arial", 7, "bold"),
+            font=(FONT, 7, "bold"),
             bg=self.palette["panel"],
-            fg="#2c3e50",
+            fg=PALETA["texto"],
         )
         # Fila 0, Columna 0
         self.lbl_dimensiones_calculo.grid(row=0, column=0, sticky="w", padx=5, pady=2)
@@ -2330,9 +1995,9 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.lbl_dimensiones_referencia = tk.Label(
             sombra_frame,
             text="Área de Referencia: N/A",
-            font=("Arial", 7, "bold"),
+            font=(FONT, 7, "bold"),
             bg=self.palette["panel"],
-            fg="#2c3e50",
+            fg=PALETA["texto"],
         )
         # Fila 0, Columna 1
         self.lbl_dimensiones_referencia.grid(row=0, column=1, sticky="w", padx=5, pady=2)
@@ -2340,9 +2005,9 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.lbl_promedio_referencia = tk.Label(
             sombra_frame,
             text="Promedio Gris Referencia: N/A",
-            font=("Arial", 7, "bold"),
+            font=(FONT, 7, "bold"),
             bg=self.palette["panel"],
-            fg="#2c3e50",
+            fg=PALETA["texto"],
         )
         # Fila 1, Columna 0
         self.lbl_promedio_referencia.grid(row=1, column=0, sticky="w", padx=5, pady=2)
@@ -2350,9 +2015,9 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.lbl_porcentaje_sombra = tk.Label(
             sombra_frame,
             text="Cobertura de sombra: N/A",
-            font=("Arial", 7, "bold"),
+            font=(FONT, 7, "bold"),
             bg=self.palette["panel"],
-            fg="#2c3e50",
+            fg=PALETA["texto"],
         )
         # Fila 1, Columna 1
         self.lbl_porcentaje_sombra.grid(row=1, column=1, sticky="w", padx=5, pady=2)
@@ -2360,18 +2025,18 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.lbl_atenuacion_sombra = tk.Label(
             sombra_frame,
             text="Atenuación en sombra: N/A",
-            font=("Arial", 7, "bold"),
+            font=(FONT, 7, "bold"),
             bg=self.palette["panel"],
-            fg="#2c3e50",
+            fg=PALETA["texto"],
         )
         self.lbl_atenuacion_sombra.grid(row=2, column=0, sticky="w", padx=5, pady=2)
 
         self.lbl_transmitancia_sombra = tk.Label(
             sombra_frame,
             text="Transmitancia efectiva: N/A",
-            font=("Arial", 7, "bold"),
+            font=(FONT, 7, "bold"),
             bg=self.palette["panel"],
-            fg="#2c3e50",
+            fg=PALETA["texto"],
         )
         self.lbl_transmitancia_sombra.grid(row=2, column=1, sticky="w", padx=5, pady=2)
 
@@ -2391,8 +2056,8 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         strip = tk.Frame(result_frame, bg=self.palette["panel"])
         strip.pack(fill="both", expand=True, padx=6, pady=6)
         self.carrusel_izq = tk.Button(
-            strip, text="◀", bd=0, bg=self.palette["panel"], fg="#2c3e50",
-            font=("Arial", 10, "bold"), command=lambda: self._carrusel_desplazar(-1),
+            strip, text="◀", bd=0, bg=self.palette["panel"], fg=PALETA["texto"],
+            font=(FONT, 10, "bold"), command=lambda: self._carrusel_desplazar(-1),
         )
         self.carrusel_izq.pack(side="left", fill="y")
         self.carrusel_canvas = tk.Canvas(
@@ -2400,8 +2065,8 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         )
         self.carrusel_canvas.pack(side="left", fill="both", expand=True)
         self.carrusel_der = tk.Button(
-            strip, text="▶", bd=0, bg=self.palette["panel"], fg="#2c3e50",
-            font=("Arial", 10, "bold"), command=lambda: self._carrusel_desplazar(1),
+            strip, text="▶", bd=0, bg=self.palette["panel"], fg=PALETA["texto"],
+            font=(FONT, 10, "bold"), command=lambda: self._carrusel_desplazar(1),
         )
         self.carrusel_der.pack(side="right", fill="y")
         self.carrusel_inner = tk.Frame(self.carrusel_canvas, bg=self.palette["panel"])
@@ -2486,7 +2151,7 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         for marco, idx in self._carrusel_frames:
             if idx == index:
                 marco.config(relief="raised", highlightthickness=2,
-                             highlightbackground="#2196F3")
+                             highlightbackground=self.palette["focus"])
                 self._carrusel_sel = index
             else:
                 marco.config(relief="flat", highlightthickness=1,
@@ -2533,34 +2198,34 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         self.lbl_tmrt_sol = tk.Label(
             labels_frame, # OJO: El padre ahora es labels_frame
             text="Tmrt al sol: N/A",
-            font=("Arial", 7, "bold"),
+            font=(FONT, 7, "bold"),
             bg=self.palette["panel"],
-            fg="#2c3e50",
+            fg=PALETA["texto"],
         )
         self.lbl_tmrt_sol.grid(row=0, column=0, sticky="ew", padx=2)
 
         self.lbl_tmrt_sombra = tk.Label(
             labels_frame,
             text="Tmrt en sombra: N/A",
-            font=("Arial", 7, "bold"),
+            font=(FONT, 7, "bold"),
             bg=self.palette["panel"],
-            fg="#2c3e50",
+            fg=PALETA["texto"],
         )
         self.lbl_tmrt_sombra.grid(row=0, column=1, sticky="ew", padx=2)
 
         self.lbl_delta_tmrt = tk.Label(
             labels_frame,
             text="ΔTmrt (impacto sombra): N/A",
-            font=("Arial", 7, "bold"),
+            font=(FONT, 7, "bold"),
             bg=self.palette["panel"],
-            fg="#2c3e50",
+            fg=PALETA["texto"],
         )
         self.lbl_delta_tmrt.grid(row=0, column=2, sticky="ew", padx=2)
 
         self.lbl_tmrt_uncertainty = tk.Label(
             labels_frame,
             text="Incertidumbre operativa Tmrt sombra: N/A",
-            font=("Arial", 7), bg=self.palette["panel"], fg="#555555",
+            font=(FONT, 7), bg=self.palette["panel"], fg=PALETA["texto_suave"],
         )
         self.lbl_tmrt_uncertainty.grid(row=1, column=0, columnspan=3, sticky="ew", padx=2, pady=(2, 0))
 
@@ -3086,12 +2751,25 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
             except tk.TclError:
                 pass
 
-        notebook = ttk.Notebook(parent)
+        notebook = ttk.Notebook(parent, style="Scene.TNotebook")
         notebook.pack(fill="both", expand=True)
         view2d = tk.Frame(notebook, bg=self.palette["panel"])
         view3d = tk.Frame(notebook, bg=self.palette["panel"])
         notebook.add(view2d, text="Vista 2D")
         notebook.add(view3d, text="Vista 3D")
+        if mode == "diseno":
+            show_empty_editing_view(
+                view2d, title="Plano de la escena",
+                description="Generá el plano 2D para ubicar árboles y estructuras, o abrí un Excel de escena.",
+            )
+        else:
+            show_empty_editing_view(
+                view2d, title="Simulación del escenario",
+                description="Configurá el escenario y elegí Ejecutar modelo para ver el resultado 2D.",
+            )
+            # Las ediciones del modelo también deben redibujar en la pestaña 2D.
+            self.vars_modelo["graph_frame"] = view2d
+        show_empty_3d_view(view3d)
         self._scene_view_hosts[mode] = {
             "notebook": notebook,
             "view2d": view2d,
@@ -3128,7 +2806,7 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         return grafico_fn(*args, target_frame)
     def actualizar_grafico_diseno(self, target_frame=None):
         if target_frame is None or target_frame is self.frame7:
-            target_frame, _view3d, notebook = self._get_scene_view_frames("diseno")
+            target_frame, view3d, notebook = self._get_scene_view_frames("diseno")
         else:
             notebook = None
 
@@ -3141,6 +2819,9 @@ class SombraApp(PhotoAnalysisMixin, SnapshotRestorationMixin, SidebarMixin, Pref
         )
 
         if notebook is not None:
+            # Una vista 3D anterior ya no representa el plano actualizado.
+            clear_scene_3d(view3d)
+            show_empty_3d_view(view3d)
             notebook.select(target_frame)
         # El renderer de Edición ya conecta un único handler de click.
         # No volver a conectarlo aquí: hacerlo dos veces abría dos diálogos

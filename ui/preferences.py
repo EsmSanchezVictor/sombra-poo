@@ -1,5 +1,6 @@
 """Componentes de interfaz de Proyecto Sombra."""
 from __future__ import annotations
+from ui.theme import FONT, PALETA
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
@@ -36,10 +37,10 @@ class PreferencesMixin:
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(2, 0))
 
-        card = tk.Frame(preferences, bg="white", padx=18, pady=14, bd=0, relief="flat")
+        card = tk.Frame(preferences, bg=PALETA["panel"], padx=18, pady=14, bd=0, relief="flat")
         card.grid(row=1, column=0, padx=18, pady=(8, 16))
 
-        tk.Label(card, text="Unidades", bg="white", font=("Arial", 9, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(card, text="Unidades", bg=PALETA["panel"], font=(FONT, 9, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Combobox(card, textvariable=temp_unit_var, values=["C", "F", "K"], state="readonly", width=10).grid(
             row=1, column=0, sticky="w"
         )
@@ -49,71 +50,71 @@ class PreferencesMixin:
             state="readonly", width=10,
         ).grid(row=1, column=1, sticky="w")
 
-        tk.Label(card, text="Modo de interfaz", bg="white", font=("Arial", 9, "bold")).grid(
+        tk.Label(card, text="Modo de interfaz", bg=PALETA["panel"], font=(FONT, 9, "bold")).grid(
             row=2, column=0, sticky="w", pady=(10, 0)
         )
-        tk.Radiobutton(card, text="Simple", variable=ui_mode_var, value="simple", bg="white").grid(
+        tk.Radiobutton(card, text="Simple", variable=ui_mode_var, value="simple", bg=PALETA["panel"]).grid(
             row=3, column=0, sticky="w"
         )
-        tk.Radiobutton(card, text="Detallado", variable=ui_mode_var, value="advanced", bg="white").grid(
+        tk.Radiobutton(card, text="Detallado", variable=ui_mode_var, value="advanced", bg=PALETA["panel"]).grid(
             row=3, column=1, sticky="w"
         )
 
-        tk.Label(card, text="Modelo térmico Tmrt", bg="white", font=("Arial", 9, "bold")).grid(
+        tk.Label(card, text="Modelo térmico Tmrt", bg=PALETA["panel"], font=(FONT, 9, "bold")).grid(
             row=4, column=0, sticky="w", pady=(10, 0)
         )
         tk.Radiobutton(
             card, text="Estándar (empírico, predeterminado)",
-            variable=tmrt_model_var, value="standard", bg="white",
+            variable=tmrt_model_var, value="standard", bg=PALETA["panel"],
         ).grid(row=5, column=0, columnspan=2, sticky="w")
         tk.Radiobutton(
             card, text="Avanzado (balance radiativo v2)",
-            variable=tmrt_model_var, value="advanced", bg="white",
+            variable=tmrt_model_var, value="advanced", bg=PALETA["panel"],
         ).grid(row=6, column=0, columnspan=2, sticky="w")
         tk.Label(
             card,
             text=("El modelo avanzado usa GHI, DNI y DHI por separado y parámetros "
                   "radiativos humanos. Es más físico, pero todavía requiere validación local."),
-            bg="white", fg="#666666", wraplength=380, justify="left", font=("Arial", 7),
+            bg=PALETA["panel"], fg=PALETA["texto_suave"], wraplength=380, justify="left", font=(FONT, 7),
         ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
-        tk.Label(card, text="Modelo térmico de superficies", bg="white", font=("Arial", 9, "bold")).grid(
+        tk.Label(card, text="Modelo térmico de superficies", bg=PALETA["panel"], font=(FONT, 9, "bold")).grid(
             row=8, column=0, sticky="w", pady=(10, 0)
         )
         tk.Radiobutton(
             card, text="Estándar (linealizado, predeterminado)",
-            variable=surface_model_var, value="standard", bg="white",
+            variable=surface_model_var, value="standard", bg=PALETA["panel"],
         ).grid(row=9, column=0, columnspan=2, sticky="w")
         tk.Radiobutton(
             card, text="Avanzado seco (balance energético v1)",
-            variable=surface_model_var, value="advanced", bg="white",
+            variable=surface_model_var, value="advanced", bg=PALETA["panel"],
         ).grid(row=10, column=0, columnspan=2, sticky="w")
         tk.Radiobutton(
             card, text="Avanzado vegetación + ET (v2)",
-            variable=surface_model_var, value="advanced_vegetation", bg="white",
+            variable=surface_model_var, value="advanced_vegetation", bg=PALETA["panel"],
         ).grid(row=11, column=0, columnspan=2, sticky="w")
         tk.Label(
             card,
             text=("v2 añade evapotranspiración de suelo vegetado mediante FAO-56 Penman-Monteith, "
                   "fenología de caducifolias y diagnóstico separado de transpiración de copa. "
                   "El estándar y el avanzado seco conservan sus resultados anteriores."),
-            bg="white", fg="#666666", wraplength=380, justify="left", font=("Arial", 7),
+            bg=PALETA["panel"], fg=PALETA["texto_suave"], wraplength=380, justify="left", font=(FONT, 7),
         ).grid(row=12, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
-        tk.Label(card, text="Fracción de suelo vegetado (0-1)", bg="white", font=("Arial", 8, "bold")).grid(
+        tk.Label(card, text="Fracción de suelo vegetado (0-1)", bg=PALETA["panel"], font=(FONT, 8, "bold")).grid(
             row=13, column=0, sticky="w", pady=(6, 0)
         )
         tk.Entry(card, textvariable=ground_veg_var, width=10).grid(row=13, column=1, sticky="w")
-        tk.Label(card, text="Disponibilidad hídrica suelo (0-1)", bg="white", font=("Arial", 8, "bold")).grid(
+        tk.Label(card, text="Disponibilidad hídrica suelo (0-1)", bg=PALETA["panel"], font=(FONT, 8, "bold")).grid(
             row=14, column=0, sticky="w"
         )
         tk.Entry(card, textvariable=water_var, width=10).grid(row=14, column=1, sticky="w")
-        tk.Label(card, text="Disponibilidad hídrica copa (0-1)", bg="white", font=("Arial", 8, "bold")).grid(
+        tk.Label(card, text="Disponibilidad hídrica copa (0-1)", bg=PALETA["panel"], font=(FONT, 8, "bold")).grid(
             row=15, column=0, sticky="w"
         )
         tk.Entry(card, textvariable=canopy_water_var, width=10).grid(row=15, column=1, sticky="w")
 
-        tk.Label(card, text="País por defecto", bg="white", font=("Arial", 9, "bold")).grid(
+        tk.Label(card, text="País por defecto", bg=PALETA["panel"], font=(FONT, 9, "bold")).grid(
             row=16, column=0, sticky="w", pady=(10, 0)
         )
         if self.locations_data:
@@ -124,7 +125,7 @@ class PreferencesMixin:
         else:
             tk.Entry(card, textvariable=country_var, width=24).grid(row=17, column=0, columnspan=2, sticky="w")
 
-        tk.Label(card, text="Ciudad por defecto", bg="white", font=("Arial", 9, "bold")).grid(
+        tk.Label(card, text="Ciudad por defecto", bg=PALETA["panel"], font=(FONT, 9, "bold")).grid(
             row=18, column=0, sticky="w", pady=(10, 0)
         )
         if self.locations_data:
@@ -143,14 +144,14 @@ class PreferencesMixin:
         else:
             tk.Entry(card, textvariable=city_var, width=24).grid(row=19, column=0, columnspan=2, sticky="w")
 
-        tk.Label(card, text="Nubosidad", bg="white", font=("Arial", 9, "bold")).grid(
+        tk.Label(card, text="Nubosidad", bg=PALETA["panel"], font=(FONT, 9, "bold")).grid(
             row=20, column=0, sticky="w", pady=(10, 0)
         )
         ttk.Combobox(
             card, textvariable=cloudiness_var, values=["Despejado", "Parcial", "Nublado"], width=22
         ).grid(row=21, column=0, columnspan=2, sticky="w")
 
-        tk.Label(card, text="Viento", bg="white", font=("Arial", 9, "bold")).grid(
+        tk.Label(card, text="Viento", bg=PALETA["panel"], font=(FONT, 9, "bold")).grid(
             row=22, column=0, sticky="w", pady=(10, 0)
         )
         ttk.Combobox(
@@ -189,7 +190,7 @@ class PreferencesMixin:
             self.apply_settings(self.settings)
             preferences.destroy()
 
-        actions = tk.Frame(card, bg="white")
+        actions = tk.Frame(card, bg=PALETA["panel"])
         actions.grid(row=24, column=0, columnspan=2, pady=(12, 0), sticky="e")
-        tk.Button(actions, text="Guardar", command=save_preferences).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(actions, text="Guardar", command=save_preferences, style="DialogPrimary.TButton").grid(row=0, column=0, padx=(0, 8))
         tk.Button(actions, text="Cancelar", command=preferences.destroy).grid(row=0, column=1)

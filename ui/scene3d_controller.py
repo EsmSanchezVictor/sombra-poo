@@ -1,8 +1,10 @@
 """Construcción de mallas y actores VTK; interacción en un mixin separado."""
 from __future__ import annotations
+from ui.theme import PALETA
 import math
 import sys
 import tkinter as tk
+from tkinter import ttk
 from core.scene3d_data import Scene3DData, _optional_float, _finite_range, _scene_extent
 import numpy as np
 from matplotlib import colormaps
@@ -78,18 +80,18 @@ class _VTKOffscreenSceneController(VTKInteractionMixin):
         self._scene_center = None
         self._scene_span = None
 
-        toolbar = tk.Frame(parent, bd=0)
+        toolbar = ttk.Frame(parent, padding=(4, 3))
         toolbar.pack(side=tk.TOP, fill=tk.X)
-        tk.Label(toolbar, text="Motor 3D: VTK", anchor="w").pack(
+        ttk.Label(toolbar, text="Motor 3D: VTK", anchor="w", style="DialogSection.TLabel").pack(
             side=tk.LEFT, padx=(6, 12), pady=3
         )
-        tk.Button(toolbar, text="Isométrica", command=self.view_isometric).pack(
+        ttk.Button(toolbar, text="Isométrica", command=self.view_isometric).pack(
             side=tk.LEFT, padx=2, pady=2
         )
-        tk.Button(toolbar, text="Superior", command=self.view_top).pack(
+        ttk.Button(toolbar, text="Superior", command=self.view_top).pack(
             side=tk.LEFT, padx=2, pady=2
         )
-        tk.Button(toolbar, text="Reencuadrar", command=self.reset_camera).pack(
+        ttk.Button(toolbar, text="Reencuadrar", command=self.reset_camera).pack(
             side=tk.LEFT, padx=2, pady=2
         )
         solar_summary = ""
@@ -99,7 +101,7 @@ class _VTKOffscreenSceneController(VTKInteractionMixin):
             toolbar,
             text=f"Arrastrar: rotar · Rueda: zoom{solar_summary}",
             anchor="e",
-            fg="#555555",
+            fg=PALETA["texto_suave"],
         )
         self._solar_status_label.pack(side=tk.RIGHT, padx=8)
 

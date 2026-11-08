@@ -1,35 +1,14 @@
-# Validación
+# Estado de validación
 
-Aquí vive toda la evidencia de que el software funciona (instalación, ventanas, regresión) y de que sus resultados se parecen a la realidad (campo). Son cosas distintas: lo primero se puede automatizar; lo segundo exige mediciones.
-
-## Qué está acreditado y qué no
+La revisión vigente es **v35.6-etapa4.3.5**: 627 pruebas y autocomprobaciones de fuente y copia de compilación aprobadas en Linux. La bienvenida, el tema del escritorio, los paneles laterales y el empaquetado todavía deben comprobarse visualmente en Windows. La tabla de abajo conserva el estado de cierre de la etapa4.3.1 y su antecedente.
 
 | Aspecto | Estado | Evidencia |
 |---|---|---|
-| Instalación y cálculos en Windows | Aprobado (Windows 10 build 19045, Python 3.12.10, etapa 4.3) | `windows/2026-10-25_etapa4.3/autocomprobacion_windows.json` |
-| Componentes Tk, editor de fotos, Matplotlib 3D y VTK en Windows | Aprobado (automático) | `windows/2026-10-25_etapa4.3/escritorio_windows.json` |
-| Recorrido manual de la aplicación completa en Windows | **Pendiente** | `windows/2026-10-25_etapa4.3/recorrido_manual.md` |
-| Regresión sin pantalla (Linux) | 615 pruebas aprobadas según `docs/VALIDACION_ACTUAL.md` (no re-ejecutadas aquí) | `qa_linux/etapa4.3/` |
-| Fotografías reales anotadas | **Pendiente** (el banco actual es sintético) | `fotos/` |
-| Validación de campo (Tmrt, aire local, superficie) | **Pendiente** | `campo/campanias/` |
+| Regresión y autocomprobación etapa4.3.1 | Aprobadas en Linux | `qa_linux/etapa4.3.1/` |
+| Autocomprobación Windows y componentes Tk/VTK etapa4.3 | Aprobadas para esa versión | `windows/2026-10-25_etapa4.3/` |
+| Recorrido Windows etapa4.3.1 | Pendiente | [Planilla de recorrido](windows/recorrido_cierre.md) |
+| Ejecutable e instalador etapa4.3.1 | Perfil disponible; binarios pendientes de generación y prueba en Windows | [Guía de compilación](../COMPILAR_WINDOWS.md) |
+| Fotografías reales anotadas | Pendiente | `fotos/manifest.plantilla.json` |
+| Campaña térmica instrumental | Pendiente | [Plan de campo](../docs/VALIDACION_CAMPO.md) y `campo/plantillas/` |
 
-Los dos JSON de Windows declaran `human_visual_review: false`, `full_app_workflow_tested: false` y `field_validation: false`: un `passed` acredita esos componentes, no la revisión visual de toda la aplicación ni la exactitud científica.
-
-## Carpetas
-
-- `estado_actual.json`: estado vigente en formato máquina. Se actualiza en cada entrega.
-- `windows/<AAAA-MM-DD>_<etapa>/`: los dos JSON de `tools/check_installation.py` y `tools/check_desktop.py` más el recorrido manual completado.
-- `qa_linux/<etapa>/`: regresión, `pip check` y evidencia sin pantalla.
-- `campo/plantillas/`: CSV de mediciones, instrumentos y meteorología observada.
-- `campo/campanias/`: una carpeta por campaña (ver su README).
-- `fotos/`: manifiesto de fotografías reales anotadas (`tools/evaluate_shadows.py --require-real`).
-
-## Comandos
-
-```bat
-.venv\Scripts\python tools\check_installation.py --require-full --report autocomprobacion_windows.json
-.venv\Scripts\python tools\check_desktop.py --vtk --require-windows --report escritorio_windows.json
-.venv\Scripts\python tools\validate_field_campaign.py validacion\campo\campanias\<campania>\mediciones.csv --report validacion\campo\campanias\<campania>\informe.json
-```
-
-Después de cada comprobación en Windows, mueva los JSON a `windows/<fecha>_<etapa>/`.
+`estado_actual.json` contiene el estado de esta versión. Los archivos de la 4.3 y anteriores son antecedentes; no prueban la aprobación del recorrido completo ni del instalador actual. Registrá los informes nuevos con fecha, versión y equipo, sin sobrescribir los históricos.

@@ -1,3 +1,4 @@
+from ui.theme import FONT, PALETA
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk
@@ -7,6 +8,7 @@ from add_user_window import AddUserWindow
 from modify_user_window import ModifyUserWindow
 from ui.modal_style import ask_password_pair
 from ui.auth_flow import authenticate_with_required_change
+from ui.login_screen import LoginScreen
 from core.auth_policy import MIN_PASSWORD_LENGTH
 
 class MainApp:
@@ -20,79 +22,17 @@ class MainApp:
         self.current_session_id = None
         self.workspace_root = None
         self._session_closed = True
-        self.root.title("Login")
-        self.root.configure(bg="#f3f4f6")
-        self.center_window(480, 380)
+        self.root.title("Proyecto Sombra · Iniciar sesión")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
-
-        container = tk.Frame(root, bg="#f3f4f6", padx=20, pady=20)
-        container.grid(row=0, column=0, sticky="nsew")
-        container.grid_rowconfigure(0, weight=1)
-        container.grid_columnconfigure(0, weight=1)
-
-        card = tk.Frame(container, bg="white", bd=1, relief="solid", padx=24, pady=22)
-        card.grid(row=0, column=0)
-        card.grid_columnconfigure(0, weight=1)
-
-        header = tk.Label(
-            card,
-            text="Bienvenido",
-            font=("Helvetica", 16, "bold"),
-            bg="white",
-            fg="#1f2937",
-        )
-        header.grid(row=0, column=0, pady=(0, 12))
-
-        tk.Label(
-            card,
-            text="Usuario",
-            font=("Helvetica", 11),
-            bg="white",
-            fg="#4b5563",
-        ).grid(row=1, column=0, pady=(0, 5))
-        self.username_entry = tk.Entry(
-            card,
-            width=28,
-            relief="flat",
-            highlightbackground="#d1d5db",
-            highlightthickness=1,
-            bd=0,
-        )
-        self.username_entry.grid(row=2, column=0, pady=(0, 12), ipady=6, sticky="ew")
-
-        tk.Label(
-            card,
-            text="Contraseña",
-            font=("Helvetica", 11),
-            bg="white",
-            fg="#4b5563",
-        ).grid(row=3, column=0, pady=(0, 5))
-        self.password_entry = tk.Entry(
-            card,
-            show="*",
-            width=28,
-            relief="flat",
-            highlightbackground="#d1d5db",
-            highlightthickness=1,
-            bd=0,
-        )
-        self.password_entry.grid(row=4, column=0, pady=(0, 14), ipady=6, sticky="ew")
-
-        login_btn = tk.Button(
-            card,
-            text="Ingresar",
-            command=self.login,
-            bg="#2563eb",
-            fg="white",
-            activebackground="#1d4ed8",
-            relief="flat",
-            padx=14,
-            pady=8,
-            cursor="hand2",
-        )
-        login_btn.grid(row=5, column=0, sticky="ew", pady=(0, 8)) 
+        self.center_window(min(640, root.winfo_screenwidth()-36),
+                           min(660, root.winfo_screenheight()-70))
+        self.root.attributes("-fullscreen", True)
+        self.login_screen = LoginScreen(self.root, self.login, self.on_close)
+        self.login_screen.grid(row=0, column=0, sticky="nsew")
+        self.username_entry = self.login_screen.username_entry
+        self.password_entry = self.login_screen.password_entry
 
     def _end_current_session(self):
         """Cierra de forma idempotente la sesión autenticada actual."""
@@ -170,60 +110,25 @@ class MainApp:
         self.exit_fullscreen()
         for widget in self.root.winfo_children():
             widget.destroy()
-        container = tk.Frame(self.root, bg="#f3f4f6", padx=20, pady=20)
+        container = tk.Frame(self.root, bg=PALETA["background"], padx=20, pady=20)
         container.grid(row=0, column=0, sticky="nsew")
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
         self.center_window(520, 470)
-        card = tk.Frame(container, bg="white", bd=1, relief="solid", padx=24, pady=22)
+        card = tk.Frame(container, bg=PALETA["panel"], highlightthickness=1, highlightbackground=PALETA["border"], padx=24, pady=22)
         card.grid(row=0, column=0)
         card.grid_columnconfigure(0, weight=1)
 
-        tk.Label(
-            card,
-            text="Menú de administrador",
-            font=("Helvetica", 16, "bold"),
-            bg="white",
-            fg="#1f2937",
-        ).grid(row=0, column=0, pady=(0, 16), sticky="ew")
-
-        tk.Button(
-            card,
-            text="Gestión de Usuarios",
-            command=self.open_user_management,
-            bg="#2563eb",
-            fg="white",
-            activebackground="#1d4ed8",
-            relief="flat",
-            padx=14,
-            pady=10,
-            cursor="hand2",
-        ).grid(row=1, column=0, pady=(0, 10), sticky="ew")
-        tk.Button(
-            card,
-            text="Historial de sesiones",
-            command=self.open_session_history,
-            bg="#e0f2fe",
-            fg="#0f172a",
-            activebackground="#bae6fd",
-            relief="flat",
-            padx=14,
-            pady=10,
-            cursor="hand2",
-        ).grid(row=2, column=0, pady=(0, 10), sticky="ew")
-
-        tk.Button(
-            card,
-            text="Acceso al Software",
-            command=self.open_main_app,
-            bg="#fef9c3",
-            fg="#111827",
-            activebackground="#fef08a",
-            relief="flat",
-            padx=14,
-            pady=10,
-            cursor="hand2",
-        ).grid(row=3, column=0, sticky="ew")
+        ttk.Label(card, text="Menú de administrador", style="Heading.TLabel").grid(
+            row=0, column=0, sticky="w")
+        ttk.Label(card, text="Proyecto Sombra · 3Esfera", style="Muted.TLabel").grid(
+            row=1, column=0, sticky="w", pady=(4, 18))
+        ttk.Button(card, text="Abrir Proyecto Sombra", command=self.open_main_app,
+                   style="WelcomePrimary.TButton").grid(row=2, column=0, pady=(0, 8), sticky="ew")
+        ttk.Button(card, text="Gestionar usuarios", command=self.open_user_management).grid(
+            row=3, column=0, pady=(0, 8), sticky="ew")
+        ttk.Button(card, text="Historial de sesiones", command=self.open_session_history).grid(
+            row=4, column=0, sticky="ew")
 
     def open_main_app(self):
         root_2 = tk.Toplevel(self.root)
@@ -259,28 +164,28 @@ class MainApp:
         self.root.attributes("-fullscreen", True)
         self.db_manager.touch_session(self.current_session_id)
 
-        container = tk.Frame(self.root, bg="#f3f4f6", padx=18, pady=18)
+        container = tk.Frame(self.root, bg=PALETA["background"], padx=18, pady=18)
         container.grid(row=0, column=0, sticky="nsew")
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
-        card = tk.Frame(container, bg="white", bd=1, relief="solid", padx=18, pady=18)
+        card = tk.Frame(container, bg=PALETA["panel"], highlightthickness=1, highlightbackground=PALETA["border"], padx=18, pady=18)
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_rowconfigure(2, weight=1)
         card.grid_columnconfigure(0, weight=1)
 
         tk.Label(
-            card, text="Historial de sesiones", font=("Helvetica", 16, "bold"),
-            bg="white", fg="#1f2937"
+            card, text="Historial de sesiones", font=(FONT, 16, "bold"),
+            bg=PALETA["panel"], fg=PALETA["texto"]
         ).grid(row=0, column=0, sticky="w")
         tk.Label(
             card,
             text="Cada fila corresponde a un período de trabajo en un proyecto. "
                  "Las sesiones sin proyecto también quedan registradas.",
-            font=("Helvetica", 10), bg="white", fg="#6b7280",
+            font=(FONT, 10), bg=PALETA["panel"], fg=PALETA["texto_suave"],
         ).grid(row=1, column=0, sticky="w", pady=(4, 12))
 
-        table_frame = tk.Frame(card, bg="white")
+        table_frame = tk.Frame(card, bg=PALETA["panel"])
         table_frame.grid(row=2, column=0, sticky="nsew")
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
@@ -335,16 +240,16 @@ class MainApp:
                 project_root or "—",
             ))
 
-        footer = tk.Frame(card, bg="white")
+        footer = tk.Frame(card, bg=PALETA["panel"])
         footer.grid(row=3, column=0, sticky="ew", pady=(12, 0))
         tk.Button(
             footer, text="Volver", command=self.back_to_admin,
-            bg="#fef9c3", fg="#111827", relief="flat", padx=18, pady=9,
+            bg=PALETA["accent"], fg=PALETA["texto"], relief="flat", padx=18, pady=9,
             cursor="hand2",
         ).pack(side="left")
         tk.Button(
             footer, text="Borrar historial", command=self.clear_session_history,
-            bg="#fee2e2", fg="#991b1b", relief="flat", padx=18, pady=9,
+            bg=PALETA["peligro_bg"], fg=PALETA["peligro"], relief="flat", padx=18, pady=9,
             cursor="hand2",
         ).pack(side="right")
 
@@ -387,38 +292,38 @@ class MainApp:
         self.root.attributes("-fullscreen", True)
         self.db_manager.touch_session(self.current_session_id)
 
-        container = tk.Frame(self.root, bg="#f3f4f6", padx=18, pady=18)
+        container = tk.Frame(self.root, bg=PALETA["background"], padx=18, pady=18)
         container.grid(row=0, column=0, sticky="nsew")
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
-        card = tk.Frame(container, bg="white", bd=1, relief="solid", padx=18, pady=18)
+        card = tk.Frame(container, bg=PALETA["panel"], highlightthickness=1, highlightbackground=PALETA["border"], padx=18, pady=18)
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_rowconfigure(3, weight=1)
         card.grid_columnconfigure(0, weight=1)
 
-        title_row = tk.Frame(card, bg="white")
+        title_row = tk.Frame(card, bg=PALETA["panel"])
         title_row.grid(row=0, column=0, sticky="ew")
         title_row.grid_columnconfigure(0, weight=1)
         tk.Label(
             title_row, text="Gestión de Usuarios",
-            font=("Helvetica", 16, "bold"), bg="white", fg="#1f2937",
+            font=(FONT, 16, "bold"), bg=PALETA["panel"], fg=PALETA["texto"],
         ).grid(row=0, column=0, sticky="w")
         tk.Label(
             title_row,
             text="Las credenciales sensibles no se muestran en esta pantalla.",
-            font=("Helvetica", 9), bg="white", fg="#6b7280",
+            font=(FONT, 9), bg=PALETA["panel"], fg=PALETA["texto_suave"],
         ).grid(row=1, column=0, sticky="w", pady=(3, 0))
 
-        filters = tk.Frame(card, bg="white")
+        filters = tk.Frame(card, bg=PALETA["panel"])
         filters.grid(row=1, column=0, sticky="ew", pady=(14, 10))
         filters.grid_columnconfigure(1, weight=1)
-        tk.Label(filters, text="Buscar", bg="white", fg="#4b5563").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        tk.Label(filters, text="Buscar", bg=PALETA["panel"], fg=PALETA["texto_suave"]).grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.user_search_var = tk.StringVar()
         search_entry = tk.Entry(filters, textvariable=self.user_search_var, relief="solid", bd=1)
         search_entry.grid(row=0, column=1, sticky="ew", ipady=5, padx=(0, 12))
 
-        tk.Label(filters, text="Rol", bg="white", fg="#4b5563").grid(row=0, column=2, sticky="w", padx=(0, 6))
+        tk.Label(filters, text="Rol", bg=PALETA["panel"], fg=PALETA["texto_suave"]).grid(row=0, column=2, sticky="w", padx=(0, 6))
         self.user_role_filter = tk.StringVar(value="Todos")
         role_combo = ttk.Combobox(
             filters, textvariable=self.user_role_filter,
@@ -426,7 +331,7 @@ class MainApp:
         )
         role_combo.grid(row=0, column=3, padx=(0, 12))
 
-        tk.Label(filters, text="Estado", bg="white", fg="#4b5563").grid(row=0, column=4, sticky="w", padx=(0, 6))
+        tk.Label(filters, text="Estado", bg=PALETA["panel"], fg=PALETA["texto_suave"]).grid(row=0, column=4, sticky="w", padx=(0, 6))
         self.user_status_filter = tk.StringVar(value="Todos")
         status_combo = ttk.Combobox(
             filters, textvariable=self.user_status_filter,
@@ -436,11 +341,11 @@ class MainApp:
 
         info = tk.Label(
             card, text="Seleccioná una fila para editar, cambiar estado, restablecer contraseña o eliminar.",
-            font=("Helvetica", 9), bg="white", fg="#6b7280",
+            font=(FONT, 9), bg=PALETA["panel"], fg=PALETA["texto_suave"],
         )
         info.grid(row=2, column=0, sticky="w", pady=(0, 8))
 
-        table_frame = tk.Frame(card, bg="white")
+        table_frame = tk.Frame(card, bg=PALETA["panel"])
         table_frame.grid(row=3, column=0, sticky="nsew")
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
@@ -469,34 +374,33 @@ class MainApp:
         xscroll.grid(row=1, column=0, sticky="ew")
         self.user_tree.bind("<Double-1>", lambda _e: self.modify_user())
 
-        actions = tk.Frame(card, bg="white")
+        actions = tk.Frame(card, bg=PALETA["panel"])
         actions.grid(row=4, column=0, sticky="ew", pady=(12, 0))
         for c in range(5):
             actions.grid_columnconfigure(c, weight=1, uniform="user_actions")
 
         buttons = [
-            ("Nuevo usuario", self.add_user, "#2563eb", "white"),
-            ("Editar", self.modify_user, "#fef9c3", "#111827"),
-            ("Restablecer contraseña", self.reset_user_password, "#e0f2fe", "#0f172a"),
-            ("Activar / Desactivar", self.toggle_user_active, "#e5e7eb", "#111827"),
-            ("Eliminar", self.delete_user, "#ef4444", "white"),
+            ("Nuevo usuario", self.add_user, "Primary.TButton"),
+            ("Editar", self.modify_user, "TButton"),
+            ("Restablecer contraseña", self.reset_user_password, "TButton"),
+            ("Activar / Desactivar", self.toggle_user_active, "TButton"),
+            ("Eliminar", self.delete_user, "Danger.TButton"),
         ]
-        for idx, (text, command, bg, fg) in enumerate(buttons):
-            tk.Button(
-                actions, text=text, command=command, bg=bg, fg=fg,
-                relief="flat", padx=8, pady=8, cursor="hand2",
-            ).grid(row=0, column=idx, padx=4, sticky="ew")
+        for idx, (text, command, style) in enumerate(buttons):
+            ttk.Button(actions, text=text, command=command, style=style).grid(
+                row=0, column=idx, padx=4, sticky="ew")
 
-        footer = tk.Frame(card, bg="white")
+        footer = tk.Frame(card, bg=PALETA["panel"])
         footer.grid(row=5, column=0, sticky="ew", pady=(14, 0))
         tk.Button(
             footer, text="Volver", command=self.back_to_admin,
-            bg="#fef9c3", fg="#111827", relief="flat", padx=18, pady=9,
+            bg=PALETA["accent"], fg=PALETA["texto"], relief="flat", padx=18, pady=9,
             cursor="hand2",
         ).pack(side="left")
         tk.Button(
             footer, text="Salir", command=self.exit_program,
-            bg="#ef4444", fg="white", relief="flat", padx=18, pady=9,
+            bg=PALETA["peligro"], fg="white", activebackground=PALETA["peligro_hover"],
+            activeforeground="white", relief="flat", padx=18, pady=9,
             cursor="hand2",
         ).pack(side="right")
 

@@ -1,26 +1,7 @@
-"""Construcción de la barra de menús y atajos.
-
-CORRECCIÓN: open_panel() indexa directo en self.panel_frames (4
-elementos, índices 0-3) — los ítems de este menú usaban 1-4, lo que
-hacía que "Panel 4 (Modelo)" quedara fuera de rango (IndexError) y que
-"Panel 1/2/3" abrieran cada uno el panel siguiente al que decía la
-etiqueta. Un "fix" anterior en esta misma sección había cambiado
-"Panel 4" de open_panel(3) a open_panel(4) pensando que era un
-copy-paste — en realidad open_panel(3) ERA el valor correcto (0-based),
-lo que estaba mal era el texto del label, no el índice. Corregido acá
-de raíz, junto con Panel 1/2/3.
-
-Los enlaces de "Manual de usuario" y "Guía rápida" siguen apuntando a
-`https://www.example.com` — quedan como constantes al inicio del
-archivo para que sea evidente dónde reemplazarlos por las URLs reales
-en cuanto existan.
-"""
+"""Menús y atajos del escritorio de Proyecto Sombra."""
 from __future__ import annotations
 
 import tkinter as tk
-
-URL_MANUAL_USUARIO = "https://www.example.com"  # TODO: reemplazar por la URL real
-URL_GUIA_RAPIDA = "https://www.example.com"      # TODO: reemplazar por la URL real
 
 
 class MenuBar:
@@ -28,6 +9,21 @@ class MenuBar:
 
     def __init__(self, app):
         self.app = app
+        self._project_enabled = False
+
+    def set_project_enabled(self, enabled: bool) -> None:
+        self._project_enabled = enabled
+        state = tk.NORMAL if enabled else tk.DISABLED
+        for menu, labels in self._project_entries:
+            for label in labels:
+                menu.entryconfigure(label, state=state)
+
+    def _shortcut(self, callback, *, requires_project=False):
+        def handler(_event):
+            if not requires_project or self._project_enabled:
+                callback()
+            return "break"
+        return handler
 
     def setup(self) -> None:
         """Crea menús y registra atajos de teclado."""
@@ -69,15 +65,15 @@ class MenuBar:
 
         escena_menu = tk.Menu(menu_bar, tearoff=0)
         paneles_menu = tk.Menu(escena_menu, tearoff=0)
-        paneles_menu.add_command(label="Abrir Panel 1", command=lambda: self.app.open_panel(0))
-        paneles_menu.add_command(label="Abrir Panel 2", command=lambda: self.app.open_panel(1))
-        paneles_menu.add_command(label="Abrir Panel 3 (Modo diseño)", command=lambda: self.app.open_panel(2))
-        paneles_menu.add_command(label="Abrir Panel 4 (Modelo)", command=lambda: self.app.open_panel(3))
+        paneles_menu.add_command(label="Temperatura", command=lambda: self.app.open_panel(0))
+        paneles_menu.add_command(label="Sombra", command=lambda: self.app.open_panel(1))
+        paneles_menu.add_command(label="Edición de escena", command=lambda: self.app.open_panel(2))
+        paneles_menu.add_command(label="Modelo", command=lambda: self.app.open_panel(3))
         escena_menu.add_cascade(label="Paneles", menu=paneles_menu)
         escena_menu.add_separator()
-        escena_menu.add_command(label="Mostrar frames Panel 2", command=self.app.show_panel2_frames)
-        escena_menu.add_command(label="Mostrar frames Diseño", command=self.app.show_diseno_frames)
-        escena_menu.add_command(label="Mostrar frames Modelo", command=self.app.show_modelo_frames)
+        escena_menu.add_command(label="Vista de sombra y resultados", command=self.app.show_panel2_frames)
+        escena_menu.add_command(label="Vista de edición", command=self.app.show_diseno_frames)
+        escena_menu.add_command(label="Vista del modelo", command=self.app.show_modelo_frames)
         menu_bar.add_cascade(label="Escena", menu=escena_menu)
 
         modelo_menu = tk.Menu(menu_bar, tearoff=0)
@@ -156,25 +152,37 @@ class MenuBar:
         ayuda_menu = tk.Menu(menu_bar, tearoff=0)
         ayuda_menu.add_command(
             label="Manual de usuario",
-            command=lambda: self.app._open_link("manual", URL_MANUAL_USUARIO),
+            command=self.app.open_user_help,
         )
         ayuda_menu.add_command(
             label="Guía rápida",
-            command=lambda: self.app._open_link("guia", URL_GUIA_RAPIDA),
+            command=lambda: self.app.open_user_help(quick=True),
         )
         ayuda_menu.add_command(label="Acerca de…", command=self.app.show_about)
         menu_bar.add_cascade(label="Ayuda", menu=ayuda_menu)
 
         self.app.root.config(menu=menu_bar)
 
-        # Atajos globales
-        self.app.root.bind_all("<Control-n>", lambda _e: (self.app.new_project(), "break")[1])
-        self.app.root.bind_all("<Control-o>", lambda _e: (self.app.open_project(), "break")[1])
-        self.app.root.bind_all("<Control-s>", lambda _e: (self.app.save_project(), "break")[1])
-        self.app.root.bind_all("<Control-Shift-S>", lambda _e: (self.app.save_project_as(), "break")[1])
-        self.app.root.bind_all("<Control-e>", lambda _e: (self.app.exportar_a_excel(), "break")[1])
-        self.app.root.bind_all("<Control-p>", lambda _e: (self.app.exportar_a_pdf(), "break")[1])
-        self.app.root.bind_all("<Control-q>", lambda _e: (self.app.exit_app(), "break")[1])
-        self.app.root.bind_all("<F5>", lambda _e: (self.app.run_model_for_active_panel(), "break")[1])
-        self.app.root.bind_all("<Control-F5>", lambda _e: (self.app.generar_grafico_modelo(), "break")[1])
-        self.app.root.bind_all("<Control-Shift-P>", lambda _e: (self.app.generar_informe_completo(), "break")[1])
+        self._project_entries = (
+            (menu_bar, ("Escena", "Modelo", "Análisis")),
+            (archivo_menu, ("Guardar respaldo", "Guardar como…", "Duplicar proyecto…",
+                            "Exportar .3es…", "Exportar…")),
+            (importar_menu, ("Importar imagen base…", "Importar serie meteorológica CSV…")),
+            (edicion_menu, ("Deshacer", "Rehacer")),
+        )
+        self.set_project_enabled(False)
+
+        # Los atajos pertenecen al escritorio, no a los diálogos ni al acceso.
+        for key, callback, needs_project in (
+            ("<Control-n>", self.app.new_project, False),
+            ("<Control-o>", self.app.open_project, False),
+            ("<Control-q>", self.app.exit_app, False),
+            ("<Control-s>", self.app.save_project, True),
+            ("<Control-Shift-S>", self.app.save_project_as, True),
+            ("<Control-e>", self.app.exportar_a_excel, True),
+            ("<Control-p>", self.app.exportar_a_pdf, True),
+            ("<F5>", self.app.run_model_for_active_panel, True),
+            ("<Control-F5>", self.app.generar_grafico_modelo, True),
+            ("<Control-Shift-P>", self.app.generar_informe_completo, True),
+        ):
+            self.app.root.bind(key, self._shortcut(callback, requires_project=needs_project))

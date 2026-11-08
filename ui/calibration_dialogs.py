@@ -1,5 +1,6 @@
 """Componentes de interfaz de Proyecto Sombra."""
 from __future__ import annotations
+from ui.theme import PALETA
 from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox
@@ -59,11 +60,11 @@ class CalibrationDialogsMixin:
         cuerpo.grid_rowconfigure(fila, weight=1)
         fila += 1
 
-        error_lbl = tk.Label(cuerpo, text="", fg="red", justify="left", anchor="w")
+        error_lbl = tk.Label(cuerpo, text="", fg=PALETA["peligro"], justify="left", anchor="w")
         error_lbl.grid(row=fila, column=0, columnspan=2, sticky="ew")
         fila += 1
 
-        resultado = tk.Label(cuerpo, text="", justify="left", anchor="w", fg="#1565C0")
+        resultado = tk.Label(cuerpo, text="", justify="left", anchor="w", fg=PALETA["primario"])
         resultado.grid(row=fila, column=0, columnspan=2, sticky="ew", pady=4)
         fila += 1
 

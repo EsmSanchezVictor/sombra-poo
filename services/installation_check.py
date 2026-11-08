@@ -47,9 +47,12 @@ def run_installation_check(*, require_full=False):
         for name in ("fiebre", "sombra", "config", "vista-3d"):
             with Image.open(resource_path(f"test/imagen/{name} (3).png")) as image:
                 image.verify()
+        for name in ("proyecto.png", "marca.png", "protada.png"):
+            with Image.open(resource_path(f"assest/{name}")) as image:
+                image.verify()
         if not resource_path("data/locations_latam.csv").is_file():
             raise ValueError("Falta el catálogo de ubicaciones.")
-        return "Cuatro iconos y ubicaciones disponibles independientemente del directorio de inicio."
+        return "Iconos, ubicaciones y tres PNG de arranque disponibles desde cualquier directorio."
     check("resources", resources)
 
     def science():

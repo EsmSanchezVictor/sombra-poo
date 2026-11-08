@@ -1,3 +1,4 @@
+from ui.theme import FONT, PALETA
 import re
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -14,18 +15,18 @@ class AddUserWindow:
         self.window = tk.Toplevel(root)
         prepare_dialog(self.window, root, modal=True, resizable=False, minsize=(520, 620))
         self.window.title("Nuevo usuario")
-        self.window.configure(bg="#ffffff")
+        self.window.configure(bg=PALETA["background"])
         self.window.transient(root)
         self.window.grab_set()
         self.window.resizable(False, False)
 
-        outer = tk.Frame(self.window, bg="#ffffff", padx=18, pady=18)
+        outer = tk.Frame(self.window, bg=PALETA["background"], padx=18, pady=18)
         outer.grid(row=0, column=0, sticky="nsew")
-        card = tk.Frame(outer, bg="white", bd=1, relief="solid", padx=20, pady=18)
+        card = tk.Frame(outer, bg=PALETA["panel"], highlightthickness=1, highlightbackground=PALETA["border"], padx=20, pady=18)
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_columnconfigure(1, weight=1)
 
-        tk.Label(card, text="Nuevo usuario", font=("Segoe UI", 13, "bold"), bg="white", fg="#1f2937").grid(
+        tk.Label(card, text="Nuevo usuario", font=("Segoe UI", 13, "bold"), bg=PALETA["panel"], fg=PALETA["texto"]).grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 14)
         )
 
@@ -47,7 +48,7 @@ class AddUserWindow:
         row = self._entry(card, row, "Usuario", self.username)
         row = self._entry(card, row, "Contraseña", self.password, show="*")
         row = self._entry(card, row, "Repetir contraseña", self.password2, show="*")
-        tk.Label(card, text="Rol", bg="white", fg="#4b5563").grid(row=row, column=0, sticky="w", padx=(0, 12), pady=5)
+        tk.Label(card, text="Rol", bg=PALETA["panel"], fg=PALETA["texto_suave"]).grid(row=row, column=0, sticky="w", padx=(0, 12), pady=5)
         ttk.Combobox(card, textvariable=self.role, values=("Usuario", "Administrador"), state="readonly", width=28).grid(
             row=row, column=1, sticky="ew", pady=5
         )
@@ -65,7 +66,7 @@ class AddUserWindow:
         row = self._entry(card, row, "Número", self.number)
         row = self._entry(card, row, "Ciudad", self.city)
 
-        buttons = tk.Frame(card, bg="white")
+        buttons = tk.Frame(card, bg=PALETA["panel"])
         buttons.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(16, 0))
         buttons.grid_columnconfigure((0, 1), weight=1, uniform="b")
         ttk.Button(buttons, text="Cancelar", command=self.window.destroy).grid(
@@ -81,14 +82,14 @@ class AddUserWindow:
 
     @staticmethod
     def _section(parent, row, text):
-        tk.Label(parent, text=text, font=("Helvetica", 10, "bold"), bg="white", fg="#1f2937").grid(
+        tk.Label(parent, text=text, font=(FONT, 10, "bold"), bg=PALETA["panel"], fg=PALETA["texto"]).grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(10 if row > 1 else 0, 4)
         )
         return row + 1
 
     @staticmethod
     def _entry(parent, row, label, variable, show=None):
-        tk.Label(parent, text=label, bg="white", fg="#4b5563").grid(
+        tk.Label(parent, text=label, bg=PALETA["panel"], fg=PALETA["texto_suave"]).grid(
             row=row, column=0, sticky="w", padx=(0, 12), pady=5
         )
         tk.Entry(parent, textvariable=variable, show=show or "", relief="solid", bd=1, width=30).grid(

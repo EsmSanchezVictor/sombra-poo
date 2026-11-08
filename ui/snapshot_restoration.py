@@ -1,4 +1,5 @@
 """Restauración del proyecto y del carrusel, separada del montaje de la ventana."""
+from ui.photo_workflow import refresh_photo_workflow
 import os
 import tkinter as tk
 import numpy as np
@@ -357,6 +358,7 @@ class SnapshotRestorationMixin:
         self.curve_button.config(state=tk.NORMAL if self.area_calculo_done else tk.DISABLED)
         if hasattr(self,'photo_exclusion_button'):
             self.photo_exclusion_button.config(state=tk.NORMAL if entry.get('complete') else tk.DISABLED)
+        refresh_photo_workflow(self)
         self._carrusel_marcar(index)
 
 

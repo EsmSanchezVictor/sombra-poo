@@ -1,5 +1,7 @@
 # Comprobación de escritorio en Windows
 
+Para registrar la aceptación de v35.6-etapa4.3.1, usá [el recorrido de cierre](../validacion/windows/recorrido_cierre.md). La evidencia de la 4.3 se mantiene como antecedente.
+
 Este procedimiento completa evidencia que las pruebas Linux sin pantalla no producen. No requiere instalar una versión compilada y no modifica cuentas ni proyectos reales. Use Python 3.12 con el entorno de la aplicación.
 
 ```bat

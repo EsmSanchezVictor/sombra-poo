@@ -300,11 +300,6 @@ class AppState:
         self.app.last_validation_summary = payload.get("validation_summary") if isinstance(payload.get("validation_summary"), dict) else None
         self.app.last_scientific_audit = payload.get("scientific_audit") if isinstance(payload.get("scientific_audit"), dict) else None
         
-        target_panel = ui.get("active_panel")
-        if isinstance(target_panel, int) and 0 <= target_panel < len(self.app.panel_frames):
-            self.app.open_panel(target_panel)
-        
-
         saved_at = payload.get("meta", {}).get("saved_at")
         self.app.update_status_saved_time(saved_at)
         if project is not None:project._minimum_state_schema=payload.get('state_schema_version',2)
@@ -317,6 +312,10 @@ class AppState:
             restore=getattr(self.app,'restore_pending_photo_exclusions',None)
             if not callable(restore):raise ValueError('La interfaz no admite exclusiones de esta versión.')
             restore(exclusion_state)
+
+        target_panel = ui.get("active_panel")
+        if isinstance(target_panel, int) and 0 <= target_panel < len(self.app.panel_frames):
+            self.app.open_panel(target_panel)
 
     def _serialize_vars(self, vars_dict: dict) -> dict:
         data = {}

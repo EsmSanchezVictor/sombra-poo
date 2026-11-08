@@ -1,3 +1,4 @@
+from ui.photo_workflow import refresh_photo_workflow
 import numpy as np
 import cv2
 from matplotlib.patches import Rectangle, Circle, Polygon
@@ -157,6 +158,7 @@ class ShapeSelector:
                 
                 if self.app.area_calculo_done and self.app.area_referencia_done:
                     self.app.confirm_button.config(state='normal')
+                refresh_photo_workflow(self.app)
                 
             except Exception as e:
                 print(f"Error al procesar selección: {str(e)}")
@@ -247,6 +249,7 @@ class ShapeSelector:
         
         if self.app.area_calculo_done and self.app.area_referencia_done:
             self.app.confirm_button.config(state='normal')
+        refresh_photo_workflow(self.app)
         
         # Resetear puntos para nueva selección
         self.polygon_points = []
@@ -403,6 +406,7 @@ class ShapeSelector:
     def enable_calculo_button(self):
         self.app.area_calc_button.config(state='normal')
         self.app.save_dataset_button.config(state='normal')
+        refresh_photo_workflow(self.app)
 
     def select_area_calculo(self):
         self.app.selection_mode = "calc"

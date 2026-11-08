@@ -18,6 +18,7 @@ from core.excel_scene import save_scene_excel, load_scene_excel, apply_parameter
 from ui.scene3d import render_scene_3d
 from ui.solar_indicator import add_solar_indicator_2d
 from ui.modal_style import prepare_dialog, center_dialog, dialog_header
+from ui.theme import PALETA
 
 # Constantes físicas
 sigma = 5.67e-8  # Constante de Stefan-Boltzmann
@@ -267,8 +268,7 @@ def mostrar_dialogo_arbol(x, y, app):
             app.vars['arboles'].append(nuevo_arbol)
             if hasattr(app, "mark_dirty"):
                 app.mark_dirty()
-            target_frame = getattr(app, "frame7", app.frame2)
-            actualizar_grafico(app.vars, target_frame)
+            _redibujar_escena(app.vars, app)
             cerrar_dialogo()
         except ValueError as exc:
             if str(exc) == "densidad":
@@ -282,7 +282,7 @@ def mostrar_dialogo_arbol(x, y, app):
     acciones = ttk.Frame(cont)
     acciones.grid(row=2, column=0, sticky="e", pady=(16, 0))
     ttk.Button(acciones, text="Cancelar", command=cerrar_dialogo).pack(side="left", padx=(0, 8))
-    ttk.Button(acciones, text="Guardar árbol", command=guardar).pack(side="left")
+    ttk.Button(acciones, text="Guardar árbol", command=guardar, style="DialogPrimary.TButton").pack(side="left")
 
     dialogo.bind("<Return>", lambda _e: guardar())
     combo_especie.focus_set()
@@ -347,8 +347,7 @@ def mostrar_dialogo_estructura(x1, y1, x2, y2, app):
             app.vars['estructuras'].append(nueva_estructura)
             if hasattr(app, "mark_dirty"):
                 app.mark_dirty()
-            target_frame = getattr(app, "frame7", app.frame2)
-            actualizar_grafico(app.vars, target_frame)
+            _redibujar_escena(app.vars, app)
             cerrar_dialogo()
         except ValueError as exc:
             if str(exc) == "opacidad":
@@ -362,7 +361,7 @@ def mostrar_dialogo_estructura(x1, y1, x2, y2, app):
     acciones = ttk.Frame(cont)
     acciones.grid(row=2, column=0, sticky="e", pady=(16, 0))
     ttk.Button(acciones, text="Cancelar", command=cerrar_dialogo).pack(side="left", padx=(0, 8))
-    ttk.Button(acciones, text="Guardar estructura", command=guardar).pack(side="left")
+    ttk.Button(acciones, text="Guardar estructura", command=guardar, style="DialogPrimary.TButton").pack(side="left")
 
     dialogo.bind("<Return>", lambda _e: guardar())
     tipo.focus_set()
@@ -494,8 +493,7 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
                 estructura.material = entries["Material:"].get()
 
             if app is not None:
-                target_frame = getattr(app, "frame7", app.frame2)
-                actualizar_grafico(vars, target_frame)
+                _redibujar_escena(vars, app)
                 if hasattr(app, "mark_dirty"):
                     app.mark_dirty()
             cerrar_dialogo()
@@ -517,15 +515,14 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
         else:
             vars["estructuras"].remove(obj)
         if app is not None:
-            target_frame = getattr(app, "frame7", app.frame2)
-            actualizar_grafico(vars, target_frame)
+            _redibujar_escena(vars, app)
             if hasattr(app, "mark_dirty"):
                 app.mark_dirty()
         cerrar_dialogo()
 
     acciones = ttk.Frame(cont)
     acciones.grid(row=2, column=0, sticky="ew", pady=(16, 0))
-    ttk.Button(acciones, text="Eliminar", command=eliminar).pack(side="left")
+    ttk.Button(acciones, text="Eliminar", command=eliminar, style="Danger.TButton").pack(side="left")
     ttk.Button(acciones, text="Cancelar", command=cerrar_dialogo).pack(side="right", padx=(8, 0))
     ttk.Button(acciones, text="Guardar cambios", command=guardar, style="DialogPrimary.TButton").pack(side="right")
 
@@ -534,6 +531,17 @@ def mostrar_dialogo_edicion(arbol=None, estructura=None, vars=None, app=None):
         combo_especie.focus_set()
     else:
         next(iter(entries.values())).focus_set()
+
+def _redibujar_escena(vars, app):
+    """Actualiza el plano dentro del contenedor 2D/3D del escritorio."""
+    redraw = getattr(app, "actualizar_grafico_diseno", None)
+    if callable(redraw) and vars is app.vars:
+        return redraw()
+    frame = getattr(app, "frame7", None)
+    if frame is None:
+        frame = app.frame2
+    return crear_area_grafico(vars, frame, app)
+
 
 def actualizar_grafico(vars, frame):
     from services.scenario_service import prepare_surface_scenario
@@ -600,7 +608,7 @@ def actualizar_grafico(vars, frame):
     niveles = np.sort(np.unique(niveles))
     
     # Configurar el gráfico
-    fig = Figure(figsize=(8, 6))
+    fig = Figure(figsize=(8, 6), facecolor=PALETA["background"])
     ax = fig.add_subplot(111)
     vars['_current_fig'] = fig
     canvas = FigureCanvasTkAgg(fig, master=frame)
@@ -927,8 +935,7 @@ def abrir_archivo(vars, app, filepath=None):
             pass
 
         archivo_actual = filepath
-        target_frame = getattr(app, "frame7", app.frame2)
-        actualizar_grafico(vars, target_frame)
+        _redibujar_escena(vars, app)
         messagebox.showinfo("Éxito", "Archivo cargado correctamente")
         return filepath
     except Exception as e:

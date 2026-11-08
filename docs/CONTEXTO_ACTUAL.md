@@ -1,11 +1,7 @@
-# Continuidad — v35.6-etapa4.3
+# Continuidad — v35.6-etapa4.3.1
 
-Base inmediata: v35.6-etapa4.2, SHA256 bae640d1869ed00716d026a5b39d80caa227141b7b1b44a68b2beacf5dfde822. Su origen sigue siendo el ZIP actualizado del usuario (5337991567a18628496be162e1688e337c84d339f0bc51b698bae94a5e7d657f). No se mezcló con la Etapa 4 construida sobre otra base.
+Base inmediata: la etapa4.3 reorganizada de `sombra-poo(1).zip`, SHA-256 `6816e0d103ccd2b95e523a07a0355fab3c6944f87a952275596ff4761a6b9b9d`. El cierre usa esa copia como fuente y conserva sus cálculos y compatibilidad de proyectos. No parte de la etapa4 construida sobre otra base.
 
-La física avanzada v2, superficie, incertidumbre, meteorología y almacenamiento de 4.2 no cambian. El refactor divide componentes de interfaz y conserva los nombres históricos. Los informes fotográficos añaden agrupación y trazabilidad; no se añade un clasificador semántico. El estado de proyecto 3 sigue identificando las correcciones manuales de 4.2.
+Cambios acotados: entorno local de arranque, entrada autenticada, ayuda local, rutas de recursos, perfil de compilación y distribución limpia. Las cuentas existentes y los proyectos de trabajo no viajan en la entrega; el ZIP de origen sigue siendo el respaldo. El ejecutable, si se genera, guarda sus datos modificables fuera de su carpeta de instalación.
 
-El bundle respaldos/Sombra_actual.bundle conserva los tags base-actual-53379915, v35.6-etapa4.1, v35.6-etapa4.2 y v35.6-etapa4.3. Es un historial local de fuentes sin datos privados; no se publicó un remoto. El ZIP completo conserva los datos locales de la base y el parche contiene solo cambios de código/documentación.
-
-La evidencia vigente está en validacion/qa_linux/etapa4.3 y validacion/estado_actual.json. validacion/qa_linux/etapa4.2 y validacion/qa_linux/base_recibida son históricas. Las notas originales permanecen en docs/historico/cambios/, identificado como archivo histórico. El manifiesto de entrega contiene padre y hashes, fuera del commit para evitar referencias circulares al bundle.
-
-Consulte CIERRE_CLAUDE.md para distinguir implementación de evidencia externa. Faltan fotografías anotadas, campaña instrumental y aceptación manual Windows. No hay ejecutable/instalador Windows compilado.
+El estado de evidencia, el recorrido Windows y el plan de campo se enlazan en [CIERRE_VERSION.md](CIERRE_VERSION.md). La evidencia de la 4.3 conserva su versión. El registro científico y el modelo avanzado v2 continúan vigentes, pendientes de validación de campo.

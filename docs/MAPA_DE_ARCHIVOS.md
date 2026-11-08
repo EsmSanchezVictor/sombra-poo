@@ -7,6 +7,8 @@ sombra-poo/
 ├─ main.py, app.py              entrada de la aplicación
 ├─ README.md, CHANGELOG.md      puerta de entrada y registro vigente de cambios
 ├─ requirements*.txt, *.lock    dependencias (convención: raíz)
+├─ PREPARAR_SOMBRA.cmd, ABRIR_SOMBRA.cmd  entorno y arranque Windows
+├─ windows_build/              perfil de ejecutable e instalador
 ├─ core/        física, modelos, validación, estado (sin Tk ni ui)
 ├─ services/    casos de uso: análisis, informes, almacenamiento, campaña
 ├─ ui/          ventanas y componentes Tk/VTK

@@ -6,29 +6,10 @@ sin reemplazar los cuadros nativos de Windows (abrir/guardar/messagebox).
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk, font as tkfont
+from tkinter import ttk
 
-from ui.theme import PALETA
+from ui.theme import FONT, PALETA, aplicar_tema
 
-
-
-
-def ensure_dialog_styles(root: tk.Misc) -> None:
-    """Define los estilos mínimos de diálogo sin cambiar el tema ttk activo."""
-    try:
-        style = ttk.Style(root)
-        style.configure("TLabel", foreground=PALETA["texto"], font=("Segoe UI", 9))
-        style.configure("Heading.TLabel", foreground=PALETA["texto"], font=("Segoe UI", 13, "bold"))
-        style.configure("Muted.TLabel", foreground=PALETA["texto_suave"], font=("Segoe UI", 8))
-        style.configure("DialogSection.TLabel", foreground=PALETA["texto"], font=("Segoe UI", 10, "bold"))
-        style.configure("TButton", foreground=PALETA["texto"], padding=6, font=("Segoe UI", 9))
-        style.configure("DialogPrimary.TButton", background=PALETA["primario"], foreground="white", padding=(12, 7), font=("Segoe UI", 9, "bold"))
-        style.map("DialogPrimary.TButton", background=[("active", PALETA["primario_hover"])])
-        style.configure("DialogSuccess.TButton", background=PALETA["exito"], foreground="white", padding=(12, 7), font=("Segoe UI", 9, "bold"))
-        style.map("DialogSuccess.TButton", background=[("active", PALETA["exito_hover"])])
-        style.configure("TCombobox", padding=4)
-    except (tk.TclError, AttributeError):
-        pass
 
 DIALOG_PAD_X = 18
 DIALOG_PAD_Y = 16
@@ -64,58 +45,30 @@ def center_dialog(window: tk.Toplevel, parent: tk.Misc | None = None) -> None:
 
 
 def _style_classic_widgets(widget: tk.Misc) -> None:
-    """Aproxima los widgets tk clásicos al lenguaje visual ttk de la app."""
+    """Alinea formularios clásicos conservando colores y tipografías explícitos."""
     for child in widget.winfo_children():
         try:
-            if isinstance(child, tk.Frame) and not isinstance(child, ttk.Frame):
-                child.configure(bg=PALETA["panel"], relief="flat", bd=0, highlightthickness=0)
-            elif isinstance(child, tk.Label) and not isinstance(child, ttk.Label):
-                # Mantiene títulos/negritas y tipografías técnicas (p.ej. Consolas);
-                # normaliza solo las etiquetas de cuerpo.
-                cfg = {"bg": PALETA["panel"]}
-                try:
-                    f = tkfont.Font(font=child.cget("font"))
-                    actual = f.actual()
-                    if actual.get("weight") != "bold" and str(actual.get("family", "")).lower() not in {"consolas", "courier", "courier new"}:
-                        cfg["font"] = ("Segoe UI", 9)
-                except tk.TclError:
-                    cfg["font"] = ("Segoe UI", 9)
-                child.configure(**cfg)
-            elif isinstance(child, tk.Radiobutton):
-                child.configure(
-                    bg=PALETA["panel"], activebackground=PALETA["panel"],
-                    fg=PALETA["texto"], font=("Segoe UI", 9),
-                    selectcolor=PALETA["panel"], highlightthickness=0,
-                )
-            elif isinstance(child, tk.Checkbutton):
-                child.configure(
-                    bg=PALETA["panel"], activebackground=PALETA["panel"],
-                    fg=PALETA["texto"], font=("Segoe UI", 9),
-                    selectcolor=PALETA["panel"], highlightthickness=0,
-                )
-            elif isinstance(child, tk.Button):
-                # No pisa colores especiales ya asignados (p.ej. verde/azul).
+            if isinstance(child, tk.Button):
                 bg = str(child.cget("background"))
-                default_like = bg in {"SystemButtonFace", "#d9d9d9", "white", PALETA["panel"]}
+                hover = {
+                    PALETA["primario"]: PALETA["primario_hover"],
+                    PALETA["peligro"]: PALETA["peligro_hover"],
+                    PALETA["exito"]: PALETA["exito_hover"],
+                }.get(bg, PALETA["accent"])
                 child.configure(
-                    font=("Segoe UI", 9), relief="flat", bd=1,
-                    padx=max(int(child.cget("padx") or 0), 10),
-                    pady=max(int(child.cget("pady") or 0), 5),
-                    cursor="hand2",
-                    highlightthickness=0,
+                    relief="flat", bd=1, cursor="hand2",
+                    activebackground=hover, activeforeground=child.cget("foreground"),
+                    highlightcolor=PALETA["focus"], highlightthickness=1,
+                    highlightbackground=PALETA["border"],
+                    padx=max(int(child.cget("padx") or 0), 9),
+                    pady=max(int(child.cget("pady") or 0), 4),
                 )
-                if default_like:
-                    child.configure(
-                        bg=PALETA["panel"], fg=PALETA["texto"],
-                        activebackground=PALETA["accent"],
-                        activeforeground=PALETA["texto"],
-                    )
-            elif isinstance(child, tk.Entry):
-                child.configure(font=("Segoe UI", 9), relief="solid", bd=1)
-            elif isinstance(child, tk.Listbox):
-                child.configure(font=("Segoe UI", 9), relief="solid", bd=1)
-            elif isinstance(child, tk.Spinbox):
-                child.configure(font=("Segoe UI", 9), relief="solid", bd=1)
+            elif isinstance(child, (tk.Entry, tk.Listbox, tk.Spinbox)):
+                child.configure(font=(FONT, 9), relief="flat", bd=0,
+                                highlightthickness=1, highlightcolor=PALETA["focus"],
+                                highlightbackground=PALETA["border"],
+                                selectbackground=PALETA["selected"],
+                                selectforeground=PALETA["texto"])
         except (tk.TclError, ValueError, TypeError):
             pass
         _style_classic_widgets(child)
@@ -137,8 +90,9 @@ def prepare_dialog(
     recursivo y el centrado se ejecutan ``after_idle`` para incluir los widgets
     que la función llamadora agregue a continuación.
     """
-    ensure_dialog_styles(window)
     try:
+        if ttk.Style(window).lookup("Heading.TLabel", "foreground") != PALETA["texto"]:
+            aplicar_tema(window)
         window.configure(bg=PALETA["panel"])
         if _safe_exists(parent):
             window.transient(parent)
@@ -274,7 +228,7 @@ def ask_password_pair(
     ttk.Label(form, text="Repetir contraseña:").grid(row=1, column=0, sticky="w", padx=(0, 14), pady=6)
     e2 = ttk.Entry(form, textvariable=p2, show="*", width=34)
     e2.grid(row=1, column=1, sticky="ew", pady=6)
-    error = ttk.Label(cont, text="", foreground="#d9534f")
+    error = ttk.Label(cont, text="", foreground=PALETA["peligro"])
     error.pack(fill="x", pady=(4, 0))
     buttons = ttk.Frame(cont)
     buttons.pack(fill="x", pady=(16, 0))

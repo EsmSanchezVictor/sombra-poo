@@ -15,7 +15,7 @@ def test_frames_2_5_sin_borde_visible():
         while pos >= 0:
             starts.append(pos)
             pos = source.find(needle, pos + 1)
-        assert len(starts) >= 2
+        assert starts, f"Falta la definición de frame{n}"
         block = source[starts[-1]:starts[-1] + 320]
         assert 'bd=0' in block
         assert 'relief="flat"' in block

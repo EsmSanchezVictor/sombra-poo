@@ -1,4 +1,5 @@
 """Selección, máscaras y mapas fotográficos; controlador de UI extraído."""
+from ui.photo_workflow import refresh_photo_workflow
 import os
 from datetime import datetime
 import pandas as pd
@@ -117,6 +118,7 @@ class PhotoAnalysisMixin:
             self.shadow_detection_meta=None;self.shadow_coverage_fraction=None
             self._invalidate_photo_thermal_results()
             self.curve_button.config(state=tk.NORMAL)
+            refresh_photo_workflow(self)
             if mark_dirty:self.mark_dirty()
         return not equal
 
@@ -173,6 +175,7 @@ class PhotoAnalysisMixin:
                 
             # Habilitar el botón para curvas de nivel
             self.curve_button.config(state=tk.NORMAL)
+            refresh_photo_workflow(self)
             if hasattr(self, "shadow_mask_button"):
                 self.shadow_mask_button.config(state=tk.NORMAL)
             self._guardar_mascara_clasificacion_sombra()

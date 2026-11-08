@@ -1,16 +1,17 @@
-"""Bootstrap de la aplicación principal."""
+"""Compatibilidad con el nombre histórico y el inicio con autenticación."""
 
-import tkinter as tk
-from ui.app_ui import SombraApp
 
-# Alias para mantener compatibilidad con imports previos
-App = SombraApp
+def __getattr__(name):
+    if name == "App":
+        from ui.app_ui import SombraApp
+        return SombraApp
+    raise AttributeError(name)
 
-def main() -> None:
-    """Punto de entrada para ejecutar la UI directamente."""
-    root = tk.Tk()
-    App(root)
-    root.mainloop()
+
+def main():
+    from main import main as start
+    return start()
+
 
 if __name__ == "__main__":
     main()

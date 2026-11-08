@@ -1,5 +1,6 @@
 """Backend Matplotlib independiente del controlador VTK; sólo representación."""
 from __future__ import annotations
+from ui.theme import PALETA
 import math
 import tkinter as tk
 import numpy as np
@@ -36,7 +37,7 @@ def render_matplotlib_fallback(
             text=f"{vtk_installation_info()} · {detail}",
             anchor="w",
             justify="left",
-            fg="#8a2d2d",
+            fg=PALETA["peligro"],
             wraplength=1000,
         )
         diag.pack(side=tk.TOP, fill=tk.X, padx=6, pady=(0, 3))

@@ -1,0 +1,52 @@
+{
+  "app_release": "v35.6-etapa4.3.1",
+  "closed_on": "2026-11-08",
+  "base_release": "v35.6-etapa4.3",
+  "base_zip_sha256": "6816e0d103ccd2b95e523a07a0355fab3c6944f87a952275596ff4761a6b9b9d",
+  "disposition": "source_technical_closure_pilot",
+  "software_checks": {
+    "base_tests_passed": 615,
+    "final_tests_passed": 619,
+    "python": "3.12.14",
+    "platform": "Linux",
+    "source_self_check": "passed",
+    "staged_source_self_check": "passed",
+    "pip_check": "passed"
+  },
+  "numeric_parity": {
+    "surface_cases": 9,
+    "advanced_tmrt_cases": 8,
+    "seeded_uncertainty_equal": true,
+    "model": "advanced_radiative_v2"
+  },
+  "base_python_files": 179,
+  "unchanged_python_files": 172,
+  "modified_python_files": [
+    "app.py",
+    "core/app_version.py",
+    "core/project_manager.py",
+    "core/species.py",
+    "test/test_stage3_integration.py",
+    "ui/app_ui.py",
+    "ui/menu_bar.py"
+  ],
+  "windows_previous": {
+    "app_release": "v35.6-etapa4.3",
+    "source_automatic_checks_passed": 14,
+    "desktop_automatic_checks_passed": 4,
+    "manual_walkthrough_completed": false
+  },
+  "windows_current": {
+    "native_execution_tested": false,
+    "manual_walkthrough_completed": false,
+    "build_profile_included": true,
+    "exe_built": false,
+    "installer_built": false
+  },
+  "scientific_validation": {
+    "annotated_real_photo_cases": 0,
+    "field_measurements_supplied": 0,
+    "field_validation": false
+  },
+  "private_data_omitted": true
+}

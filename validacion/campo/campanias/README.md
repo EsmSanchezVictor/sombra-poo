@@ -23,7 +23,7 @@ AAAA-MM-DD_lugar/
 
 - Fecha, hora y zona horaria; latitud y longitud; sombra (porcentaje y tipo) y especie si es arbolado.
 - Meteorología de referencia con su procedencia (GHI/DNI/DHI y viento medidos o tomados de una estación; indique cuál).
-- Si usa globo negro: `tg`, `ta`, viento medido junto al globo, `globe_diameter_m` y `globe_emissivity` reales. La conversión a Tmrt depende de ellos; respete el tiempo de equilibrio que indique la norma o el fabricante para su globo.
+- Si usa globo negro: registre `tg`, Ta junto al globo, Ta de referencia, viento junto al globo, `globe_diameter_m` y `globe_emissivity` reales. Siga las precauciones de [VALIDACION_CAMPO.md](../../../docs/VALIDACION_CAMPO.md) antes de importar o convertir esos datos.
 - Para aire local, `ta_local` en el punto medido. El viento local y el meteorológico de referencia no se intercambian sin documentar la transformación.
 
 ## Después de medir

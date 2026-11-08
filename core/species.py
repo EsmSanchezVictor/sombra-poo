@@ -172,8 +172,8 @@ def _completar_propiedades(props: dict) -> dict:
 
 def _ruta_db() -> str:
     """data/species_db.json — junto a settings.json, bajo el root del repo."""
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-    return os.path.join(base, "data", "species_db.json")
+    from core.runtime_paths import writable_path
+    return str(writable_path("data", "species_db.json"))
 
 
 def _cargar_custom() -> dict:
